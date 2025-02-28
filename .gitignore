@@ -1,0 +1,9 @@
+*.vsidx
+.vs/
+bin
+**/bin
+**/obj
+**/csx
+*.userprefs
+*.suo
+
