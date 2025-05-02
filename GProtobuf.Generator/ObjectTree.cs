@@ -34,128 +34,118 @@ namespace GProtobuf.Generator
 
         public IEnumerable<(string fileName, string fileCode)> GenerateCode()
         {
-            var sb = new StringBuilder();
+            var sb = new StringBuilderWithIndent();
 
             //context.AddSource("PropertySummary.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));
 
             foreach (var namespaceWithObjects in types)
             {
-                sb.Clear();
-                sb.AppendLine("using GProtobuf.Core;\r\nusing System;\r\nusing System.Collections.Generic;\r\n");
-
                 var nmspace = namespaceWithObjects.Key;
-                var objects = namespaceWithObjects.Value;
-
-                sb.AppendLine($"namespace {nmspace}.Serialization\r\n{{");
-
-                sb.AppendLine("""
-                            public static class Deserializers
-                            {
-                        """);
-
-                foreach (var obj in objects)
-                {
-                    sb.AppendLine($$"""
-                                public static global::{{obj.FullName}} Deserialize{{GetClassNameFromFullName(obj.FullName)}}(ReadOnlySpan<byte> data)
-                                {
-                                    var reader = new SpanReader(data);
-                                    return SpanReaders.Read{{GetClassNameFromFullName(obj.FullName)}}(ref reader);
-                                }
-
-                        """);
-
-
-
-                }
-
-                sb.AppendLine("""
-                            }
-
-                        """);
-
-
-                sb.AppendLine($"\tpublic static class SpanReaders\r\n\t{{");
-
-                foreach (var obj in objects)
-                {
-                    sb.AppendLine($"\t\tpublic static global::{obj.FullName} Read{GetClassNameFromFullName(obj.FullName)}(ref SpanReader reader)");
-                    sb.AppendLine($"\t\t{{");
-                    
-                    if (obj.ProtoIncludes == null || obj.ProtoIncludes.Count == 0)
-                        sb.AppendLine($"\t\t\tglobal::{obj.FullName} result = new global::{obj.FullName}();\r\n");
-                    else
-                        sb.AppendLine($"\t\t\tglobal::{obj.FullName} result = default(global::{obj.FullName});\r\n");
-
-                    sb.AppendLine($"\t\t\twhile(!reader.IsEnd)");
-                    sb.AppendLine($"\t\t\t{{");
-                    sb.AppendLine($"\t\t\t\tvar (wireType, fieldId) = reader.ReadWireTypeAndFieldId();\r\n");
-
-                    if (obj.ProtoIncludes != null)
-                    {
-                        WriteProtoIncludes(sb, obj);
-                    }
-
-                    if (obj.ProtoMembers != null)
-                    {
-                        foreach(var protoMember in obj.ProtoMembers)
-                        {
-                            this.WriteProtoMember(sb, protoMember);
-                        }
-                    }
-                    sb.AppendLine($$"""
-                                        // default
-                                        reader.SkipField(wireType);
-                                    }
-                            
-                                    return result;
-                                }
-                        """);
-                    //sb.AppendLine($"\t\t\t\t// default");
-                    //sb.AppendLine($"\t\t\t\treader.SkipField(wireType);");
-
-                    //sb.AppendLine($"\t\t\t}}"); // end of main while loop
-
-                    //sb.AppendLine($"\t\t\treturn result;");
-                    //sb.AppendLine($"\t\t}}\r\n");
-                }
-
-                sb.AppendLine($"\t}}"); // end of extension class
-                sb.AppendLine("}"); // end of namespace
+                GenerateDeserializers(sb, namespaceWithObjects, nmspace);
 
                 yield return (nmspace + ".Serialization.cs", sb.ToString());
             }
         }
 
-        private static void WriteProtoIncludes(StringBuilder sb, TypeDefinition obj)
+        private void GenerateDeserializers(StringBuilderWithIndent sb, KeyValuePair<string, List<TypeDefinition>> namespaceWithObjects, string nmspace)
+        {
+            sb.Clear();
+            sb.AppendIndentedLine("using GProtobuf.Core;\r\nusing System;\r\nusing System.Collections.Generic;\r\n");
+
+            var objects = namespaceWithObjects.Value;
+
+            sb.AppendIndentedLine($"namespace {nmspace}.Serialization");
+            sb.StartNewBlock();
+            sb.AppendIndentedLine("public static class Deserializers");
+            sb.StartNewBlock();
+
+            foreach (var obj in objects)
+            {
+                sb.AppendIndentedLine($"public static global::{obj.FullName} Deserialize{GetClassNameFromFullName(obj.FullName)}(ReadOnlySpan<byte> data)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine("var reader = new SpanReader(data);");
+                sb.AppendIndentedLine($"return SpanReaders.Read{GetClassNameFromFullName(obj.FullName)}(ref reader);");
+                sb.EndBlock();
+                sb.AppendNewLine();
+            }
+
+            sb.EndBlock();
+
+            sb.AppendNewLine();
+
+            sb.AppendIndentedLine($"public static class SpanReaders");
+            sb.StartNewBlock();
+
+            foreach (var obj in objects)
+            {
+                sb.AppendIndentedLine($"public static global::{obj.FullName} Read{GetClassNameFromFullName(obj.FullName)}(ref SpanReader reader)");
+                sb.StartNewBlock();
+
+                if (obj.ProtoIncludes == null || obj.ProtoIncludes.Count == 0)
+                    sb.AppendIndentedLine($"global::{obj.FullName} result = new global::{obj.FullName}();\r\n");
+                else
+                    sb.AppendIndentedLine($"global::{obj.FullName} result = default(global::{obj.FullName});\r\n");
+
+                sb.AppendIndentedLine($"while(!reader.IsEnd)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"var (wireType, fieldId) = reader.ReadWireTypeAndFieldId();\r\n");
+
+                if (obj.ProtoIncludes != null)
+                {
+                    WriteProtoIncludes(sb, obj);
+                }
+
+                if (obj.ProtoMembers != null)
+                {
+                    foreach (var protoMember in obj.ProtoMembers)
+                    {
+                        this.WriteProtoMember(sb, protoMember);
+                    }
+                }
+                sb.AppendIndentedLine($"// default");
+                sb.AppendIndentedLine($"reader.SkipField(wireType);");
+                sb.EndBlock();// end of main while loop
+
+                sb.AppendNewLine();
+                sb.AppendIndentedLine($"return result;");
+                sb.EndBlock();
+                sb.AppendNewLine();
+            }
+
+            sb.EndBlock();
+            sb.EndBlock();
+        }
+
+        private static void WriteProtoIncludes(StringBuilderWithIndent sb, TypeDefinition obj)
         {
             if (obj.ProtoIncludes.Count > 0)
             {
                 foreach (var protoInclude in obj.ProtoIncludes)
                 {
                     //protoInclude.Type
-                    sb.AppendLine($"\t\t\t\tif (fieldId == {protoInclude.FieldId})");
-                    sb.AppendLine($"\t\t\t\t{{");
-                    sb.AppendLine($"\t\t\t\t\tvar length = reader.ReadVarInt32();");
-                    sb.AppendLine($"\t\t\t\t\tvar reader1 = new SpanReader(reader.GetSlice(length));");
+                    sb.AppendIndentedLine($"if (fieldId == {protoInclude.FieldId})");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"var length = reader.ReadVarInt32();");
+                    sb.AppendIndentedLine($"var reader1 = new SpanReader(reader.GetSlice(length));");
                     //sb.AppendLine($"\t\t\t\t\tresult = reader1.Read{GetClassNameFromFullName(protoInclude.Type)}();");
-                    sb.AppendLine($"\t\t\t\t\tresult = global::{protoInclude.Namespace}.Serialization.SpanReaders.Read{GetClassNameFromFullName(protoInclude.Type)}(ref reader1);");
+                    sb.AppendIndentedLine($"result = global::{protoInclude.Namespace}.Serialization.SpanReaders.Read{GetClassNameFromFullName(protoInclude.Type)}(ref reader1);");
 
-                    sb.AppendLine($"\t\t\t\t\t\tcontinue;");
-                    sb.AppendLine($"\t\t\t\t}}\r\n");
+                    sb.AppendIndentedLine($"continue;");
+                    //sb.AppendIndentedLine($"\t\t\t\t}}\r\n");
+                    sb.EndBlock();
+                    sb.AppendNewLine();
 
-                    sb.AppendLine($"\t\t\t\tif (result == null)");
-                    sb.AppendLine($"\t\t\t\t\tthrow new InvalidOperationException($\"ProtoInclude field must be first. Is {{fieldId}} defined in ProtoInclude attributes?\");\r\n");
+                    sb.AppendIndentedLine($"if (result == null)");
+                    sb.AppendIndentedLine($"throw new InvalidOperationException($\"ProtoInclude field must be first. Is {{fieldId}} defined in ProtoInclude attributes?\");\r\n");
                 }
 
             } // todo hybrid binary tree for many proto includes
         }
 
-        private void WriteProtoMember(StringBuilder sb, ProtoMemberAttribute protoMember)
+        private void WriteProtoMember(StringBuilderWithIndent sb, ProtoMemberAttribute protoMember)
         {
-            sb.AppendLine($"\t\t\t\tif (fieldId == {protoMember.FieldId})");
-            sb.AppendLine($"\t\t\t\t{{");
-            //sb.AppendLine($"\t\t\treader.SkipField(wireType)");
-            //sb.AppendLine($"\t\t\t\tresult.{protoMember.Name} = reader.Read{GetClassNameFromFullName(protoMember.Type)};");
+            sb.AppendIndentedLine($"if (fieldId == {protoMember.FieldId})");
+            sb.StartNewBlock();
             switch(GetClassNameFromFullName(protoMember.Type))
             {
                 case "System.Int32":
@@ -164,34 +154,34 @@ namespace GProtobuf.Generator
                     switch (protoMember.DataFormat)
                     {
                         case DataFormat.FixedSize:
-                            sb.AppendLine($"\t\t\t\t\tresult.{protoMember.Name} = reader.ReadFixedInt32();");
+                            sb.AppendIndentedLine($"result.{protoMember.Name} = reader.ReadFixedInt32();");
                             break;
 
                         case DataFormat.ZigZag:
-                            sb.AppendLine($"\t\t\t\t\tresult.{protoMember.Name} = reader.ReadZigZagVarInt32();");
+                            sb.AppendIndentedLine($"result.{protoMember.Name} = reader.ReadZigZagVarInt32();");
                             break;
 
                         default:
-                            sb.AppendLine($"\t\t\t\t\tresult.{protoMember.Name} = reader.ReadVarInt32();");
+                            sb.AppendIndentedLine($"result.{protoMember.Name} = reader.ReadVarInt32();");
                             break;
                     }
                     break;
 
                 case "Double":
                 case "double":
-                    sb.AppendLine($"\t\t\t\t\tresult.{protoMember.Name} = reader.ReadDouble(wireType);");
+                    sb.AppendIndentedLine($"result.{protoMember.Name} = reader.ReadDouble(wireType);");
                     break;
 
                 case "String":
                 case "System.String":
                 case "string":
-                    sb.AppendLine($"\t\t\t\t\tresult.{protoMember.Name} = reader.ReadString(wireType);");
+                    sb.AppendIndentedLine($"result.{protoMember.Name} = reader.ReadString(wireType);");
                     break;
 
                 case "byte[]":
                 case "Byte[]":
                 case "System.Byte[]":
-                    sb.AppendLine($"\t\t\t\t\tresult.{protoMember.Name} = reader.ReadByteArray();");
+                    sb.AppendIndentedLine($"result.{protoMember.Name} = reader.ReadByteArray();");
                     break;
 
                 case "System.Int32[]":
@@ -202,15 +192,15 @@ namespace GProtobuf.Generator
                         switch (protoMember.DataFormat)
                         {
                             case DataFormat.FixedSize:
-                                sb.AppendLine($"\t\t\t\t\tresult.{protoMember.Name} = reader.ReadPackedFixedSizeInt32Array();");
+                                sb.AppendIndentedLine($"result.{protoMember.Name} = reader.ReadPackedFixedSizeInt32Array();");
                                 break;
 
                             case DataFormat.ZigZag:
-                                sb.AppendLine($"\t\t\t\t\tresult.{protoMember.Name} = reader.ReadPackedVarIntInt32Array(true);");
+                                sb.AppendIndentedLine($"result.{protoMember.Name} = reader.ReadPackedVarIntInt32Array(true);");
                                 break;
 
                             default:
-                                sb.AppendLine($"\t\t\t\t\tresult.{protoMember.Name} = reader.ReadPackedVarIntInt32Array(false);");
+                                sb.AppendIndentedLine($"result.{protoMember.Name} = reader.ReadPackedVarIntInt32Array(false);");
                                 break;
                         }
                     }
@@ -233,35 +223,31 @@ namespace GProtobuf.Generator
                                 break;
                         }
 
-                        sb.AppendLine($$"""
-                                            List<int> resultList = new();
-                                            var wireType1 = wireType;
-                                            var fieldId1 = fieldId;
-
-                                            while (!reader.IsEnd && fieldId == fieldId1)
-                                            {
-                                                var number = {{int32Reader}}
-                                                resultList.Add(number);
-                                                (wireType1, fieldId1) = reader.ReadWireTypeAndFieldId();
-                        					}
-
-                                            result.{{protoMember.Name}} = resultList.ToArray();
-                        """);
-
-                        //sb.AppendLine($"\t\t\t{{");
-                        //sb.AppendLine($"\t\t\t\tvar (wireType, fieldId) = reader.ReadWireTypeAndFieldId();\r\n");
+                        sb.AppendIndentedLine($"List<int> resultList = new();");
+                        sb.AppendIndentedLine($"var wireType1 = wireType;");
+                        sb.AppendIndentedLine($"var fieldId1 = fieldId;");
+                        sb.AppendNewLine();
+                        sb.AppendIndentedLine($"while (!reader.IsEnd && fieldId == fieldId1)");
+                        sb.StartNewBlock();
+                        sb.AppendIndentedLine($"var number = {int32Reader}");
+                        sb.AppendIndentedLine($"resultList.Add(number);");
+                        sb.AppendIndentedLine($"(wireType1, fieldId1) = reader.ReadWireTypeAndFieldId();");
+                        sb.EndBlock();
+                        sb.AppendNewLine();
+                        sb.AppendIndentedLine($"result.{protoMember.Name} = resultList.ToArray();");
                     }
                     break;
 
                 default:
 
-                    sb.AppendLine($"\t\t\t\t\tvar length = reader.ReadVarInt32();");
-                    sb.AppendLine($"\t\t\t\t\tvar reader1 = new SpanReader(reader.GetSlice(length));");
-                    sb.AppendLine($"\t\t\t\t\tresult.{protoMember.Name} = global::{protoMember.Namespace}.Serialization.SpanReaders.Read{GetClassNameFromFullName(protoMember.Type)}(ref reader1);");
+                    sb.AppendIndentedLine($"var length = reader.ReadVarInt32();");
+                    sb.AppendIndentedLine($"var reader1 = new SpanReader(reader.GetSlice(length));");
+                    sb.AppendIndentedLine($"result.{protoMember.Name} = global::{protoMember.Namespace}.Serialization.SpanReaders.Read{GetClassNameFromFullName(protoMember.Type)}(ref reader1);");
                     break;
             }
-            sb.AppendLine($"\t\t\t\t\tcontinue;");
-            sb.AppendLine($"\t\t\t\t}}\r\n");
+            sb.AppendIndentedLine($"continue;");
+            sb.EndBlock();
+            sb.AppendNewLine();
         }
 
         static string BoolToSource(bool value)

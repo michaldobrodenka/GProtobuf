@@ -66,7 +66,7 @@ var result = Model.Serialization.Deserializers.DeserializeModelClassBase(data);
 //    reader.SkipField(wireType);
 //}
 
-Console.WriteLine(result);
+Console.WriteLine(result.A);
 //public double ReadDouble(SpanReader reader, wireType)
 //{
 
