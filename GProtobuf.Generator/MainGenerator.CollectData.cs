@@ -24,10 +24,10 @@ namespace GProtobuf.Generator
             Compilation compilation = context.Compilation;
 
 #if DEBUG
-            if (!Debugger.IsAttached)
-            {
-                Debugger.Launch();
-            }
+            //if (!Debugger.IsAttached)
+            //{
+            //    Debugger.Launch();
+            //}
 #endif
             // Prejdeme všetky referencované assembly
             foreach (var reference in compilation.References)

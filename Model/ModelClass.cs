@@ -64,8 +64,8 @@ namespace Model
         [ProtoMember(9)]
         public int[] NonPackedInts { get; set; }
 
-        //[ProtoMember(10, DataFormat = DataFormat.FixedSize)]
-        //public int[] NonPackedFixedSizeInts { get; set; }
+        [ProtoMember(10, DataFormat = DataFormat.FixedSize)]
+        public int[] NonPackedFixedSizeInts { get; set; }
 
         // todo: zigzag
     }

@@ -70,6 +70,21 @@ namespace GProtobuf.Core
         private ReadOnlySpan<byte> buffer;
         private int position;
 
+        public int Position
+        {
+            get
+            {
+                return position;
+            }
+            set
+            {
+                if (value < 0 || value > buffer.Length)
+                    throw new ArgumentOutOfRangeException(nameof(value), "Position is out of range.");
+
+                position = value;
+            }
+        }
+
         public SpanReader(ReadOnlySpan<byte> buffer)
         {
             this.buffer = buffer;
@@ -125,6 +140,16 @@ namespace GProtobuf.Core
             } while ((b & 0x80) != 0);
 
             return result;
+        }
+
+        public int ReadFixedInt32()
+        {
+            if (position + sizeof(int) > buffer.Length)
+                throw new InvalidOperationException("Buffer overrun");
+
+            int intValue = BinaryPrimitives.ReadInt32LittleEndian(buffer.Slice(position));
+            position += sizeof(float); // Posun o 4 bajty
+            return intValue;
         }
 
         public int ReadZigZagVarInt32()

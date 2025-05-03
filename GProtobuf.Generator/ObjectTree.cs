@@ -92,7 +92,7 @@ namespace GProtobuf.Generator
 
                 if (obj.ProtoIncludes != null)
                 {
-                    WriteProtoIncludes(sb, obj);
+                    WriteProtoIncludesInDeserializers(sb, obj);
                 }
 
                 if (obj.ProtoMembers != null)
@@ -116,7 +116,7 @@ namespace GProtobuf.Generator
             sb.EndBlock();
         }
 
-        private static void WriteProtoIncludes(StringBuilderWithIndent sb, TypeDefinition obj)
+        private static void WriteProtoIncludesInDeserializers(StringBuilderWithIndent sb, TypeDefinition obj)
         {
             if (obj.ProtoIncludes.Count > 0)
             {
@@ -227,11 +227,17 @@ namespace GProtobuf.Generator
                         sb.AppendIndentedLine($"var wireType1 = wireType;");
                         sb.AppendIndentedLine($"var fieldId1 = fieldId;");
                         sb.AppendNewLine();
-                        sb.AppendIndentedLine($"while (!reader.IsEnd && fieldId == fieldId1)");
+                        sb.AppendIndentedLine($"while (!reader.IsEnd)");
                         sb.StartNewBlock();
                         sb.AppendIndentedLine($"var number = {int32Reader}");
+                        sb.AppendIndentedLine($"var p = reader.Position;");
                         sb.AppendIndentedLine($"resultList.Add(number);");
                         sb.AppendIndentedLine($"(wireType1, fieldId1) = reader.ReadWireTypeAndFieldId();");
+                        sb.AppendIndentedLine($"if (fieldId1 != fieldId)");
+                        sb.StartNewBlock();
+                        sb.AppendIndentedLine($"reader.Position = p; // rewind");
+                        sb.AppendIndentedLine($"break;");
+                        sb.EndBlock();
                         sb.EndBlock();
                         sb.AppendNewLine();
                         sb.AppendIndentedLine($"result.{protoMember.Name} = resultList.ToArray();");

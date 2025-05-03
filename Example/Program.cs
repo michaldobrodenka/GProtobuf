@@ -17,24 +17,42 @@ ModelClass model = new ModelClass()
     D = 12345,
     Model2 = new ClassWithCollections
     {
-        Bytes = new byte[] { 1,2,3,4},
-        PackedInts = new[] { -1, 15},
-        PackedFixedSizeInts = new[] { -2, 17 },
-        NonPackedInts = new[] { 5,6,7,8 },
+        //SomeInt = -1,//12345,
+        //Bytes = new byte[] { 1, 2, 3, 4 },
+        //PackedInts = new[] { -1, 15 },
+        //PackedFixedSizeInts = new[] { -2, 17 },
+        //NonPackedInts = new[] { 5, 6, 7, 8 },
+        NonPackedFixedSizeInts = new int[] {1,2,3,4 }//{ -5, 16, -7, 18 },
     }
 };
 
-byte[] data;
+byte[] data, data2;
 
 using( var ms = new MemoryStream())
 {
-    global::ProtoBuf.Serializer.Serialize(ms, model);
+    global::ProtoBuf.Serializer.Serialize(ms, model.Model2);
 
     data = ms.ToArray();
 }
 
-var result = Model.Serialization.Deserializers.DeserializeModelClassBase(data);
+using (var ms = new MemoryStream())
+{
+    Model.Serialization.Serializers.SerializeClassWithCollections(ms, model.Model2);
 
+    data2 = ms.ToArray();
+}
+
+//var result = Model.Serialization.Deserializers.DeserializeModelClassBase(data);
+var result = Model.Serialization.Deserializers.DeserializeClassWithCollections(data);
+var result2 = Model.Serialization.Deserializers.DeserializeClassWithCollections(data2);
+
+using (var ms = new MemoryStream(data2))
+{
+    //Model.Serialization.Serializers.SerializeClassWithCollections(ms, model.Model2);
+    var result3 = global::ProtoBuf.Serializer.Deserialize<ClassWithCollections>(ms);
+}
+
+Console.WriteLine(result.SomeInt);
 
 //SpanReader reader = new SpanReader(data.AsSpan());
 
@@ -66,7 +84,7 @@ var result = Model.Serialization.Deserializers.DeserializeModelClassBase(data);
 //    reader.SkipField(wireType);
 //}
 
-Console.WriteLine(result.A);
+//Console.WriteLine(result.A);
 //public double ReadDouble(SpanReader reader, wireType)
 //{
 
