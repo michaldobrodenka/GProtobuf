@@ -7,3 +7,5 @@ bin
 *.userprefs
 *.suo
 
+/.idea
+*.user
