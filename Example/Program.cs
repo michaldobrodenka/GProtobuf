@@ -9,7 +9,7 @@ using System.Net.Http.Headers;
 
 Console.WriteLine("Hello, World!");
 
-ModelClass model = new ModelClass()
+ModelClass model = new ModelClass
 {
     A = 3.4,//new byte[] { 1, 2, 3, 4 },//"long.MaxValue",
     B = -3,
@@ -22,17 +22,22 @@ ModelClass model = new ModelClass()
         //PackedInts = new[] { -1, 15 },
         //PackedFixedSizeInts = new[] { -2, 17 },
         //NonPackedInts = new[] { 5, 6, 7, 8 },
-        NonPackedFixedSizeInts = new int[] {1,2,3,4 }//{ -5, 16, -7, 18 },
+        NonPackedFixedSizeInts = [1,2,3,4] //{ -5, 16, -7, 18 },
     }
 };
 
-byte[] data, data2;
+byte[] data, data2, modelData;
 
-using( var ms = new MemoryStream())
+using (var ms = new MemoryStream())
 {
-    global::ProtoBuf.Serializer.Serialize(ms, model.Model2);
-
+    Serializer.Serialize(ms, model.Model2);
     data = ms.ToArray();
+}
+
+using (var ms = new MemoryStream())
+{
+    Serializer.Serialize(ms, model);
+    modelData = ms.ToArray();
 }
 
 using (var ms = new MemoryStream())
@@ -42,17 +47,18 @@ using (var ms = new MemoryStream())
     data2 = ms.ToArray();
 }
 
-//var result = Model.Serialization.Deserializers.DeserializeModelClassBase(data);
+var modelResult = Model.Serialization.Deserializers.DeserializeModelClassBase(modelData);
 var result = Model.Serialization.Deserializers.DeserializeClassWithCollections(data);
 var result2 = Model.Serialization.Deserializers.DeserializeClassWithCollections(data2);
 
 using (var ms = new MemoryStream(data2))
 {
     //Model.Serialization.Serializers.SerializeClassWithCollections(ms, model.Model2);
-    var result3 = global::ProtoBuf.Serializer.Deserialize<ClassWithCollections>(ms);
+    var result3 = Serializer.Deserialize<ClassWithCollections>(ms);
 }
 
 Console.WriteLine(result.SomeInt);
+Console.WriteLine(modelResult.Str);
 
 //SpanReader reader = new SpanReader(data.AsSpan());
 
