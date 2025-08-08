@@ -1,7 +1,10 @@
+using System.IO;
+using System.Linq;
 using System.Reflection;
 using GProtobuf.Generator;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using ProtoBuf;
 using Xunit.Abstractions;
 
 namespace GProtobuf.Tests;
@@ -133,6 +136,12 @@ public sealed class SerializerGeneratorTests(ITestOutputHelper outputHelper)
         Assert.Contains(
             $"public static global::{expectedNamespaceName}.{expectedClassName} Read{expectedClassName}(ref SpanReader reader)",
             generatedCode);
+        Assert.Contains(
+            $"public static void Serialize{expectedClassName}(Stream stream, global::{expectedNamespaceName}.{expectedClassName} obj)",
+            generatedCode);
+        Assert.Contains(
+            $"public static void Write{expectedClassName}(global::GProtobuf.Core.StreamWriter writer, global::{expectedNamespaceName}.{expectedClassName} obj)",
+            generatedCode);
     }
 
     [Fact]
@@ -142,5 +151,71 @@ public sealed class SerializerGeneratorTests(ITestOutputHelper outputHelper)
         var result = Model.Serialization.Deserializers.DeserializeModelClassBase(serializedData);
 
         Assert.True(result == null);
+    }
+
+    [Fact]
+    public void GeneratedSerializer_ProducesSameBytesAsProtobufNet()
+    {
+        var obj = new Model.ModelClass
+        {
+            D = 123,
+            Model2 = new Model.ClassWithCollections
+            {
+                SomeInt = 456,
+                Bytes = new byte[] { 1, 2, 3 },
+                PackedInts = new[] { 1, 2, 3 },
+                PackedFixedSizeInts = new[] { 4, 5 },
+                NonPackedInts = new[] { 6, 7 },
+                NonPackedFixedSizeInts = new[] { 8, 9 }
+            }
+        };
+
+        using var streamGenerated = new MemoryStream();
+        Model.Serialization.Serializers.SerializeModelClass(streamGenerated, obj);
+        var generatedBytes = streamGenerated.ToArray();
+
+        using var streamProtoBuf = new MemoryStream();
+        Serializer.Serialize(streamProtoBuf, obj);
+        var protoBufBytes = streamProtoBuf.ToArray();
+
+        Assert.Equal(protoBufBytes, generatedBytes);
+    }
+
+    [Fact]
+    public void GeneratedDeserializer_ReadsBytesFromProtobufNet()
+    {
+        var obj = new Model.ModelClass
+        {
+            D = 42,
+            Model2 = new Model.ClassWithCollections
+            {
+                SomeInt = 7,
+                Bytes = new byte[] { 10, 11 },
+                PackedInts = new[] { 1, 2 },
+                PackedFixedSizeInts = new[] { 3, 4 },
+                NonPackedInts = new[] { 5, 6 },
+                NonPackedFixedSizeInts = new[] { 7, 8 }
+            }
+        };
+
+        using var streamProtoBuf = new MemoryStream();
+        Serializer.Serialize(streamProtoBuf, obj);
+        var protoBufBytes = streamProtoBuf.ToArray();
+
+        var deserialized = Model.Serialization.Deserializers.DeserializeModelClass(protoBufBytes);
+
+        Assert.NotNull(deserialized.Model2);
+        Assert.Equal(obj.D, deserialized.D);
+        Assert.Equal(obj.Model2.SomeInt, deserialized.Model2.SomeInt);
+        Assert.True(obj.Model2.Bytes.SequenceEqual(deserialized.Model2.Bytes));
+        Assert.True(obj.Model2.PackedInts.SequenceEqual(deserialized.Model2.PackedInts));
+        Assert.True(obj.Model2.PackedFixedSizeInts.SequenceEqual(deserialized.Model2.PackedFixedSizeInts));
+        Assert.True(obj.Model2.NonPackedInts.SequenceEqual(deserialized.Model2.NonPackedInts));
+        Assert.True(obj.Model2.NonPackedFixedSizeInts.SequenceEqual(deserialized.Model2.NonPackedFixedSizeInts));
+
+        using var roundtripStream = new MemoryStream();
+        Model.Serialization.Serializers.SerializeModelClass(roundtripStream, deserialized);
+        var roundtripBytes = roundtripStream.ToArray();
+        Assert.Equal(protoBufBytes, roundtripBytes);
     }
 }
