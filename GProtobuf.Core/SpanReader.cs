@@ -148,7 +148,7 @@ namespace GProtobuf.Core
                 throw new InvalidOperationException("Buffer overrun");
 
             int intValue = BinaryPrimitives.ReadInt32LittleEndian(buffer.Slice(position));
-            position += sizeof(float); // Posun o 4 bajty
+            position += sizeof(int); // Posun o 4 bajty
             return intValue;
         }
 
@@ -179,7 +179,7 @@ namespace GProtobuf.Core
                 throw new InvalidOperationException("Buffer overrun");
 
             var value = BinaryPrimitives.ReadDoubleLittleEndian(buffer.Slice(position));
-            position += sizeof(double); // Posun o 4 bajty
+            position += sizeof(double); // Posun o 8 bajtov
             return value;
         }
 
