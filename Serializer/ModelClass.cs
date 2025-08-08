@@ -4,6 +4,7 @@ namespace Model;
 
 [ProtoContract]
 [ProtoInclude(1, typeof(ModelClass))]
+[ProtoInclude(2, typeof(SecondModelClass))]
 public abstract class ModelClassBase
 {
     [ProtoMember(3122, DataFormat = DataFormat.FixedSize)]
@@ -27,6 +28,9 @@ public class ModelClass : ModelClassBase
     [ProtoMember(2)]
     public ClassWithCollections Model2 { get; set; }
 }
+
+[ProtoContract]
+public class SecondModelClass : ModelClassBase;
 
 [ProtoContract]
 public class ClassWithCollections
