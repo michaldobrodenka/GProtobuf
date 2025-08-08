@@ -32,11 +32,10 @@ namespace GProtobuf.Core
             if (position + length > buffer.Length) throw new InvalidOperationException("Buffer overrun");
             var slice = buffer.Slice(position, length);
             position += length;
+
             var result = new List<byte>(length);
-            foreach (var b in slice)
-            {
-                result.Add(b);
-            }
+            result.AddRange(slice);
+
             return result;
         }
 
