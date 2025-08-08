@@ -1,10 +1,7 @@
 ﻿using GProtobuf.Core;
-using System;
 using System.IO;
-using System.Collections.Generic;
-using System.Runtime.Intrinsics.Wasm;
 
-namespace Model.Serialization
+namespace Model.MySerialization
 {
     public static class Serializers
     {
@@ -15,24 +12,17 @@ namespace Model.Serialization
                 case global::Model.ModelClass obj1:
                     SerializeModelClass(stream, obj1);
                     return;
-            };
-
-            //var reader = new SpanReader(data);
-            //return SpanReaders.ReadModelClassBase(ref reader);
+            }
         }
 
         public static void SerializeModelClass(Stream stream, global::Model.ModelClass obj)
         {
-            //var reader = new SpanReader(data);
-            //return SpanReaders.ReadModelClass(ref reader);
         }
 
         public static void SerializeClassWithCollections(Stream stream, global::Model.ClassWithCollections obj)
         {
             var writer = new global::GProtobuf.Core.StreamWriter(stream);
             StreamWriters.WriteClassWithCollections(writer, obj);
-            //var reader = new SpanReader(data);
-            //return SpanReaders.ReadClassWithCollections(ref reader);
         }
     }
 
@@ -46,7 +36,6 @@ namespace Model.Serialization
                     WriteModelClass(stream, obj1);
                     return;
             }
-            ;
         }
         //public static void WriteModelClass(Stream stream, global::Model.ModelClass obj)
         //{
@@ -68,8 +57,6 @@ namespace Model.Serialization
         //}
         public static void WriteModelClass(Stream stream, global::Model.ModelClass obj)
         {
-            //var reader = new SpanReader(data);
-            //return SpanReaders.ReadModelClass(ref reader);
         }
 
         public static void WriteClassWithCollections(global::GProtobuf.Core.StreamWriter writer, global::Model.ClassWithCollections obj)

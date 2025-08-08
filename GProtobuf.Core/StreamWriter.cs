@@ -4,6 +4,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
+using System.IO;
 
 namespace GProtobuf.Core
 {
@@ -76,6 +77,16 @@ namespace GProtobuf.Core
         public void WriteZigZag64(long value)
         {
             WriteVarint64((value << 1) ^ (value >> 63));
+        }
+
+        public void WriteDouble(double value)
+        {
+            Stream.Write(MemoryMarshal.Cast<double, byte>(MemoryMarshal.CreateReadOnlySpan(ref value, 1)));
+        }
+
+        public void WriteFloat(float value)
+        {
+            Stream.Write(MemoryMarshal.Cast<float, byte>(MemoryMarshal.CreateReadOnlySpan(ref value, 1)));
         }
 
         public void WritePackedFixedSizeIntArray(int[] array)

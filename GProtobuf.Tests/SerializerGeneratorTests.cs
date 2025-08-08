@@ -2,6 +2,7 @@ using System.Reflection;
 using GProtobuf.Generator;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using ProtoBuf;
 using Xunit.Abstractions;
 
 namespace GProtobuf.Tests;
@@ -133,6 +134,12 @@ public sealed class SerializerGeneratorTests(ITestOutputHelper outputHelper)
         Assert.Contains(
             $"public static global::{expectedNamespaceName}.{expectedClassName} Read{expectedClassName}(ref SpanReader reader)",
             generatedCode);
+        Assert.Contains(
+            $"public static void Serialize{expectedClassName}(Stream stream, global::{expectedNamespaceName}.{expectedClassName} obj)",
+            generatedCode);
+        Assert.Contains(
+            $"public static void Write{expectedClassName}(global::GProtobuf.Core.StreamWriter writer, global::{expectedNamespaceName}.{expectedClassName} obj)",
+            generatedCode);
     }
 
     [Fact]
@@ -142,5 +149,187 @@ public sealed class SerializerGeneratorTests(ITestOutputHelper outputHelper)
         var result = Model.Serialization.Deserializers.DeserializeModelClassBase(serializedData);
 
         Assert.True(result == null);
+    }
+
+    [Fact]
+    public void GeneratedSerializer_SerializeAndDeserializeClassWithCollections_SameObject()
+    {
+        var obj = new Model.ClassWithCollections
+        {
+            SomeInt = 7,
+            Bytes = [10, 11],
+            PackedInts = [1, 2],
+            PackedFixedSizeInts = [3, 4],
+            NonPackedInts = [5, 6],
+            NonPackedFixedSizeInts = [7, 8]
+        };
+
+        using var stream = new MemoryStream();
+        Model.Serialization.Serializers.SerializeClassWithCollections(stream, obj);
+        var deserialized = Model.Serialization.Deserializers.DeserializeClassWithCollections(stream.ToArray());
+        Assert.NotNull(deserialized);
+        Assert.IsType<Model.ClassWithCollections>(deserialized);
+        Assert.Equal(obj.SomeInt, deserialized.SomeInt);
+        Assert.True(obj.Bytes.SequenceEqual(deserialized.Bytes));
+        Assert.True(obj.PackedInts.SequenceEqual(deserialized.PackedInts));
+        Assert.True(obj.PackedFixedSizeInts.SequenceEqual(deserialized.PackedFixedSizeInts));
+        Assert.True(obj.NonPackedInts.SequenceEqual(deserialized.NonPackedInts));
+        Assert.True(obj.NonPackedFixedSizeInts.SequenceEqual(deserialized.NonPackedFixedSizeInts));
+    }
+    
+    [Fact]
+    public void GeneratedSerializer_SerializeAndDeserializeModelClass_SameObject()
+    {
+        var obj = new Model.ModelClass
+        {
+            D = 42,
+            Model2 = new Model.ClassWithCollections
+            {
+                SomeInt = 7,
+                Bytes = [10, 11],
+                PackedInts = [1, 2],
+                PackedFixedSizeInts = [3, 4],
+                NonPackedInts = [5, 6],
+                NonPackedFixedSizeInts = [7, 8]
+            }
+        };
+
+        using var stream = new MemoryStream();
+        Model.Serialization.Serializers.SerializeModelClass(stream, obj);
+
+        var deserialized = Model.Serialization.Deserializers.DeserializeModelClass(stream.ToArray());
+
+        Assert.NotNull(deserialized);
+        Assert.IsType<Model.ModelClass>(deserialized);
+        Assert.Equal(obj.D, deserialized.D);
+        Assert.NotNull(deserialized.Model2);
+        Assert.Equal(obj.Model2.SomeInt, deserialized.Model2.SomeInt);
+        Assert.True(obj.Model2.Bytes.SequenceEqual(deserialized.Model2.Bytes));
+        Assert.True(obj.Model2.PackedInts.SequenceEqual(deserialized.Model2.PackedInts));
+        Assert.True(obj.Model2.PackedFixedSizeInts.SequenceEqual(deserialized.Model2.PackedFixedSizeInts));
+        Assert.True(obj.Model2.NonPackedInts.SequenceEqual(deserialized.Model2.NonPackedInts));
+        Assert.True(obj.Model2.NonPackedFixedSizeInts.SequenceEqual(deserialized.Model2.NonPackedFixedSizeInts));
+    }
+    
+    [Fact]
+    public void GeneratedSerializer_SerializeAndDeserializeModelClass_AsBaseClass_SameObject()
+    {
+        var obj = new Model.ModelClass
+        {
+            D = 42,
+            Model2 = new Model.ClassWithCollections
+            {
+                SomeInt = 7,
+                Bytes = [10, 11],
+                PackedInts = [1, 2],
+                PackedFixedSizeInts = [3, 4],
+                NonPackedInts = [5, 6],
+                NonPackedFixedSizeInts = [7, 8]
+            }
+        };
+
+        using var stream = new MemoryStream();
+        Model.Serialization.Serializers.SerializeModelClassBase(stream, obj);
+
+        // todo failure because of buffer overrun
+        var deserialized = Model.Serialization.Deserializers.DeserializeModelClassBase(stream.ToArray());
+
+        Assert.NotNull(deserialized);
+        Assert.IsType<Model.ModelClass>(deserialized);
+        var modelClass = deserialized as Model.ModelClass;
+        
+        Assert.Equal(obj.D, modelClass!.D);
+        Assert.NotNull(modelClass.Model2);
+        Assert.Equal(obj.Model2.SomeInt, modelClass.Model2.SomeInt);
+        Assert.True(obj.Model2.Bytes.SequenceEqual(modelClass.Model2.Bytes));
+        Assert.True(obj.Model2.PackedInts.SequenceEqual(modelClass.Model2.PackedInts));
+        Assert.True(obj.Model2.PackedFixedSizeInts.SequenceEqual(modelClass.Model2.PackedFixedSizeInts));
+        Assert.True(obj.Model2.NonPackedInts.SequenceEqual(modelClass.Model2.NonPackedInts));
+        Assert.True(obj.Model2.NonPackedFixedSizeInts.SequenceEqual(modelClass.Model2.NonPackedFixedSizeInts));
+    }
+
+    [Fact]
+    public void GeneratedSerializer_ClassWithCollections_ProducesSameBytesAsProtobufNet()
+    {
+        var clazzWithCollections = new Model.ClassWithCollections
+        {
+            SomeInt = 456,
+            Bytes = [1, 2, 3],
+            PackedInts = [1, 2, 3],
+            PackedFixedSizeInts = [4, 5],
+            NonPackedInts = [6, 7],
+            NonPackedFixedSizeInts = [8, 9]
+        };
+        
+        using var streamGenerated = new MemoryStream();
+        Model.Serialization.Serializers.SerializeClassWithCollections(streamGenerated, clazzWithCollections);
+        var generatedBytes = streamGenerated.ToArray();
+
+        using var streamProtoBuf = new MemoryStream();
+        Serializer.Serialize(streamProtoBuf, clazzWithCollections);
+        var protoBufBytes = streamProtoBuf.ToArray();
+
+        Assert.Equal(protoBufBytes, generatedBytes);
+    }
+
+    [Fact]
+    public void GeneratedSerializer_ModelClass_ProducesSameBytesAsProtobufNet()
+    {
+        var obj = new Model.ModelClass
+        {
+            D = 123,
+            Model2 = new Model.ClassWithCollections
+            {
+                SomeInt = 456,
+                Bytes = [1, 2, 3],
+                PackedInts = [1, 2, 3],
+                PackedFixedSizeInts = [4, 5],
+                NonPackedInts = [6, 7],
+                NonPackedFixedSizeInts = [8, 9]
+            }
+        };
+
+        using var streamGenerated = new MemoryStream();
+        Model.Serialization.Serializers.SerializeModelClassBase(streamGenerated, obj);
+        var generatedBytes = streamGenerated.ToArray();
+
+        using var streamProtoBuf = new MemoryStream();
+        Serializer.Serialize(streamProtoBuf, obj);
+        var protoBufBytes = streamProtoBuf.ToArray();
+
+        Assert.Equal(protoBufBytes, generatedBytes); // todo the result is not the same
+    }
+
+    [Fact]
+    public void GeneratedDeserializer_ReadsBytesFromProtobufNet()
+    {
+        var obj = new Model.ModelClass
+        {
+            D = 42,
+            Model2 = new Model.ClassWithCollections
+            {
+                SomeInt = 7,
+                Bytes = [10, 11],
+                PackedInts = [1, 2],
+                PackedFixedSizeInts = [3, 4],
+                NonPackedInts = [5, 6],
+                NonPackedFixedSizeInts = [7, 8]
+            }
+        };
+
+        using var streamProtoBuf = new MemoryStream();
+        Serializer.Serialize(streamProtoBuf, obj);
+        var protoBufBytes = streamProtoBuf.ToArray();
+
+        var deserialized = Model.Serialization.Deserializers.DeserializeModelClass(protoBufBytes);
+
+        Assert.NotNull(deserialized.Model2);
+        Assert.Equal(obj.D, deserialized.D);
+        Assert.Equal(obj.Model2.SomeInt, deserialized.Model2.SomeInt);
+        Assert.True(obj.Model2.Bytes.SequenceEqual(deserialized.Model2.Bytes));
+        Assert.True(obj.Model2.PackedInts.SequenceEqual(deserialized.Model2.PackedInts));
+        Assert.True(obj.Model2.PackedFixedSizeInts.SequenceEqual(deserialized.Model2.PackedFixedSizeInts));
+        Assert.True(obj.Model2.NonPackedInts.SequenceEqual(deserialized.Model2.NonPackedInts));
+        Assert.True(obj.Model2.NonPackedFixedSizeInts.SequenceEqual(deserialized.Model2.NonPackedFixedSizeInts));
     }
 }
