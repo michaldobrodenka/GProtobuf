@@ -7,12 +7,14 @@ namespace GProtobuf.Generator;
 public sealed record TypeDefinition(
     bool IsStruct,
     string FullName,
-    List<ProtoIncludeAttribute> ProtoIncludes,
+    List<ProtoIncludeAttribute> ProtoIncludes, // List of ProtoInclude derived classes
     List<ProtoMemberAttribute> ProtoMembers);
 
 class ObjectTree
 {
     private Dictionary<string, List<TypeDefinition>> types = new();
+
+    private Dictionary<string, string> baseClassesForTypes = new();
 
     public void AddType(string nmspace, string fullName, bool isStruct, List<ProtoIncludeAttribute> protoIncludes, List<ProtoMemberAttribute> protoMembers)
     {
@@ -28,6 +30,17 @@ class ObjectTree
         }
 
         typeDefinitions.Add(typeDefinition);
+
+        if (typeDefinition.ProtoIncludes != null)
+        {
+            foreach (var protoInclude in typeDefinition.ProtoIncludes)
+            {
+                if (!baseClassesForTypes.ContainsKey(protoInclude.Type))
+                {
+                    baseClassesForTypes[protoInclude.Type] = typeDefinition.FullName;
+                }
+            }
+        }
     }
 
     public IEnumerable<(string FileName, string FileCode)> GenerateCode()
