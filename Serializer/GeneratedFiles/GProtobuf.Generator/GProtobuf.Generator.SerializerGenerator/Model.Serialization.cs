@@ -2,6 +2,8 @@
 using GProtobuf.Core;
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Text;
 
 namespace Model.Serialization
 {
@@ -19,10 +21,44 @@ namespace Model.Serialization
             return SpanReaders.ReadModelClass(ref reader);
         }
 
+        public static global::Model.SecondModelClass DeserializeSecondModelClass(ReadOnlySpan<byte> data)
+        {
+            var reader = new SpanReader(data);
+            return SpanReaders.ReadSecondModelClass(ref reader);
+        }
+
         public static global::Model.ClassWithCollections DeserializeClassWithCollections(ReadOnlySpan<byte> data)
         {
             var reader = new SpanReader(data);
             return SpanReaders.ReadClassWithCollections(ref reader);
+        }
+
+    }
+
+    public static class Serializers
+    {
+        public static void SerializeModelClassBase(Stream stream, global::Model.ModelClassBase obj)
+        {
+            var writer = new global::GProtobuf.Core.StreamWriter(stream);
+            StreamWriters.WriteModelClassBase(writer, obj);
+        }
+
+        public static void SerializeModelClass(Stream stream, global::Model.ModelClass obj)
+        {
+            var writer = new global::GProtobuf.Core.StreamWriter(stream);
+            StreamWriters.WriteModelClass(writer, obj);
+        }
+
+        public static void SerializeSecondModelClass(Stream stream, global::Model.SecondModelClass obj)
+        {
+            var writer = new global::GProtobuf.Core.StreamWriter(stream);
+            StreamWriters.WriteSecondModelClass(writer, obj);
+        }
+
+        public static void SerializeClassWithCollections(Stream stream, global::Model.ClassWithCollections obj)
+        {
+            var writer = new global::GProtobuf.Core.StreamWriter(stream);
+            StreamWriters.WriteClassWithCollections(writer, obj);
         }
 
     }
@@ -42,6 +78,14 @@ namespace Model.Serialization
                     var length = reader.ReadVarInt32();
                     var reader1 = new SpanReader(reader.GetSlice(length));
                     result = global::Model.Serialization.SpanReaders.ReadModelClass(ref reader1);
+                    continue;
+                }
+
+                if (fieldId == 2)
+                {
+                    var length = reader.ReadVarInt32();
+                    var reader1 = new SpanReader(reader.GetSlice(length));
+                    result = global::Model.Serialization.SpanReaders.ReadSecondModelClass(ref reader1);
                     continue;
                 }
 
@@ -94,6 +138,21 @@ namespace Model.Serialization
                     result.Model2 = global::Model.Serialization.SpanReaders.ReadClassWithCollections(ref reader1);
                     continue;
                 }
+
+                // default
+                reader.SkipField(wireType);
+            }
+
+            return result;
+        }
+
+        public static global::Model.SecondModelClass ReadSecondModelClass(ref SpanReader reader)
+        {
+            global::Model.SecondModelClass result = new global::Model.SecondModelClass();
+
+            while(!reader.IsEnd)
+            {
+                var (wireType, fieldId) = reader.ReadWireTypeAndFieldId();
 
                 // default
                 reader.SkipField(wireType);
@@ -185,6 +244,113 @@ namespace Model.Serialization
             }
 
             return result;
+        }
+
+    }
+
+    public static class StreamWriters
+    {
+        public static void WriteModelClassBase(global::GProtobuf.Core.StreamWriter writer, global::Model.ModelClassBase obj)
+        {
+
+            switch (obj)
+            {
+                case global::Model.ModelClass obj1:
+                    writer.WriteTag(1, WireType.Len);
+                    writer.WriteVarint32(0);
+                    WriteModelClass(writer, obj1);
+                    return;
+                case global::Model.SecondModelClass obj1:
+                    writer.WriteTag(2, WireType.Len);
+                    writer.WriteVarint32(0);
+                    WriteSecondModelClass(writer, obj1);
+                    return;
+            }
+            writer.WriteTag(3122, WireType.Fixed64b);
+            writer.WriteDouble(obj.A);
+
+            if (obj.B != 0)
+            {
+                writer.WriteTag(201, WireType.VarInt);
+                writer.WriteVarint32(obj.B);
+            }
+
+            if (obj.Str != null)
+            {
+                writer.WriteTag(1234568, WireType.Len);
+                var bytes = Encoding.UTF8.GetBytes(obj.Str);
+                writer.WriteVarint32(bytes.Length);
+                writer.Stream.Write(bytes);
+            }
+
+        }
+
+        public static void WriteModelClass(global::GProtobuf.Core.StreamWriter writer, global::Model.ModelClass obj)
+        {
+            if (obj.D != 0)
+            {
+                writer.WriteTag(1, WireType.VarInt);
+                writer.WriteVarint32(obj.D);
+            }
+
+            if (obj.Model2 != null)
+            {
+                var ms = new MemoryStream();
+                global::Model.Serialization.Serializers.SerializeClassWithCollections(ms, obj.Model2);
+                writer.WriteTag(2, WireType.Len);
+                writer.WriteVarint32((int)ms.Length);
+                ms.Position = 0;
+                ms.CopyTo(writer.Stream);
+            }
+
+        }
+
+        public static void WriteSecondModelClass(global::GProtobuf.Core.StreamWriter writer, global::Model.SecondModelClass obj)
+        {
+        }
+
+        public static void WriteClassWithCollections(global::GProtobuf.Core.StreamWriter writer, global::Model.ClassWithCollections obj)
+        {
+            if (obj.SomeInt != 0)
+            {
+                writer.WriteTag(1, WireType.VarInt);
+                writer.WriteVarint32(obj.SomeInt);
+            }
+
+            if (obj.Bytes != null)
+            {
+                writer.WriteTag(6, WireType.Len);
+                writer.WriteVarint32(obj.Bytes.Length);
+                writer.Stream.Write(obj.Bytes);
+            }
+
+            if (obj.PackedInts != null)
+            {
+                writer.WriteTag(7, WireType.Len);
+                var packedSize = Utils.GetVarintPackedCollectionSize(obj.PackedInts);
+                writer.WriteVarint32(packedSize);
+                foreach(var v in obj.PackedInts) writer.WriteVarint32(v);
+            }
+
+            if (obj.PackedFixedSizeInts != null)
+            {
+                writer.WriteTag(8, WireType.Len);
+                writer.WriteVarint32(obj.PackedFixedSizeInts.Length << 2);
+                writer.WritePackedFixedSizeIntArray(obj.PackedFixedSizeInts);
+            }
+
+            if (obj.NonPackedInts != null)
+            {
+                var tagAndWire = Utils.GetTagAndWireType(9, WireType.VarInt);
+                foreach(var v in obj.NonPackedInts) { writer.WriteVarint32(tagAndWire); writer.WriteVarint32(v); }
+            }
+
+            if (obj.NonPackedFixedSizeInts != null)
+            {
+                var tagAndWire = Utils.GetTagAndWireType(10, WireType.Fixed32b);
+                foreach(var v in obj.NonPackedFixedSizeInts) { writer.WriteVarint32(tagAndWire); writer.WriteFixedSizeInt32(v); }
+            }
+
         }
 
     }

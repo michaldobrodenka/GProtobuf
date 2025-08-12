@@ -20,7 +20,7 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                 var protoIncludes = GetProtoIncludeAttributes(typeWithAttribute);
                 var protoMembers = GetProtoMemberAttributes(typeWithAttribute);
                 var typeDefinition = new TypeDefinition(
-                    IsStruct: false,
+                    IsStruct: false, // todo implement support for structs
                     typeWithAttribute.ToDisplayString(),
                     protoIncludes,
                     protoMembers);
