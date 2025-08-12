@@ -154,7 +154,7 @@ class ObjectTree
             sb.AppendIndentedLine($"public static void Write{GetClassNameFromFullName(obj.FullName)}(global::GProtobuf.Core.StreamWriter writer, global::{obj.FullName} obj)");
             sb.StartNewBlock();
 
-            if (obj.ProtoIncludes.Count > 0)
+                if (obj.ProtoIncludes.Count > 0)
             {
                 sb.AppendNewLine();
                 sb.AppendIndentedLine("switch (obj)");
@@ -163,13 +163,16 @@ class ObjectTree
                 {
                     var className = GetClassNameFromFullName(include.Type);
                     sb.AppendIndentedLine($"case global::{include.Type} obj1:");
-                    sb.IncreaseIndent();
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine("var ms = new MemoryStream();");
+                    sb.AppendIndentedLine("var writer1 = new global::GProtobuf.Core.StreamWriter(ms);");
+                    sb.AppendIndentedLine($"Write{className}(writer1, obj1);");
                     sb.AppendIndentedLine($"writer.WriteTag({include.FieldId}, WireType.Len);");
-                    sb.AppendIndentedLine("writer.WriteVarint32(0);"); // todo protobuf-net writes length here
-                    
-                    sb.AppendIndentedLine($"Write{className}(writer, obj1);");
-                    sb.AppendIndentedLine("return;");
-                    sb.DecreaseIndent();
+                    sb.AppendIndentedLine("writer.WriteVarint32((int)ms.Length);");
+                    sb.AppendIndentedLine("ms.Position = 0;");
+                    sb.AppendIndentedLine("ms.CopyTo(writer.Stream);");
+                    sb.AppendIndentedLine("break;");
+                    sb.EndBlock();
                 }
                 sb.EndBlock();
             }
