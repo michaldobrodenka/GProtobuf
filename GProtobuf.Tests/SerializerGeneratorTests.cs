@@ -250,7 +250,8 @@ public sealed class SerializerGeneratorTests(ITestOutputHelper outputHelper)
 
         using var streamProtoBuf = new MemoryStream();
         Serializer.Serialize(streamProtoBuf, obj);
-        Assert.Equal(streamProtoBuf.ToArray(), generatedBytes);
+        var protoBufBytes = streamProtoBuf.ToArray();
+        Assert.Equal(protoBufBytes, generatedBytes);
     }
 
     [Fact]
@@ -278,7 +279,8 @@ public sealed class SerializerGeneratorTests(ITestOutputHelper outputHelper)
 
         using var streamProtoBuf = new MemoryStream();
         Serializer.Serialize(streamProtoBuf, obj);
-        Assert.Equal(streamProtoBuf.ToArray(), generatedBytes);
+        var protoBufBytes = streamProtoBuf.ToArray();
+        Assert.Equal(protoBufBytes, generatedBytes);
     }
 
     [Fact]

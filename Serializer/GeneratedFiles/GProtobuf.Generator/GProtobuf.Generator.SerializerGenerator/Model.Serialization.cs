@@ -252,38 +252,42 @@ namespace Model.Serialization
     {
         public static void WriteModelClassBase(global::GProtobuf.Core.StreamWriter writer, global::Model.ModelClassBase obj)
         {
+
             switch (obj)
             {
                 case global::Model.ModelClass obj1:
-                    {
-                        var ms = new MemoryStream();
-                        var writer1 = new global::GProtobuf.Core.StreamWriter(ms);
-                        WriteModelClass(writer1, obj1);
-                        writer.WriteTag(1, WireType.Len);
-                        writer.WriteVarint32((int)ms.Length);
-                        ms.Position = 0;
-                        ms.CopyTo(writer.Stream);
-                        break;
-                    }
+                {
+                    var ms = new MemoryStream();
+                    var writer1 = new global::GProtobuf.Core.StreamWriter(ms);
+                    WriteModelClass(writer1, obj1);
+                    writer.WriteTag(1, WireType.Len);
+                    writer.WriteVarint32((int)ms.Length);
+                    ms.Position = 0;
+                    ms.CopyTo(writer.Stream);
+                    break;
+                }
                 case global::Model.SecondModelClass obj1:
-                    {
-                        var ms = new MemoryStream();
-                        var writer1 = new global::GProtobuf.Core.StreamWriter(ms);
-                        WriteSecondModelClass(writer1, obj1);
-                        writer.WriteTag(2, WireType.Len);
-                        writer.WriteVarint32((int)ms.Length);
-                        ms.Position = 0;
-                        ms.CopyTo(writer.Stream);
-                        break;
-                    }
+                {
+                    var ms = new MemoryStream();
+                    var writer1 = new global::GProtobuf.Core.StreamWriter(ms);
+                    WriteSecondModelClass(writer1, obj1);
+                    writer.WriteTag(2, WireType.Len);
+                    writer.WriteVarint32((int)ms.Length);
+                    ms.Position = 0;
+                    ms.CopyTo(writer.Stream);
+                    break;
+                }
             }
-            writer.WriteTag(3122, WireType.Fixed64b);
-            writer.WriteDouble(obj.A);
-
             if (obj.B != 0)
             {
                 writer.WriteTag(201, WireType.VarInt);
                 writer.WriteVarint32(obj.B);
+            }
+
+            if (obj.A != 0)
+            {
+                writer.WriteTag(3122, WireType.Fixed64b);
+                writer.WriteDouble(obj.A);
             }
 
             if (obj.Str != null)
