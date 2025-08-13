@@ -49,7 +49,7 @@ public sealed class SerializerGeneratorTests(ITestOutputHelper outputHelper)
     public void SerializerGenerator_ContractWithInheritance_ShouldGenerateSerializer()
     {
         const string namespaceName = "TestNamespace";
-        const string abstractClassName = "AbstractClass";
+        const string parentClassName = "ParentClass";
         const string derivedClass1Name = "DerivedClass1";
         const string derivedClass2Name = "DerivedClass2";
 
@@ -61,21 +61,21 @@ public sealed class SerializerGeneratorTests(ITestOutputHelper outputHelper)
           namespace {{namespaceName}};
 
           [ProtoContract]
-          [ProtoInclude(1, typeof(DerivedClass1))]
-          [ProtoInclude(2, typeof(DerivedClass2))]
-          public class {{abstractClassName}}
+          [ProtoInclude(1, typeof({{derivedClass1Name}}))]
+          [ProtoInclude(2, typeof({{derivedClass2Name}}))]
+          public class {{parentClassName}}
           {
             [ProtoMember(1)] public int X { get; set; }
           }
 
           [ProtoContract]
-          public class {{derivedClass1Name}} : {{abstractClassName}}
+          public class {{derivedClass1Name}} : {{parentClassName}}
           {
             [ProtoMember(2)] public string Y { get; set; }
           }
           
           [ProtoContract]
-          public class {{derivedClass2Name}} : {{abstractClassName}}
+          public class {{derivedClass2Name}} : {{parentClassName}}
           {
             [ProtoMember(2)] public double Z { get; set; }
           }
@@ -86,10 +86,57 @@ public sealed class SerializerGeneratorTests(ITestOutputHelper outputHelper)
         var generatedText = generatedFileSyntaxTree.GetText().ToString();
         
         outputHelper.WriteLine(generatedText);
-        AssertGeneratedCode(generatedText, abstractClassName, namespaceName);
+        AssertGeneratedCode(generatedText, parentClassName, namespaceName);
         AssertGeneratedCode(generatedText, derivedClass1Name, namespaceName);
         AssertGeneratedCode(generatedText, derivedClass2Name, namespaceName);
     }
+    
+    [Fact]
+    public void SerializerGenerator_ContractsWithMultilayerInheritance_ShouldGenerateSerializer()
+    {
+        const string namespaceName = "TestNamespace";
+        const string parentClassName = "ParentClass";
+        const string derivedClass1Name = "DerivedClass1";
+        const string derivedClass2Name = "DerivedClass2";
+
+        // language=C#
+        var code =
+            $$"""
+              using ProtoBuf;
+
+              namespace {{namespaceName}};
+
+              [ProtoContract]
+              [ProtoInclude(1, typeof({{derivedClass1Name}}))]
+              public class {{parentClassName}}
+              {
+                [ProtoMember(1)] public int X { get; set; }
+              }
+
+              [ProtoContract]
+              [ProtoInclude(2, typeof({{derivedClass2Name}}))]
+              public class {{derivedClass1Name}} : {{parentClassName}}
+              {
+                [ProtoMember(1)] public string Y { get; set; }
+              }
+
+              [ProtoContract]
+              public class {{derivedClass2Name}} : {{parentClassName}}
+              {
+                [ProtoMember(1)] public double Z { get; set; }
+              }
+              """;
+
+        var runResult = RunGenerator(code);
+        var generatedFileSyntaxTree = runResult.GeneratedTrees.Single(t => t.FilePath.EndsWith($"{namespaceName}.Serialization.cs"));
+        var generatedText = generatedFileSyntaxTree.GetText().ToString();
+        
+        outputHelper.WriteLine(generatedText);
+        AssertGeneratedCode(generatedText, parentClassName, namespaceName);
+        AssertGeneratedCode(generatedText, derivedClass1Name, namespaceName);
+        AssertGeneratedCode(generatedText, derivedClass2Name, namespaceName);
+    }
+
 
     private GeneratorDriverRunResult RunGenerator(string code)
     {
