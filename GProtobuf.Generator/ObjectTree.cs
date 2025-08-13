@@ -17,8 +17,6 @@ class ObjectTree
 
     private Dictionary<string, string> baseClassesForTypes = new();
 
-    private Dictionary<string, TypeDefinition> typesByFullName = new();
-
     public void AddType(string nmspace, string fullName, bool isStruct, List<ProtoIncludeAttribute> protoIncludes, List<ProtoMemberAttribute> protoMembers)
     {
         AddType(nmspace, new TypeDefinition(isStruct, fullName, protoIncludes, protoMembers));
@@ -33,7 +31,6 @@ class ObjectTree
         }
 
         typeDefinitions.Add(typeDefinition);
-        typesByFullName[typeDefinition.FullName] = typeDefinition;
 
         if (typeDefinition.ProtoIncludes != null)
         {
@@ -197,15 +194,20 @@ class ObjectTree
 
     private List<ProtoMemberAttribute> GetAllProtoMembers(TypeDefinition obj)
     {
-        List<ProtoMemberAttribute> result = new();
-        if (baseClassesForTypes.TryGetValue(obj.FullName, out var baseClass) &&
-            typesByFullName.TryGetValue(baseClass, out var baseType))
+        var members = new List<ProtoMemberAttribute>();
+
+        var current = obj;
+        while (current != null)
         {
-            result.AddRange(GetAllProtoMembers(baseType));
+            members.AddRange(current.ProtoMembers);
+
+            if (!baseClassesForTypes.TryGetValue(current.FullName, out var baseClass))
+                break;
+
+            current = types.SelectMany(kv => kv.Value).FirstOrDefault(t => t.FullName == baseClass);
         }
-        if (obj.ProtoMembers != null)
-            result.AddRange(obj.ProtoMembers);
-        return result;
+
+        return members;
     }
 
     private static void WriteProtoIncludesInDeserializers(StringBuilderWithIndent sb, TypeDefinition obj)
