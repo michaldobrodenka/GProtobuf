@@ -49,7 +49,7 @@ public sealed class SerializerGeneratorTests(ITestOutputHelper outputHelper)
     public void SerializerGenerator_ContractWithInheritance_ShouldGenerateSerializer()
     {
         const string namespaceName = "TestNamespace";
-        const string abstractClassName = "AbstractClass";
+        const string parentClassName = "ParentClass";
         const string derivedClass1Name = "DerivedClass1";
         const string derivedClass2Name = "DerivedClass2";
 
@@ -61,21 +61,21 @@ public sealed class SerializerGeneratorTests(ITestOutputHelper outputHelper)
           namespace {{namespaceName}};
 
           [ProtoContract]
-          [ProtoInclude(1, typeof(DerivedClass1))]
-          [ProtoInclude(2, typeof(DerivedClass2))]
-          public class {{abstractClassName}}
+          [ProtoInclude(1, typeof({{derivedClass1Name}}))]
+          [ProtoInclude(2, typeof({{derivedClass2Name}}))]
+          public class {{parentClassName}}
           {
             [ProtoMember(1)] public int X { get; set; }
           }
 
           [ProtoContract]
-          public class {{derivedClass1Name}} : {{abstractClassName}}
+          public class {{derivedClass1Name}} : {{parentClassName}}
           {
             [ProtoMember(2)] public string Y { get; set; }
           }
           
           [ProtoContract]
-          public class {{derivedClass2Name}} : {{abstractClassName}}
+          public class {{derivedClass2Name}} : {{parentClassName}}
           {
             [ProtoMember(2)] public double Z { get; set; }
           }
@@ -86,12 +86,59 @@ public sealed class SerializerGeneratorTests(ITestOutputHelper outputHelper)
         var generatedText = generatedFileSyntaxTree.GetText().ToString();
         
         outputHelper.WriteLine(generatedText);
-        AssertGeneratedCode(generatedText, abstractClassName, namespaceName);
+        AssertGeneratedCode(generatedText, parentClassName, namespaceName);
+        AssertGeneratedCode(generatedText, derivedClass1Name, namespaceName);
+        AssertGeneratedCode(generatedText, derivedClass2Name, namespaceName);
+    }
+    
+    [Fact]
+    public void SerializerGenerator_ContractsWithMultilayerInheritance_ShouldGenerateSerializer()
+    {
+        const string namespaceName = "TestNamespace";
+        const string parentClassName = "ParentClass";
+        const string derivedClass1Name = "DerivedClass1";
+        const string derivedClass2Name = "DerivedClass2";
+
+        // language=C#
+        var code =
+            $$"""
+              using ProtoBuf;
+
+              namespace {{namespaceName}};
+
+              [ProtoContract]
+              [ProtoInclude(1, typeof({{derivedClass1Name}}))]
+              public class {{parentClassName}}
+              {
+                [ProtoMember(1)] public int X { get; set; }
+              }
+
+              [ProtoContract]
+              [ProtoInclude(2, typeof({{derivedClass2Name}}))]
+              public class {{derivedClass1Name}} : {{parentClassName}}
+              {
+                [ProtoMember(1)] public string Y { get; set; }
+              }
+
+              [ProtoContract]
+              public class {{derivedClass2Name}} : {{parentClassName}}
+              {
+                [ProtoMember(1)] public double Z { get; set; }
+              }
+              """;
+
+        var runResult = RunGenerator(code);
+        var generatedFileSyntaxTree = runResult.GeneratedTrees.Single(t => t.FilePath.EndsWith($"{namespaceName}.Serialization.cs"));
+        var generatedText = generatedFileSyntaxTree.GetText().ToString();
+        
+        outputHelper.WriteLine(generatedText);
+        AssertGeneratedCode(generatedText, parentClassName, namespaceName);
         AssertGeneratedCode(generatedText, derivedClass1Name, namespaceName);
         AssertGeneratedCode(generatedText, derivedClass2Name, namespaceName);
     }
 
-    private static GeneratorDriverRunResult RunGenerator(string code)
+
+    private GeneratorDriverRunResult RunGenerator(string code)
     {
         // Create an instance of the source generator.
         var generator = new SerializerGenerator();
@@ -102,7 +149,7 @@ public sealed class SerializerGeneratorTests(ITestOutputHelper outputHelper)
         // We need to add all the required references for the compilation.
         var protobufAssembly = Assembly.GetAssembly(typeof(ProtoBuf.ProtoContractAttribute));
         var references = AppDomain.CurrentDomain.GetAssemblies()
-            .Where(assembly => !assembly.IsDynamic)
+            .Where(assembly => !assembly.IsDynamic && !string.IsNullOrEmpty(assembly.Location))
             .Select(assembly => MetadataReference.CreateFromFile(assembly.Location))
             .Cast<MetadataReference>()
             .Append(MetadataReference.CreateFromFile(protobufAssembly!.Location))
@@ -212,7 +259,7 @@ public sealed class SerializerGeneratorTests(ITestOutputHelper outputHelper)
     }
     
     [Fact]
-    public void GeneratedSerializer_SerializeAndDeserializeModelClass_AsBaseClass_SameObject()
+    public void GeneratedSerializer_SerializeAndDeserializeModelClass_AsBaseClass_OnlyDerivedFields()
     {
         var obj = new Model.ModelClass
         {
@@ -230,15 +277,16 @@ public sealed class SerializerGeneratorTests(ITestOutputHelper outputHelper)
 
         using var stream = new MemoryStream();
         Model.Serialization.Serializers.SerializeModelClassBase(stream, obj);
+        var generatedBytes = stream.ToArray();
 
-        // todo failure because of buffer overrun
-        var deserialized = Model.Serialization.Deserializers.DeserializeModelClassBase(stream.ToArray());
+        var deserialized = Model.Serialization.Deserializers.DeserializeModelClassBase(generatedBytes);
 
         Assert.NotNull(deserialized);
-        Assert.IsType<Model.ModelClass>(deserialized);
-        var modelClass = deserialized as Model.ModelClass;
-        
-        Assert.Equal(obj.D, modelClass!.D);
+        var modelClass = Assert.IsType<Model.ModelClass>(deserialized);
+        Assert.Equal(0, modelClass.A);
+        Assert.Equal(0, modelClass.B);
+        Assert.Null(modelClass.Str);
+        Assert.Equal(obj.D, modelClass.D);
         Assert.NotNull(modelClass.Model2);
         Assert.Equal(obj.Model2.SomeInt, modelClass.Model2.SomeInt);
         Assert.True(obj.Model2.Bytes.SequenceEqual(modelClass.Model2.Bytes));
@@ -246,6 +294,65 @@ public sealed class SerializerGeneratorTests(ITestOutputHelper outputHelper)
         Assert.True(obj.Model2.PackedFixedSizeInts.SequenceEqual(modelClass.Model2.PackedFixedSizeInts));
         Assert.True(obj.Model2.NonPackedInts.SequenceEqual(modelClass.Model2.NonPackedInts));
         Assert.True(obj.Model2.NonPackedFixedSizeInts.SequenceEqual(modelClass.Model2.NonPackedFixedSizeInts));
+
+        using var streamProtoBuf = new MemoryStream();
+        Serializer.Serialize(streamProtoBuf, obj);
+        var protoBufBytes = streamProtoBuf.ToArray();
+        Assert.Equal(protoBufBytes, generatedBytes);
+    }
+
+    [Fact]
+    public void GeneratedSerializer_SerializeAndDeserializeModelClass_AsBaseClass_BaseAndDerivedFields()
+    {
+        var obj = new Model.ModelClass
+        {
+            A = 1.5,
+            B = 11,
+            Str = "base",
+            D = 7
+        };
+
+        using var stream = new MemoryStream();
+        Model.Serialization.Serializers.SerializeModelClassBase(stream, obj);
+        var generatedBytes = stream.ToArray();
+
+        var deserialized = Model.Serialization.Deserializers.DeserializeModelClassBase(generatedBytes);
+
+        var modelClass = Assert.IsType<Model.ModelClass>(deserialized);
+        Assert.Equal(obj.A, modelClass.A);
+        Assert.Equal(obj.B, modelClass.B);
+        Assert.Equal(obj.Str, modelClass.Str);
+        Assert.Equal(obj.D, modelClass.D);
+
+        using var streamProtoBuf = new MemoryStream();
+        Serializer.Serialize(streamProtoBuf, obj);
+        var protoBufBytes = streamProtoBuf.ToArray();
+        Assert.Equal(protoBufBytes, generatedBytes);
+    }
+
+    [Fact]
+    public void GeneratedSerializer_SerializeAndDeserializeSecondModelClass_OnlyBaseFields()
+    {
+        var obj = new Model.SecondModelClass
+        {
+            A = 2.25,
+            B = 3,
+            Str = "abc"
+        };
+
+        using var stream = new MemoryStream();
+        Model.Serialization.Serializers.SerializeModelClassBase(stream, obj);
+        var generatedBytes = stream.ToArray();
+
+        var deserialized = Model.Serialization.Deserializers.DeserializeModelClassBase(generatedBytes);
+        var second = Assert.IsType<Model.SecondModelClass>(deserialized);
+        Assert.Equal(obj.A, second.A);
+        Assert.Equal(obj.B, second.B);
+        Assert.Equal(obj.Str, second.Str);
+
+        using var streamProtoBuf = new MemoryStream();
+        Serializer.Serialize(streamProtoBuf, obj);
+        Assert.Equal(streamProtoBuf.ToArray(), generatedBytes);
     }
 
     [Fact]
@@ -297,7 +404,7 @@ public sealed class SerializerGeneratorTests(ITestOutputHelper outputHelper)
         Serializer.Serialize(streamProtoBuf, obj);
         var protoBufBytes = streamProtoBuf.ToArray();
 
-        Assert.Equal(protoBufBytes, generatedBytes); // todo the result is not the same
+        Assert.Equal(protoBufBytes, generatedBytes);
     }
 
     [Fact]
