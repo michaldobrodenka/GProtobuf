@@ -57,7 +57,7 @@ class ObjectTree
         }
     }
 
-    private static void GenerateCode(
+    private void GenerateCode(
         StringBuilderWithIndent sb,
         KeyValuePair<string, List<TypeDefinition>> namespaceWithObjects,
         string nmspace)
@@ -126,12 +126,10 @@ class ObjectTree
                 WriteProtoIncludesInDeserializers(sb, obj);
             }
 
-            if (obj.ProtoMembers != null)
+            var allProtoMembers = GetAllProtoMembers(obj);
+            foreach (var protoMember in allProtoMembers)
             {
-                foreach (var protoMember in obj.ProtoMembers)
-                {
-                    WriteProtoMember(sb, protoMember);
-                }
+                WriteProtoMember(sb, protoMember);
             }
             sb.AppendIndentedLine($"// default");
             sb.AppendIndentedLine($"reader.SkipField(wireType);");
@@ -192,6 +190,24 @@ class ObjectTree
 
         sb.EndBlock();
         sb.EndBlock();
+    }
+
+    private List<ProtoMemberAttribute> GetAllProtoMembers(TypeDefinition obj)
+    {
+        var members = new List<ProtoMemberAttribute>();
+
+        var current = obj;
+        while (current != null)
+        {
+            members.AddRange(current.ProtoMembers);
+
+            if (!baseClassesForTypes.TryGetValue(current.FullName, out var baseClass))
+                break;
+
+            current = types.SelectMany(kv => kv.Value).FirstOrDefault(t => t.FullName == baseClass);
+        }
+
+        return members;
     }
 
     private static void WriteProtoIncludesInDeserializers(StringBuilderWithIndent sb, TypeDefinition obj)

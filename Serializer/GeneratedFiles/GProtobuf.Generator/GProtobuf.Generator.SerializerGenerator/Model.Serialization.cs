@@ -139,6 +139,24 @@ namespace Model.Serialization
                     continue;
                 }
 
+                if (fieldId == 3122)
+                {
+                    result.A = reader.ReadDouble(wireType);
+                    continue;
+                }
+
+                if (fieldId == 201)
+                {
+                    result.B = reader.ReadVarInt32();
+                    continue;
+                }
+
+                if (fieldId == 1234568)
+                {
+                    result.Str = reader.ReadString(wireType);
+                    continue;
+                }
+
                 // default
                 reader.SkipField(wireType);
             }
@@ -153,6 +171,24 @@ namespace Model.Serialization
             while(!reader.IsEnd)
             {
                 var (wireType, fieldId) = reader.ReadWireTypeAndFieldId();
+
+                if (fieldId == 3122)
+                {
+                    result.A = reader.ReadDouble(wireType);
+                    continue;
+                }
+
+                if (fieldId == 201)
+                {
+                    result.B = reader.ReadVarInt32();
+                    continue;
+                }
+
+                if (fieldId == 1234568)
+                {
+                    result.Str = reader.ReadString(wireType);
+                    continue;
+                }
 
                 // default
                 reader.SkipField(wireType);
