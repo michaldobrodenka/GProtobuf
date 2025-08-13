@@ -1,6 +1,7 @@
 ﻿using GProtobuf.Core;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace GProtobuf.Generator;
 
@@ -56,7 +57,7 @@ class ObjectTree
         }
     }
 
-    private static void GenerateCode(
+    private void GenerateCode(
         StringBuilderWithIndent sb,
         KeyValuePair<string, List<TypeDefinition>> namespaceWithObjects,
         string nmspace)
@@ -125,12 +126,10 @@ class ObjectTree
                 WriteProtoIncludesInDeserializers(sb, obj);
             }
 
-            if (obj.ProtoMembers != null)
+            var allProtoMembers = GetAllProtoMembers(obj);
+            foreach (var protoMember in allProtoMembers)
             {
-                foreach (var protoMember in obj.ProtoMembers)
-                {
-                    WriteProtoMember(sb, protoMember);
-                }
+                WriteProtoMember(sb, protoMember);
             }
             sb.AppendIndentedLine($"// default");
             sb.AppendIndentedLine($"reader.SkipField(wireType);");
@@ -163,20 +162,23 @@ class ObjectTree
                 {
                     var className = GetClassNameFromFullName(include.Type);
                     sb.AppendIndentedLine($"case global::{include.Type} obj1:");
-                    sb.IncreaseIndent();
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine("var ms = new MemoryStream();");
+                    sb.AppendIndentedLine("var writer1 = new global::GProtobuf.Core.StreamWriter(ms);");
+                    sb.AppendIndentedLine($"Write{className}(writer1, obj1);");
                     sb.AppendIndentedLine($"writer.WriteTag({include.FieldId}, WireType.Len);");
-                    sb.AppendIndentedLine("writer.WriteVarint32(0);"); // todo protobuf-net writes length here
-                    
-                    sb.AppendIndentedLine($"Write{className}(writer, obj1);");
-                    sb.AppendIndentedLine("return;");
-                    sb.DecreaseIndent();
+                    sb.AppendIndentedLine("writer.WriteVarint32((int)ms.Length);");
+                    sb.AppendIndentedLine("ms.Position = 0;");
+                    sb.AppendIndentedLine("ms.CopyTo(writer.Stream);");
+                    sb.AppendIndentedLine("break;");
+                    sb.EndBlock();
                 }
                 sb.EndBlock();
             }
 
             if (obj.ProtoMembers != null)
             {
-                foreach (var protoMember in obj.ProtoMembers)
+                foreach (var protoMember in obj.ProtoMembers.OrderBy(m => m.FieldId))
                 {
                     WriteProtoMemberSerializer(sb, protoMember);
                 }
@@ -188,6 +190,24 @@ class ObjectTree
 
         sb.EndBlock();
         sb.EndBlock();
+    }
+
+    private List<ProtoMemberAttribute> GetAllProtoMembers(TypeDefinition obj)
+    {
+        var members = new List<ProtoMemberAttribute>();
+
+        var current = obj;
+        while (current != null)
+        {
+            members.AddRange(current.ProtoMembers);
+
+            if (!baseClassesForTypes.TryGetValue(current.FullName, out var baseClass))
+                break;
+
+            current = types.SelectMany(kv => kv.Value).FirstOrDefault(t => t.FullName == baseClass);
+        }
+
+        return members;
     }
 
     private static void WriteProtoIncludesInDeserializers(StringBuilderWithIndent sb, TypeDefinition obj)
@@ -366,15 +386,21 @@ class ObjectTree
 
             case "Double":
             case "double":
+                sb.AppendIndentedLine($"if (obj.{protoMember.Name} != 0)");
+                sb.StartNewBlock();
                 sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Fixed64b);");
                 sb.AppendIndentedLine($"writer.WriteDouble(obj.{protoMember.Name});");
+                sb.EndBlock();
                 break;
 
             case "Single":
             case "single":
             case "float":
+                sb.AppendIndentedLine($"if (obj.{protoMember.Name} != 0)");
+                sb.StartNewBlock();
                 sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Fixed32b);");
                 sb.AppendIndentedLine($"writer.WriteFloat(obj.{protoMember.Name});");
+                sb.EndBlock();
                 break;
 
             case "String":
@@ -384,8 +410,8 @@ class ObjectTree
                 sb.StartNewBlock();
                 sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Len);");
                 sb.AppendIndentedLine($"var bytes = Encoding.UTF8.GetBytes(obj.{protoMember.Name});");
-                sb.AppendIndentedLine($"writer.WriteVarint32(bytes.Length);");
-                sb.AppendIndentedLine($"writer.Stream.Write(bytes);");
+                sb.AppendIndentedLine("writer.WriteVarint32(bytes.Length);");
+                sb.AppendIndentedLine("writer.Stream.Write(bytes);");
                 sb.EndBlock();
                 break;
 
@@ -417,13 +443,13 @@ class ObjectTree
                         case DataFormat.ZigZag:
                             sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Len);");
                             sb.AppendIndentedLine($"var packedSize = Utils.GetVarintPackedCollectionSize(obj.{protoMember.Name});");
-                            sb.AppendIndentedLine($"writer.WriteVarint32(packedSize);");
+                            sb.AppendIndentedLine("writer.WriteVarint32(packedSize);");
                             sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) writer.WriteZigZag32(v);");
                             break;
                         default:
                             sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Len);");
                             sb.AppendIndentedLine($"var packedSize = Utils.GetVarintPackedCollectionSize(obj.{protoMember.Name});");
-                            sb.AppendIndentedLine($"writer.WriteVarint32(packedSize);");
+                            sb.AppendIndentedLine("writer.WriteVarint32(packedSize);");
                             sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) writer.WriteVarint32(v);");
                             break;
                     }
@@ -452,12 +478,12 @@ class ObjectTree
             default:
                 sb.AppendIndentedLine($"if (obj.{protoMember.Name} != null)");
                 sb.StartNewBlock();
-                sb.AppendIndentedLine($"var ms = new MemoryStream();");
+                sb.AppendIndentedLine("var ms = new MemoryStream();");
                 sb.AppendIndentedLine($"global::{protoMember.Namespace}.Serialization.Serializers.Serialize{GetClassNameFromFullName(protoMember.Type)}(ms, obj.{protoMember.Name});");
                 sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Len);");
-                sb.AppendIndentedLine($"writer.WriteVarint32((int)ms.Length);");
-                sb.AppendIndentedLine($"ms.Position = 0;");
-                sb.AppendIndentedLine($"ms.CopyTo(writer.Stream);");
+                sb.AppendIndentedLine("writer.WriteVarint32((int)ms.Length);");
+                sb.AppendIndentedLine("ms.Position = 0;");
+                sb.AppendIndentedLine("ms.CopyTo(writer.Stream);");
                 sb.EndBlock();
                 break;
         }
