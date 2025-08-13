@@ -439,4 +439,48 @@ public sealed class SerializerGeneratorTests(ITestOutputHelper outputHelper)
         Assert.True(obj.Model2.NonPackedInts.SequenceEqual(deserialized.Model2.NonPackedInts));
         Assert.True(obj.Model2.NonPackedFixedSizeInts.SequenceEqual(deserialized.Model2.NonPackedFixedSizeInts));
     }
+
+    [Fact]
+    public void GeneratedDeserializer_DeserializesModelClass_WithBaseFields()
+    {
+        var obj = new Model.ModelClass
+        {
+            A = 1.5,
+            B = 11,
+            Str = "base",
+            D = 7
+        };
+
+        using var streamProtoBuf = new MemoryStream();
+        Serializer.Serialize(streamProtoBuf, obj);
+        var protoBufBytes = streamProtoBuf.ToArray();
+
+        var deserialized = Model.Serialization.Deserializers.DeserializeModelClass(protoBufBytes);
+
+        Assert.Equal(obj.A, deserialized.A);
+        Assert.Equal(obj.B, deserialized.B);
+        Assert.Equal(obj.Str, deserialized.Str);
+        Assert.Equal(obj.D, deserialized.D);
+    }
+
+    [Fact]
+    public void GeneratedDeserializer_DeserializesSecondModelClass_WithBaseFields()
+    {
+        var obj = new Model.SecondModelClass
+        {
+            A = 2.25,
+            B = 3,
+            Str = "abc"
+        };
+
+        using var streamProtoBuf = new MemoryStream();
+        Serializer.Serialize(streamProtoBuf, obj);
+        var protoBufBytes = streamProtoBuf.ToArray();
+
+        var deserialized = Model.Serialization.Deserializers.DeserializeSecondModelClass(protoBufBytes);
+
+        Assert.Equal(obj.A, deserialized.A);
+        Assert.Equal(obj.B, deserialized.B);
+        Assert.Equal(obj.Str, deserialized.Str);
+    }
 }

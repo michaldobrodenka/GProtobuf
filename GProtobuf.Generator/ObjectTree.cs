@@ -17,6 +17,8 @@ class ObjectTree
 
     private Dictionary<string, string> baseClassesForTypes = new();
 
+    private Dictionary<string, TypeDefinition> typesByFullName = new();
+
     public void AddType(string nmspace, string fullName, bool isStruct, List<ProtoIncludeAttribute> protoIncludes, List<ProtoMemberAttribute> protoMembers)
     {
         AddType(nmspace, new TypeDefinition(isStruct, fullName, protoIncludes, protoMembers));
@@ -31,6 +33,7 @@ class ObjectTree
         }
 
         typeDefinitions.Add(typeDefinition);
+        typesByFullName[typeDefinition.FullName] = typeDefinition;
 
         if (typeDefinition.ProtoIncludes != null)
         {
@@ -57,7 +60,7 @@ class ObjectTree
         }
     }
 
-    private static void GenerateCode(
+    private void GenerateCode(
         StringBuilderWithIndent sb,
         KeyValuePair<string, List<TypeDefinition>> namespaceWithObjects,
         string nmspace)
@@ -126,12 +129,10 @@ class ObjectTree
                 WriteProtoIncludesInDeserializers(sb, obj);
             }
 
-            if (obj.ProtoMembers != null)
+            var allProtoMembers = GetAllProtoMembers(obj);
+            foreach (var protoMember in allProtoMembers)
             {
-                foreach (var protoMember in obj.ProtoMembers)
-                {
-                    WriteProtoMember(sb, protoMember);
-                }
+                WriteProtoMember(sb, protoMember);
             }
             sb.AppendIndentedLine($"// default");
             sb.AppendIndentedLine($"reader.SkipField(wireType);");
@@ -192,6 +193,19 @@ class ObjectTree
 
         sb.EndBlock();
         sb.EndBlock();
+    }
+
+    private List<ProtoMemberAttribute> GetAllProtoMembers(TypeDefinition obj)
+    {
+        List<ProtoMemberAttribute> result = new();
+        if (baseClassesForTypes.TryGetValue(obj.FullName, out var baseClass) &&
+            typesByFullName.TryGetValue(baseClass, out var baseType))
+        {
+            result.AddRange(GetAllProtoMembers(baseType));
+        }
+        if (obj.ProtoMembers != null)
+            result.AddRange(obj.ProtoMembers);
+        return result;
     }
 
     private static void WriteProtoIncludesInDeserializers(StringBuilderWithIndent sb, TypeDefinition obj)
