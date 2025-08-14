@@ -1,10 +1,11 @@
 ﻿using System;
+using System.Buffers;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
-using System.IO;
 
 namespace GProtobuf.Core
 {
@@ -97,6 +98,32 @@ namespace GProtobuf.Core
         public void WritePackedFixedSizeIntList(List<int> list)
         {
             Stream.Write(MemoryMarshal.Cast<int, byte>(CollectionsMarshal.AsSpan(list)));
+        }
+
+
+        // Write non null string value, for shorter strings we use stackalloc for performance
+        public void WriteString(string value)
+        {
+            if (value.Length <= 256)
+            {
+                Span<byte> buffer = stackalloc byte[Encoding.UTF8.GetMaxByteCount(value.Length)];
+                int bytesWritten = Encoding.UTF8.GetBytes(value, buffer);
+                Stream.Write(buffer.Slice(0, bytesWritten));
+            }
+            else
+            {
+                var rentedBuffer = ArrayPool<byte>.Shared.Rent(Encoding.UTF8.GetMaxByteCount(value.Length));
+                try
+                {
+                    var buffer = rentedBuffer.AsSpan();
+                    int bytesWritten = Encoding.UTF8.GetBytes(value, buffer);
+                    Stream.Write(buffer.Slice(0, bytesWritten));
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(rentedBuffer);
+                }
+            }
         }
     }
 }
