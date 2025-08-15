@@ -383,9 +383,8 @@ class ObjectTree
                 sb.AppendIndentedLine($"if (obj.{protoMember.Name} != null)");
                 sb.StartNewBlock();
                 sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Len);");
-                sb.AppendIndentedLine($"var bytes = Encoding.UTF8.GetBytes(obj.{protoMember.Name});");
-                sb.AppendIndentedLine($"writer.WriteVarint32(bytes.Length);");
-                sb.AppendIndentedLine($"writer.Stream.Write(bytes);");
+                sb.AppendIndentedLine($"writer.WriteVarint32((uint)Encoding.UTF8.GetByteCount(obj.{protoMember.Name}));");
+                sb.AppendIndentedLine($"writer.WriteString(obj.{protoMember.Name});");
                 sb.EndBlock();
                 break;
 
