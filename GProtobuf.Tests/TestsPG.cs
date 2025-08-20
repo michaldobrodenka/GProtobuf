@@ -333,4 +333,24 @@ public sealed class ProtobufNetToGProtobufTests : BaseSerializationTest
         gprotobufDeserialized.EmptyGuidValue.Should().Be(Guid.Empty, "empty Guid should remain empty");
         gprotobufDeserialized.AnotherGuidValue.Should().Be(Guid.Empty, "empty Guid should remain empty");
     }
+
+    [Fact]
+    public void NullableTypes_CompatibleWithProtobufNet_PG()
+    {
+        var model = new TestModel.NullableTypesModel
+        {
+            NullableIntValue = 42,
+            NullableLongValue = 123456789L,
+            NullableDoubleValue = 3.14159,
+            NullableBoolValue = true
+        };
+
+        var data = SerializeWithProtobufNet(model);
+        var deserialized = DeserializeWithGProtobuf(data, bytes => TestModel.Serialization.Deserializers.DeserializeNullableTypesModel(bytes));
+
+        deserialized.NullableIntValue.Should().Be(42);
+        deserialized.NullableLongValue.Should().Be(123456789L);
+        deserialized.NullableDoubleValue.Should().Be(3.14159);
+        deserialized.NullableBoolValue.Should().Be(true);
+    }
 }

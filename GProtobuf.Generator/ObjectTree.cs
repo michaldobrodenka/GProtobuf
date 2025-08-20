@@ -1154,6 +1154,8 @@ class ObjectTree
     
     private static void WriteProtoMemberSerializerWithObject(StringBuilderWithIndent sb, ProtoMemberAttribute protoMember, string objectName)
     {
+        // Check if it's a nullable type
+        bool isNullable = protoMember.Type.EndsWith("?");
         var typeName = GetClassNameFromFullName(protoMember.Type);
 
         switch (typeName)
@@ -1161,138 +1163,298 @@ class ObjectTree
             case "System.Int32":
             case "Int32":
             case "int":
-                sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != 0)");
-                sb.StartNewBlock();
-                switch (protoMember.DataFormat)
+                if (isNullable)
                 {
-                    case DataFormat.FixedSize:
-                        sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Fixed32b);");
-                        sb.AppendIndentedLine($"writer.WriteFixedSizeInt32({objectName}.{protoMember.Name});");
-                        break;
-                    case DataFormat.ZigZag:
-                        sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.VarInt);");
-                        sb.AppendIndentedLine($"writer.WriteZigZag32({objectName}.{protoMember.Name});");
-                        break;
-                    default:
-                        sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.VarInt);");
-                        sb.AppendIndentedLine($"writer.WriteVarint32({objectName}.{protoMember.Name});");
-                        break;
+                    // Nullable int? - write if not null (even if value is 0)
+                    sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name}.HasValue)");
+                    sb.StartNewBlock();
+                    switch (protoMember.DataFormat)
+                    {
+                        case DataFormat.FixedSize:
+                            sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Fixed32b);");
+                            sb.AppendIndentedLine($"writer.WriteFixedSizeInt32({objectName}.{protoMember.Name}.Value);");
+                            break;
+                        case DataFormat.ZigZag:
+                            sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                            sb.AppendIndentedLine($"writer.WriteZigZag32({objectName}.{protoMember.Name}.Value);");
+                            break;
+                        default:
+                            sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                            sb.AppendIndentedLine($"writer.WriteVarint32({objectName}.{protoMember.Name}.Value);");
+                            break;
+                    }
+                    sb.EndBlock();
                 }
-                sb.EndBlock();
+                else
+                {
+                    // Non-nullable int - write if not 0
+                    sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != 0)");
+                    sb.StartNewBlock();
+                    switch (protoMember.DataFormat)
+                    {
+                        case DataFormat.FixedSize:
+                            sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Fixed32b);");
+                            sb.AppendIndentedLine($"writer.WriteFixedSizeInt32({objectName}.{protoMember.Name});");
+                            break;
+                        case DataFormat.ZigZag:
+                            sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                            sb.AppendIndentedLine($"writer.WriteZigZag32({objectName}.{protoMember.Name});");
+                            break;
+                        default:
+                            sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                            sb.AppendIndentedLine($"writer.WriteVarint32({objectName}.{protoMember.Name});");
+                            break;
+                    }
+                    sb.EndBlock();
+                }
                 break;
 
             case "bool":
             case "Boolean":
             case "System.Boolean":
-                sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.VarInt);");
-                sb.AppendIndentedLine($"writer.WriteBool({objectName}.{protoMember.Name});");
+                if (isNullable)
+                {
+                    sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name}.HasValue)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    sb.AppendIndentedLine($"writer.WriteBool({objectName}.{protoMember.Name}.Value);");
+                    sb.EndBlock();
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    sb.AppendIndentedLine($"writer.WriteBool({objectName}.{protoMember.Name});");
+                }
                 break;
 
             case "byte":
             case "Byte":
             case "System.Byte":
-                sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != 0)");
-                sb.StartNewBlock();
-                sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.VarInt);");
-                sb.AppendIndentedLine($"writer.WriteByte({objectName}.{protoMember.Name});");
-                sb.EndBlock();
+                if (isNullable)
+                {
+                    sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name}.HasValue)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    sb.AppendIndentedLine($"writer.WriteByte({objectName}.{protoMember.Name}.Value);");
+                    sb.EndBlock();
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != 0)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    sb.AppendIndentedLine($"writer.WriteByte({objectName}.{protoMember.Name});");
+                    sb.EndBlock();
+                }
                 break;
 
             case "sbyte":
             case "SByte":
             case "System.SByte":
-                sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != 0)");
-                sb.StartNewBlock();
-                sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.VarInt);");
-                switch (protoMember.DataFormat)
+                if (isNullable)
                 {
-                    case DataFormat.ZigZag:
-                        sb.AppendIndentedLine($"writer.WriteSByte({objectName}.{protoMember.Name}, true);");
-                        break;
-                    default:
-                        sb.AppendIndentedLine($"writer.WriteSByte({objectName}.{protoMember.Name}, false);");
-                        break;
+                    sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name}.HasValue)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    switch (protoMember.DataFormat)
+                    {
+                        case DataFormat.ZigZag:
+                            sb.AppendIndentedLine($"writer.WriteSByte({objectName}.{protoMember.Name}.Value, true);");
+                            break;
+                        default:
+                            sb.AppendIndentedLine($"writer.WriteSByte({objectName}.{protoMember.Name}.Value, false);");
+                            break;
+                    }
+                    sb.EndBlock();
                 }
-                sb.EndBlock();
+                else
+                {
+                    sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != 0)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    switch (protoMember.DataFormat)
+                    {
+                        case DataFormat.ZigZag:
+                            sb.AppendIndentedLine($"writer.WriteSByte({objectName}.{protoMember.Name}, true);");
+                            break;
+                        default:
+                            sb.AppendIndentedLine($"writer.WriteSByte({objectName}.{protoMember.Name}, false);");
+                            break;
+                    }
+                    sb.EndBlock();
+                }
                 break;
 
             case "short":
             case "Int16":
             case "System.Int16":
-                sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != 0)");
-                sb.StartNewBlock();
-                sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.VarInt);");
-                switch (protoMember.DataFormat)
+                if (isNullable)
                 {
-                    case DataFormat.ZigZag:
-                        sb.AppendIndentedLine($"writer.WriteInt16({objectName}.{protoMember.Name}, true);");
-                        break;
-                    default:
-                        sb.AppendIndentedLine($"writer.WriteInt16({objectName}.{protoMember.Name}, false);");
-                        break;
+                    sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name}.HasValue)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    switch (protoMember.DataFormat)
+                    {
+                        case DataFormat.ZigZag:
+                            sb.AppendIndentedLine($"writer.WriteInt16({objectName}.{protoMember.Name}.Value, true);");
+                            break;
+                        default:
+                            sb.AppendIndentedLine($"writer.WriteInt16({objectName}.{protoMember.Name}.Value, false);");
+                            break;
+                    }
+                    sb.EndBlock();
                 }
-                sb.EndBlock();
+                else
+                {
+                    sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != 0)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    switch (protoMember.DataFormat)
+                    {
+                        case DataFormat.ZigZag:
+                            sb.AppendIndentedLine($"writer.WriteInt16({objectName}.{protoMember.Name}, true);");
+                            break;
+                        default:
+                            sb.AppendIndentedLine($"writer.WriteInt16({objectName}.{protoMember.Name}, false);");
+                            break;
+                    }
+                    sb.EndBlock();
+                }
                 break;
 
             case "ushort":
             case "UInt16":
             case "System.UInt16":
-                sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != 0)");
-                sb.StartNewBlock();
-                sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.VarInt);");
-                sb.AppendIndentedLine($"writer.WriteUInt16({objectName}.{protoMember.Name});");
-                sb.EndBlock();
+                if (isNullable)
+                {
+                    sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name}.HasValue)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    sb.AppendIndentedLine($"writer.WriteUInt16({objectName}.{protoMember.Name}.Value);");
+                    sb.EndBlock();
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != 0)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    sb.AppendIndentedLine($"writer.WriteUInt16({objectName}.{protoMember.Name});");
+                    sb.EndBlock();
+                }
                 break;
 
             case "uint":
             case "UInt32":
             case "System.UInt32":
-                sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != 0)");
-                sb.StartNewBlock();
-                sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.VarInt);");
-                sb.AppendIndentedLine($"writer.WriteUInt32({objectName}.{protoMember.Name});");
-                sb.EndBlock();
+                if (isNullable)
+                {
+                    sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name}.HasValue)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    sb.AppendIndentedLine($"writer.WriteUInt32({objectName}.{protoMember.Name}.Value);");
+                    sb.EndBlock();
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != 0)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    sb.AppendIndentedLine($"writer.WriteUInt32({objectName}.{protoMember.Name});");
+                    sb.EndBlock();
+                }
                 break;
 
             case "long":
             case "Int64":
             case "System.Int64":
-                sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != 0)");
-                sb.StartNewBlock();
-                sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.VarInt);");
-                switch (protoMember.DataFormat)
+                if (isNullable)
                 {
-                    case DataFormat.ZigZag:
-                        sb.AppendIndentedLine($"writer.WriteInt64({objectName}.{protoMember.Name}, true);");
-                        break;
-                    default:
-                        sb.AppendIndentedLine($"writer.WriteInt64({objectName}.{protoMember.Name}, false);");
-                        break;
+                    sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name}.HasValue)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    switch (protoMember.DataFormat)
+                    {
+                        case DataFormat.ZigZag:
+                            sb.AppendIndentedLine($"writer.WriteInt64({objectName}.{protoMember.Name}.Value, true);");
+                            break;
+                        default:
+                            sb.AppendIndentedLine($"writer.WriteInt64({objectName}.{protoMember.Name}.Value, false);");
+                            break;
+                    }
+                    sb.EndBlock();
                 }
-                sb.EndBlock();
+                else
+                {
+                    sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != 0)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    switch (protoMember.DataFormat)
+                    {
+                        case DataFormat.ZigZag:
+                            sb.AppendIndentedLine($"writer.WriteInt64({objectName}.{protoMember.Name}, true);");
+                            break;
+                        default:
+                            sb.AppendIndentedLine($"writer.WriteInt64({objectName}.{protoMember.Name}, false);");
+                            break;
+                    }
+                    sb.EndBlock();
+                }
                 break;
 
             case "ulong":
             case "UInt64":
             case "System.UInt64":
-                sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != 0)");
-                sb.StartNewBlock();
-                sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.VarInt);");
-                sb.AppendIndentedLine($"writer.WriteUInt64({objectName}.{protoMember.Name});");
-                sb.EndBlock();
+                if (isNullable)
+                {
+                    sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name}.HasValue)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    sb.AppendIndentedLine($"writer.WriteUInt64({objectName}.{protoMember.Name}.Value);");
+                    sb.EndBlock();
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != 0)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    sb.AppendIndentedLine($"writer.WriteUInt64({objectName}.{protoMember.Name});");
+                    sb.EndBlock();
+                }
                 break;
 
             case "Double":
             case "double":
-                sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Fixed64b);");
-                sb.AppendIndentedLine($"writer.WriteDouble({objectName}.{protoMember.Name});");
+                if (isNullable)
+                {
+                    sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name}.HasValue)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Fixed64b);");
+                    sb.AppendIndentedLine($"writer.WriteDouble({objectName}.{protoMember.Name}.Value);");
+                    sb.EndBlock();
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Fixed64b);");
+                    sb.AppendIndentedLine($"writer.WriteDouble({objectName}.{protoMember.Name});");
+                }
                 break;
 
             case "Single":
             case "single":
             case "float":
-                sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Fixed32b);");
-                sb.AppendIndentedLine($"writer.WriteFloat({objectName}.{protoMember.Name});");
+                if (isNullable)
+                {
+                    sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name}.HasValue)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Fixed32b);");
+                    sb.AppendIndentedLine($"writer.WriteFloat({objectName}.{protoMember.Name}.Value);");
+                    sb.EndBlock();
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Fixed32b);");
+                    sb.AppendIndentedLine($"writer.WriteFloat({objectName}.{protoMember.Name});");
+                }
                 break;
 
             case "String":
@@ -1402,6 +1564,8 @@ class ObjectTree
 
     private static void WriteProtoMemberSizeCalculator(StringBuilderWithIndent sb, ProtoMemberAttribute protoMember)
     {
+        // Check if it's a nullable type
+        bool isNullable = protoMember.Type.EndsWith("?");
         var typeName = GetClassNameFromFullName(protoMember.Type);
 
         switch (typeName)
@@ -1409,136 +1573,292 @@ class ObjectTree
             case "System.Int32":
             case "Int32":
             case "int":
-                sb.AppendIndentedLine($"if (obj.{protoMember.Name} != 0)");
-                sb.StartNewBlock();
-                sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
-                switch (protoMember.DataFormat)
+                if (isNullable)
                 {
-                    case DataFormat.FixedSize:
-                        sb.AppendIndentedLine($"calculator.WriteFixedSizeInt32(obj.{protoMember.Name});");
-                        break;
-                    case DataFormat.ZigZag:
-                        sb.AppendIndentedLine($"calculator.WriteZigZag32(obj.{protoMember.Name});");
-                        break;
-                    default:
-                        sb.AppendIndentedLine($"calculator.WriteVarint32(obj.{protoMember.Name});");
-                        break;
+                    sb.AppendIndentedLine($"if (obj.{protoMember.Name}.HasValue)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    switch (protoMember.DataFormat)
+                    {
+                        case DataFormat.FixedSize:
+                            sb.AppendIndentedLine($"calculator.WriteFixedSizeInt32(obj.{protoMember.Name}.Value);");
+                            break;
+                        case DataFormat.ZigZag:
+                            sb.AppendIndentedLine($"calculator.WriteZigZag32(obj.{protoMember.Name}.Value);");
+                            break;
+                        default:
+                            sb.AppendIndentedLine($"calculator.WriteVarint32(obj.{protoMember.Name}.Value);");
+                            break;
+                    }
+                    sb.EndBlock();
                 }
-                sb.EndBlock();
+                else
+                {
+                    sb.AppendIndentedLine($"if (obj.{protoMember.Name} != 0)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    switch (protoMember.DataFormat)
+                    {
+                        case DataFormat.FixedSize:
+                            sb.AppendIndentedLine($"calculator.WriteFixedSizeInt32(obj.{protoMember.Name});");
+                            break;
+                        case DataFormat.ZigZag:
+                            sb.AppendIndentedLine($"calculator.WriteZigZag32(obj.{protoMember.Name});");
+                            break;
+                        default:
+                            sb.AppendIndentedLine($"calculator.WriteVarint32(obj.{protoMember.Name});");
+                            break;
+                    }
+                    sb.EndBlock();
+                }
                 break;
 
             case "bool":
             case "Boolean":
             case "System.Boolean":
-                sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
-                sb.AppendIndentedLine($"calculator.WriteBool(obj.{protoMember.Name});");
+                if (isNullable)
+                {
+                    sb.AppendIndentedLine($"if (obj.{protoMember.Name}.HasValue)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    sb.AppendIndentedLine($"calculator.WriteBool(obj.{protoMember.Name}.Value);");
+                    sb.EndBlock();
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    sb.AppendIndentedLine($"calculator.WriteBool(obj.{protoMember.Name});");
+                }
                 break;
 
             case "byte":
             case "Byte":
             case "System.Byte":
-                sb.AppendIndentedLine($"if (obj.{protoMember.Name} != 0)");
-                sb.StartNewBlock();
-                sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
-                sb.AppendIndentedLine($"calculator.WriteByte(obj.{protoMember.Name});");
-                sb.EndBlock();
+                if (isNullable)
+                {
+                    sb.AppendIndentedLine($"if (obj.{protoMember.Name}.HasValue)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    sb.AppendIndentedLine($"calculator.WriteByte(obj.{protoMember.Name}.Value);");
+                    sb.EndBlock();
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"if (obj.{protoMember.Name} != 0)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    sb.AppendIndentedLine($"calculator.WriteByte(obj.{protoMember.Name});");
+                    sb.EndBlock();
+                }
                 break;
 
             case "sbyte":
             case "SByte":
             case "System.SByte":
-                sb.AppendIndentedLine($"if (obj.{protoMember.Name} != 0)");
-                sb.StartNewBlock();
-                sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
-                switch (protoMember.DataFormat)
+                if (isNullable)
                 {
-                    case DataFormat.ZigZag:
-                        sb.AppendIndentedLine($"calculator.WriteSByte(obj.{protoMember.Name}, true);");
-                        break;
-                    default:
-                        sb.AppendIndentedLine($"calculator.WriteSByte(obj.{protoMember.Name}, false);");
-                        break;
+                    sb.AppendIndentedLine($"if (obj.{protoMember.Name}.HasValue)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    switch (protoMember.DataFormat)
+                    {
+                        case DataFormat.ZigZag:
+                            sb.AppendIndentedLine($"calculator.WriteSByte(obj.{protoMember.Name}.Value, true);");
+                            break;
+                        default:
+                            sb.AppendIndentedLine($"calculator.WriteSByte(obj.{protoMember.Name}.Value, false);");
+                            break;
+                    }
+                    sb.EndBlock();
                 }
-                sb.EndBlock();
+                else
+                {
+                    sb.AppendIndentedLine($"if (obj.{protoMember.Name} != 0)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    switch (protoMember.DataFormat)
+                    {
+                        case DataFormat.ZigZag:
+                            sb.AppendIndentedLine($"calculator.WriteSByte(obj.{protoMember.Name}, true);");
+                            break;
+                        default:
+                            sb.AppendIndentedLine($"calculator.WriteSByte(obj.{protoMember.Name}, false);");
+                            break;
+                    }
+                    sb.EndBlock();
+                }
                 break;
 
             case "short":
             case "Int16":
             case "System.Int16":
-                sb.AppendIndentedLine($"if (obj.{protoMember.Name} != 0)");
-                sb.StartNewBlock();
-                sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
-                switch (protoMember.DataFormat)
+                if (isNullable)
                 {
-                    case DataFormat.ZigZag:
-                        sb.AppendIndentedLine($"calculator.WriteInt16(obj.{protoMember.Name}, true);");
-                        break;
-                    default:
-                        sb.AppendIndentedLine($"calculator.WriteInt16(obj.{protoMember.Name}, false);");
-                        break;
+                    sb.AppendIndentedLine($"if (obj.{protoMember.Name}.HasValue)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    switch (protoMember.DataFormat)
+                    {
+                        case DataFormat.ZigZag:
+                            sb.AppendIndentedLine($"calculator.WriteInt16(obj.{protoMember.Name}.Value, true);");
+                            break;
+                        default:
+                            sb.AppendIndentedLine($"calculator.WriteInt16(obj.{protoMember.Name}.Value, false);");
+                            break;
+                    }
+                    sb.EndBlock();
                 }
-                sb.EndBlock();
+                else
+                {
+                    sb.AppendIndentedLine($"if (obj.{protoMember.Name} != 0)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    switch (protoMember.DataFormat)
+                    {
+                        case DataFormat.ZigZag:
+                            sb.AppendIndentedLine($"calculator.WriteInt16(obj.{protoMember.Name}, true);");
+                            break;
+                        default:
+                            sb.AppendIndentedLine($"calculator.WriteInt16(obj.{protoMember.Name}, false);");
+                            break;
+                    }
+                    sb.EndBlock();
+                }
                 break;
 
             case "ushort":
             case "UInt16":
             case "System.UInt16":
-                sb.AppendIndentedLine($"if (obj.{protoMember.Name} != 0)");
-                sb.StartNewBlock();
-                sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
-                sb.AppendIndentedLine($"calculator.WriteUInt16(obj.{protoMember.Name});");
-                sb.EndBlock();
+                if (isNullable)
+                {
+                    sb.AppendIndentedLine($"if (obj.{protoMember.Name}.HasValue)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    sb.AppendIndentedLine($"calculator.WriteUInt16(obj.{protoMember.Name}.Value);");
+                    sb.EndBlock();
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"if (obj.{protoMember.Name} != 0)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    sb.AppendIndentedLine($"calculator.WriteUInt16(obj.{protoMember.Name});");
+                    sb.EndBlock();
+                }
                 break;
 
             case "uint":
             case "UInt32":
             case "System.UInt32":
-                sb.AppendIndentedLine($"if (obj.{protoMember.Name} != 0)");
-                sb.StartNewBlock();
-                sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
-                sb.AppendIndentedLine($"calculator.WriteUInt32(obj.{protoMember.Name});");
-                sb.EndBlock();
+                if (isNullable)
+                {
+                    sb.AppendIndentedLine($"if (obj.{protoMember.Name}.HasValue)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    sb.AppendIndentedLine($"calculator.WriteUInt32(obj.{protoMember.Name}.Value);");
+                    sb.EndBlock();
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"if (obj.{protoMember.Name} != 0)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    sb.AppendIndentedLine($"calculator.WriteUInt32(obj.{protoMember.Name});");
+                    sb.EndBlock();
+                }
                 break;
 
             case "long":
             case "Int64":
             case "System.Int64":
-                sb.AppendIndentedLine($"if (obj.{protoMember.Name} != 0)");
-                sb.StartNewBlock();
-                sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
-                switch (protoMember.DataFormat)
+                if (isNullable)
                 {
-                    case DataFormat.ZigZag:
-                        sb.AppendIndentedLine($"calculator.WriteInt64(obj.{protoMember.Name}, true);");
-                        break;
-                    default:
-                        sb.AppendIndentedLine($"calculator.WriteInt64(obj.{protoMember.Name}, false);");
-                        break;
+                    sb.AppendIndentedLine($"if (obj.{protoMember.Name}.HasValue)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    switch (protoMember.DataFormat)
+                    {
+                        case DataFormat.ZigZag:
+                            sb.AppendIndentedLine($"calculator.WriteInt64(obj.{protoMember.Name}.Value, true);");
+                            break;
+                        default:
+                            sb.AppendIndentedLine($"calculator.WriteInt64(obj.{protoMember.Name}.Value, false);");
+                            break;
+                    }
+                    sb.EndBlock();
                 }
-                sb.EndBlock();
+                else
+                {
+                    sb.AppendIndentedLine($"if (obj.{protoMember.Name} != 0)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    switch (protoMember.DataFormat)
+                    {
+                        case DataFormat.ZigZag:
+                            sb.AppendIndentedLine($"calculator.WriteInt64(obj.{protoMember.Name}, true);");
+                            break;
+                        default:
+                            sb.AppendIndentedLine($"calculator.WriteInt64(obj.{protoMember.Name}, false);");
+                            break;
+                    }
+                    sb.EndBlock();
+                }
                 break;
 
             case "ulong":
             case "UInt64":
             case "System.UInt64":
-                sb.AppendIndentedLine($"if (obj.{protoMember.Name} != 0)");
-                sb.StartNewBlock();
-                sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
-                sb.AppendIndentedLine($"calculator.WriteUInt64(obj.{protoMember.Name});");
-                sb.EndBlock();
+                if (isNullable)
+                {
+                    sb.AppendIndentedLine($"if (obj.{protoMember.Name}.HasValue)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    sb.AppendIndentedLine($"calculator.WriteUInt64(obj.{protoMember.Name}.Value);");
+                    sb.EndBlock();
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"if (obj.{protoMember.Name} != 0)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    sb.AppendIndentedLine($"calculator.WriteUInt64(obj.{protoMember.Name});");
+                    sb.EndBlock();
+                }
                 break;
 
             case "Double":
             case "double":
-                sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Fixed64b);");
-                sb.AppendIndentedLine($"calculator.WriteDouble(obj.{protoMember.Name});");
+                if (isNullable)
+                {
+                    sb.AppendIndentedLine($"if (obj.{protoMember.Name}.HasValue)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Fixed64b);");
+                    sb.AppendIndentedLine($"calculator.WriteDouble(obj.{protoMember.Name}.Value);");
+                    sb.EndBlock();
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Fixed64b);");
+                    sb.AppendIndentedLine($"calculator.WriteDouble(obj.{protoMember.Name});");
+                }
                 break;
 
             case "Single":
             case "single":
             case "float":
-                sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Fixed32b);");
-                sb.AppendIndentedLine($"calculator.WriteFloat(obj.{protoMember.Name});");
+                if (isNullable)
+                {
+                    sb.AppendIndentedLine($"if (obj.{protoMember.Name}.HasValue)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Fixed32b);");
+                    sb.AppendIndentedLine($"calculator.WriteFloat(obj.{protoMember.Name}.Value);");
+                    sb.EndBlock();
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Fixed32b);");
+                    sb.AppendIndentedLine($"calculator.WriteFloat(obj.{protoMember.Name});");
+                }
                 break;
 
             case "String":

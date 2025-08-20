@@ -383,4 +383,137 @@ public sealed class GProtobufToGProtobufTests : BaseSerializationTest
 
         gprotobufDeserialized.Should().BeEquivalentTo(protobufNetDeserialized);
     }
+
+    [Fact]
+    public void NullableTypes_AllNull_GG()
+    {
+        var model = new TestModel.NullableTypesModel();
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeNullableTypesModel);
+        var deserialized = DeserializeWithGProtobuf(data, bytes => TestModel.Serialization.Deserializers.DeserializeNullableTypesModel(bytes));
+
+        data.Should().NotBeNull();
+        data.Length.Should().Be(0, "no fields should be serialized when all nullable values are null");
+        
+        deserialized.Should().BeEquivalentTo(model);
+        deserialized.NullableIntValue.Should().BeNull();
+        deserialized.NullableLongValue.Should().BeNull();
+        deserialized.NullableDoubleValue.Should().BeNull();
+        deserialized.NullableBoolValue.Should().BeNull();
+    }
+
+    [Fact]
+    public void NullableTypes_WithZeroValues_GG()
+    {
+        var model = new TestModel.NullableTypesModel
+        {
+            NullableIntValue = 0,
+            NullableLongValue = 0L,
+            NullableDoubleValue = 0.0,
+            NullableBoolValue = false,
+            NullableByteValue = 0,
+            NullableFloatValue = 0.0f
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeNullableTypesModel);
+        var deserialized = DeserializeWithGProtobuf(data, bytes => TestModel.Serialization.Deserializers.DeserializeNullableTypesModel(bytes));
+
+        data.Should().NotBeNull();
+        data.Length.Should().BeGreaterThan(0, "nullable types with zero values should still be serialized");
+        
+        deserialized.Should().BeEquivalentTo(model);
+        deserialized.NullableIntValue.Should().Be(0);
+        deserialized.NullableLongValue.Should().Be(0L);
+        deserialized.NullableDoubleValue.Should().Be(0.0);
+        deserialized.NullableBoolValue.Should().Be(false);
+        deserialized.NullableByteValue.Should().Be(0);
+        deserialized.NullableFloatValue.Should().Be(0.0f);
+    }
+
+    [Fact]
+    public void NullableTypes_WithNonZeroValues_GG()
+    {
+        var model = new TestModel.NullableTypesModel
+        {
+            NullableIntValue = 42,
+            NullableLongValue = 123456789L,
+            NullableDoubleValue = 3.14159,
+            NullableBoolValue = true,
+            NullableByteValue = 255,
+            NullableFloatValue = 2.71828f,
+            NullableShortValue = -1000,
+            NullableUShortValue = 65535,
+            NullableUIntValue = 4294967295,
+            NullableULongValue = 18446744073709551615,
+            NullableSByteValue = -128
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeNullableTypesModel);
+        var deserialized = DeserializeWithGProtobuf(data, bytes => TestModel.Serialization.Deserializers.DeserializeNullableTypesModel(bytes));
+
+        data.Should().NotBeNull();
+        data.Length.Should().BeGreaterThan(0);
+        
+        deserialized.Should().BeEquivalentTo(model);
+    }
+
+    [Fact]
+    public void NullableTypes_MixedNullAndValues_GG()
+    {
+        var model = new TestModel.NullableTypesModel
+        {
+            NullableIntValue = 100,
+            NullableLongValue = null,
+            NullableDoubleValue = 99.99,
+            NullableBoolValue = null,
+            NullableByteValue = 50,
+            NullableFloatValue = null
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeNullableTypesModel);
+        var deserialized = DeserializeWithGProtobuf(data, bytes => TestModel.Serialization.Deserializers.DeserializeNullableTypesModel(bytes));
+
+        data.Should().NotBeNull();
+        
+        deserialized.NullableIntValue.Should().Be(100);
+        deserialized.NullableLongValue.Should().BeNull();
+        deserialized.NullableDoubleValue.Should().Be(99.99);
+        deserialized.NullableBoolValue.Should().BeNull();
+        deserialized.NullableByteValue.Should().Be(50);
+        deserialized.NullableFloatValue.Should().BeNull();
+    }
+
+    [Fact]
+    public void NullableTypes_ZigZagEncoding_GG()
+    {
+        var model = new TestModel.NullableTypesModel
+        {
+            NullableZigZagIntValue = -42,
+            NullableZigZagLongValue = -123456789L
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeNullableTypesModel);
+        var deserialized = DeserializeWithGProtobuf(data, bytes => TestModel.Serialization.Deserializers.DeserializeNullableTypesModel(bytes));
+
+        data.Should().NotBeNull();
+        
+        deserialized.NullableZigZagIntValue.Should().Be(-42);
+        deserialized.NullableZigZagLongValue.Should().Be(-123456789L);
+    }
+
+    [Fact]
+    public void NullableTypes_FixedSizeEncoding_GG()
+    {
+        var model = new TestModel.NullableTypesModel
+        {
+            NullableFixedSizeIntValue = 987654321
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeNullableTypesModel);
+        var deserialized = DeserializeWithGProtobuf(data, bytes => TestModel.Serialization.Deserializers.DeserializeNullableTypesModel(bytes));
+
+        data.Should().NotBeNull();
+        
+        deserialized.NullableFixedSizeIntValue.Should().Be(987654321);
+    }
 }

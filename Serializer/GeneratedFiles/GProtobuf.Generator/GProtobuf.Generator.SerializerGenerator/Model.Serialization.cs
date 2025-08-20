@@ -458,7 +458,23 @@ namespace Model.Serialization
                 {
                     var length = reader.ReadVarInt32();
                     var reader1 = new SpanReader(reader.GetSlice(length));
-                    result.GuidValue = global::GProtobuf.Core.SpanReaders.ReadGuid(ref reader1);
+                    // Read BCL Guid format (2 fixed64 fields)
+                    ulong low = 0, high = 0;
+                    while (!reader1.IsEnd)
+                    {
+                        var fieldInfo = reader1.ReadWireTypeAndFieldId();
+                        switch (fieldInfo.fieldId)
+                        {
+                            case 1: low = reader1.ReadFixed64(); break;
+                            case 2: high = reader1.ReadFixed64(); break;
+                            default: reader1.SkipField(fieldInfo.wireType); break;
+                        }
+                    }
+                    // Convert back to Guid
+                    var guidBytes = new byte[16];
+                    System.BitConverter.GetBytes(low).CopyTo(guidBytes, 0);
+                    System.BitConverter.GetBytes(high).CopyTo(guidBytes, 8);
+                    result.GuidValue = new Guid(guidBytes);
                     continue;
                 }
 
@@ -807,11 +823,18 @@ namespace Model.Serialization
         {
             if (instance.GuidValue != Guid.Empty)
             {
-                var calculator1 = new global::GProtobuf.Core.WriteSizeCalculator();
-                SizeCalculators.CalculateGuidSize(ref calculator1, instance.GuidValue);
                 writer.WriteTag(1, WireType.Len);
-                writer.WriteVarUInt32((uint)calculator1.Length);
-                StreamWriters.WriteGuid(writer, instance.GuidValue);
+                writer.WriteVarUInt32(18u); // BCL Guid format: 2 fixed64 fields = 2*(1+8) = 18 bytes
+                // Convert Guid to BCL format (2 fixed64 fields)
+                var guidBytes = instance.GuidValue.ToByteArray();
+                var low = System.BitConverter.ToUInt64(guidBytes, 0);
+                var high = System.BitConverter.ToUInt64(guidBytes, 8);
+                // Field 1: low (fixed64)
+                writer.WriteTag(1, WireType.Fixed64b);
+                writer.WriteFixed64(low);
+                // Field 2: high (fixed64)
+                writer.WriteTag(2, WireType.Fixed64b);
+                writer.WriteFixed64(high);
             }
 
         }
@@ -1162,10 +1185,13 @@ namespace Model.Serialization
             if (obj.GuidValue != Guid.Empty)
             {
                 calculator.WriteTag(1, WireType.Len);
-                var lengthBefore1 = calculator.Length;
-                SizeCalculators.CalculateGuidSize(ref calculator, obj.GuidValue);
-                var contentLength1 = calculator.Length - lengthBefore1;
-                calculator.WriteVarUInt32((uint)contentLength1);
+                calculator.WriteVarUInt32(18u); // BCL Guid: 2*(tag+fixed64) = 2*(1+8) = 18 bytes
+                // Field 1: low (tag + fixed64)
+                calculator.WriteTag(1, WireType.Fixed64b);
+                calculator.WriteFixed64(0ul); // placeholder
+                // Field 2: high (tag + fixed64)
+                calculator.WriteTag(2, WireType.Fixed64b);
+                calculator.WriteFixed64(0ul); // placeholder
             }
 
         }
@@ -1403,10 +1429,13 @@ namespace Model.Serialization
             if (obj.GuidValue != Guid.Empty)
             {
                 calculator.WriteTag(1, WireType.Len);
-                var lengthBefore1 = calculator.Length;
-                SizeCalculators.CalculateGuidSize(ref calculator, obj.GuidValue);
-                var contentLength1 = calculator.Length - lengthBefore1;
-                calculator.WriteVarUInt32((uint)contentLength1);
+                calculator.WriteVarUInt32(18u); // BCL Guid: 2*(tag+fixed64) = 2*(1+8) = 18 bytes
+                // Field 1: low (tag + fixed64)
+                calculator.WriteTag(1, WireType.Fixed64b);
+                calculator.WriteFixed64(0ul); // placeholder
+                // Field 2: high (tag + fixed64)
+                calculator.WriteTag(2, WireType.Fixed64b);
+                calculator.WriteFixed64(0ul); // placeholder
             }
 
         }
