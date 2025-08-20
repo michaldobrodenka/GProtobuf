@@ -26,6 +26,12 @@ namespace GProtobuf.Core
 
         public void WriteVarint32(uint value)
         {
+            WriteVarUInt32(value); // Delegate to optimized version
+        }
+
+        // Optimized version for unsigned/positive values only (lengths, byte, ushort, uint)
+        public void WriteVarUInt32(uint value)
+        {
             Span<byte> buffer = stackalloc byte[5];
             int position = 0;
             while (value > 0x7F)
@@ -59,14 +65,15 @@ namespace GProtobuf.Core
 
         public void WriteVarint64(long value)
         {
+            ulong uValue = (ulong)value; // Convert to unsigned for proper bit operations
             Span<byte> buffer = stackalloc byte[10];
             int position = 0;
-            while (value > 0x7F)
+            while (uValue > 0x7F)
             {
-                buffer[position++] = (byte)((value & 0x7F) | 0x80);
-                value >>= 7;
+                buffer[position++] = (byte)((uValue & 0x7F) | 0x80);
+                uValue >>= 7;
             }
-            buffer[position++] = (byte)value;
+            buffer[position++] = (byte)uValue;
             Stream.Write(buffer.Slice(0, position));
         }
 
@@ -78,6 +85,68 @@ namespace GProtobuf.Core
         public void WriteZigZag64(long value)
         {
             WriteVarint64((value << 1) ^ (value >> 63));
+        }
+
+        public void WriteBool(bool value)
+        {
+            WriteVarint32(value ? 1u : 0u);
+        }
+
+        public void WriteByte(byte value)
+        {
+            WriteVarUInt32(value); // Use optimized version for unsigned
+        }
+
+        public void WriteSByte(sbyte value, bool zigZag = false)
+        {
+            if (zigZag)
+                WriteZigZag32(value);
+            else
+                WriteVarint32(value); // Keep as signed to handle negatives correctly
+        }
+
+        public void WriteInt16(short value, bool zigZag = false)
+        {
+            if (zigZag)
+                WriteZigZag32(value);
+            else
+                WriteVarint32(value); // Keep as signed to handle negatives correctly
+        }
+
+        public void WriteUInt16(ushort value)
+        {
+            WriteVarUInt32(value); // Use optimized version for unsigned
+        }
+
+        public void WriteUInt32(uint value)
+        {
+            WriteVarUInt32(value); // Use optimized version for unsigned
+        }
+
+        public void WriteInt64(long value, bool zigZag = false)
+        {
+            if (zigZag)
+                WriteZigZag64(value);
+            else
+                WriteVarint64(value);
+        }
+
+        public void WriteUInt64(ulong value)
+        {
+            WriteVarintUInt64(value);
+        }
+
+        public void WriteVarintUInt64(ulong value)
+        {
+            Span<byte> buffer = stackalloc byte[10];
+            int position = 0;
+            while (value > 0x7F)
+            {
+                buffer[position++] = (byte)((value & 0x7F) | 0x80);
+                value >>= 7;
+            }
+            buffer[position++] = (byte)value;
+            Stream.Write(buffer.Slice(0, position));
         }
 
         public void WriteDouble(double value)

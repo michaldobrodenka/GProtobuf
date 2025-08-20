@@ -4,6 +4,16 @@ namespace Model;
 
 
 [ProtoContract]
+public class SimpleTypes
+{
+    //[ProtoMember(1)]
+    //public sbyte SByteValue { get; set; }
+    [ProtoMember(1, DataFormat = DataFormat.ZigZag)]
+    public long LongValue { get; set; }
+
+}
+
+[ProtoContract]
 [ProtoInclude(5, typeof(B))]
 public class A
 {
@@ -121,3 +131,4 @@ public class ClassWithCollections
 
     // todo: zigzag
 }
+

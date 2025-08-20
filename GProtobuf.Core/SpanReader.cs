@@ -63,6 +63,108 @@ namespace GProtobuf.Core
 
             return Encoding.UTF8.GetString(reader.GetSlice(length)); // Dekódovanie UTF-8 stringu
         }
+
+        public static bool ReadBool(this ref SpanReader reader, WireType wireType)
+        {
+            if (wireType != WireType.VarInt)
+                throw new InvalidOperationException($"Unexpected wire type {wireType} for bool.");
+
+            return reader.ReadVarInt32() != 0;
+        }
+
+        public static byte ReadByte(this ref SpanReader reader, WireType wireType)
+        {
+            if (wireType != WireType.VarInt)
+                throw new InvalidOperationException($"Unexpected wire type {wireType} for byte.");
+
+            uint value = reader.ReadVarUInt32(); // Use optimized version for unsigned
+            if (value > byte.MaxValue)
+                throw new OverflowException($"Value {value} is out of range for byte.");
+            
+            return (byte)value;
+        }
+
+        public static sbyte ReadSByte(this ref SpanReader reader, WireType wireType, bool zigZag = false)
+        {
+            if (wireType != WireType.VarInt)
+                throw new InvalidOperationException($"Unexpected wire type {wireType} for sbyte.");
+
+            int value = zigZag ? reader.ReadZigZagVarInt32() : reader.ReadVarInt32();
+            return (sbyte)value; // Direct cast handles overflow correctly
+        }
+
+        public static short ReadInt16(this ref SpanReader reader, WireType wireType, bool zigZag = false)
+        {
+            if (wireType != WireType.VarInt)
+                throw new InvalidOperationException($"Unexpected wire type {wireType} for short.");
+
+            int value = zigZag ? reader.ReadZigZagVarInt32() : reader.ReadVarInt32();
+            return (short)value; // Direct cast handles overflow correctly
+        }
+
+        public static ushort ReadUInt16(this ref SpanReader reader, WireType wireType)
+        {
+            if (wireType != WireType.VarInt)
+                throw new InvalidOperationException($"Unexpected wire type {wireType} for ushort.");
+
+            uint value = reader.ReadVarUInt32(); // Use optimized version for unsigned
+            if (value > ushort.MaxValue)
+                throw new OverflowException($"Value {value} is out of range for ushort.");
+            
+            return (ushort)value;
+        }
+
+        public static int ReadInt32(this ref SpanReader reader, WireType wireType, bool zigZag = false)
+        {
+            if (wireType == WireType.VarInt)
+            {
+                return zigZag ? reader.ReadZigZagVarInt32() : reader.ReadVarInt32();
+            }
+            else if (wireType == WireType.Fixed32b)
+            {
+                return reader.ReadFixedInt32();
+            }
+
+            throw new InvalidOperationException($"Unexpected wire type {wireType} for int32.");
+        }
+
+        public static uint ReadUInt32(this ref SpanReader reader, WireType wireType)
+        {
+            if (wireType != WireType.VarInt)
+                throw new InvalidOperationException($"Unexpected wire type {wireType} for uint.");
+
+            return reader.ReadVarUInt32(); // Use optimized version for unsigned
+        }
+
+        public static long ReadInt64(this ref SpanReader reader, WireType wireType, bool zigZag = false)
+        {
+            if (wireType != WireType.VarInt)
+                throw new InvalidOperationException($"Unexpected wire type {wireType} for long.");
+
+            return zigZag ? reader.ReadZigZagVarInt64() : reader.ReadVarInt64();
+        }
+
+        public static ulong ReadUInt64(this ref SpanReader reader, WireType wireType)
+        {
+            if (wireType != WireType.VarInt)
+                throw new InvalidOperationException($"Unexpected wire type {wireType} for ulong.");
+
+            return reader.ReadVarUInt64();
+        }
+
+        public static float ReadFloat(this ref SpanReader reader, WireType wireType)
+        {
+            if (wireType == WireType.Fixed32b)
+            {
+                return reader.ReadFixedFloat();
+            }
+            else if (wireType == WireType.VarInt)
+            {
+                return reader.ReadVarInt32();
+            }
+
+            throw new InvalidOperationException($"Unexpected wire type {wireType} for float.");
+        }
     }
 
     public ref partial struct SpanReader
@@ -123,7 +225,7 @@ namespace GProtobuf.Core
 
         public int ReadVarInt32()
         {
-            int result = 0;
+            long result = 0;
             int shift = 0;
             byte b;
             do
@@ -135,8 +237,36 @@ namespace GProtobuf.Core
 
                 b = (byte)readByte;
 
-                result |= (b & 0x7F) << shift;
+                result |= (long)(b & 0x7F) << shift;
                 shift += 7;
+                
+                // Handle up to 10 bytes for full signed int range
+                if (shift >= 64) break;
+            } while ((b & 0x80) != 0);
+
+            return (int)result; // Cast back to int, handles sign extension correctly
+        }
+
+        // Optimized version for unsigned/positive values only (lengths, byte, ushort, uint)
+        public uint ReadVarUInt32()
+        {
+            uint result = 0;
+            int shift = 0;
+            byte b;
+            do
+            {
+                int readByte = GetByte();
+
+                if (readByte < 0)
+                    break;
+
+                b = (byte)readByte;
+
+                result |= (uint)(b & 0x7F) << shift;
+                shift += 7;
+                
+                // Only need 5 bytes max for 32-bit values
+                if (shift >= 35) break;
             } while ((b & 0x80) != 0);
 
             return result;
@@ -154,7 +284,13 @@ namespace GProtobuf.Core
 
         public int ReadZigZagVarInt32()
         {
-            int result = 0;
+            uint result = ReadVarUInt32(); // Use unsigned version for ZigZag
+            return (int)((result >> 1) ^ (0U - (result & 1))); // Zigzag decoding for 32-bit
+        }
+
+        public long ReadVarInt64()
+        {
+            long result = 0;
             int shift = 0;
             byte b;
             do
@@ -166,11 +302,44 @@ namespace GProtobuf.Core
 
                 b = (byte)readByte;
 
-                result |= (b & 0x7F) << shift;
+                result |= (long)(b & 0x7F) << shift;
                 shift += 7;
+                
+                // Handle up to 10 bytes for full 64-bit range
+                if (shift >= 70) break;
             } while ((b & 0x80) != 0);
 
-            return (result >> 1) ^ -(result & 1); // Zigzag decoding;
+            return result;
+        }
+
+        public long ReadZigZagVarInt64()
+        {
+            ulong result = ReadVarUInt64(); // Use unsigned version for ZigZag
+            return (long)((result >> 1) ^ (0UL - (result & 1))); // Zigzag decoding for 64-bit
+        }
+
+        public ulong ReadVarUInt64()
+        {
+            ulong result = 0;
+            int shift = 0;
+            byte b;
+            do
+            {
+                int readByte = GetByte();
+
+                if (readByte < 0)
+                    break;
+
+                b = (byte)readByte;
+
+                result |= (ulong)(b & 0x7F) << shift;
+                shift += 7;
+                
+                // Handle up to 10 bytes for full 64-bit range
+                if (shift >= 70) break;
+            } while ((b & 0x80) != 0);
+
+            return result;
         }
 
         public double ReadFixedDouble()

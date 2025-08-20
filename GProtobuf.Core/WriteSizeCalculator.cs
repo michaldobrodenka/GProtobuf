@@ -23,6 +23,12 @@ namespace GProtobuf.Core
 
         public void WriteVarint32(uint value)
         {
+            WriteVarUInt32(value); // Delegate to optimized version
+        }
+
+        // Optimized version for unsigned/positive values only (lengths, byte, ushort, uint)
+        public void WriteVarUInt32(uint value)
+        {
             while (value > 0x7F)
             {
                 Length++;
@@ -49,10 +55,11 @@ namespace GProtobuf.Core
 
         public void WriteVarint64(long value)
         {
-            while (value > 0x7F)
+            ulong uValue = (ulong)value; // Convert to unsigned for proper bit operations
+            while (uValue > 0x7F)
             {
                 Length++;
-                value >>= 7;
+                uValue >>= 7;
             }
             Length++;
         }
@@ -98,7 +105,7 @@ namespace GProtobuf.Core
             if (value != null)
             {
                 int byteCount = System.Text.Encoding.UTF8.GetByteCount(value);
-                WriteVarint32((uint)byteCount); // String length as varint
+                WriteVarUInt32((uint)byteCount); // String length as varint - use optimized version
                 Length += byteCount; // String bytes themselves
             }
         }
@@ -107,14 +114,14 @@ namespace GProtobuf.Core
         {
             if (bytes != null)
             {
-                WriteVarint32((uint)bytes.Length); // Length as varint
+                WriteVarUInt32((uint)bytes.Length); // Length as varint - use optimized version
                 Length += bytes.Length; // Bytes themselves
             }
         }
 
         public void WriteBytes(ReadOnlySpan<byte> bytes)
         {
-            WriteVarint32((uint)bytes.Length); // Length as varint
+            WriteVarUInt32((uint)bytes.Length); // Length as varint - use optimized version
             Length += bytes.Length; // Bytes themselves
         }
 
@@ -134,6 +141,60 @@ namespace GProtobuf.Core
         public void WriteBool(bool value)
         {
             Length++; // Bool is always 1 byte in protobuf
+        }
+
+        public void WriteByte(byte value)
+        {
+            WriteVarUInt32(value); // Use optimized version for unsigned
+        }
+
+        public void WriteSByte(sbyte value, bool zigZag = false)
+        {
+            if (zigZag)
+                WriteZigZag32(value);
+            else
+                WriteVarint32(value); // Keep as signed to handle negatives correctly
+        }
+
+        public void WriteInt16(short value, bool zigZag = false)
+        {
+            if (zigZag)
+                WriteZigZag32(value);
+            else
+                WriteVarint32(value); // Keep as signed to handle negatives correctly
+        }
+
+        public void WriteUInt16(ushort value)
+        {
+            WriteVarUInt32(value); // Use optimized version for unsigned
+        }
+
+        public void WriteUInt32(uint value)
+        {
+            WriteVarUInt32(value); // Use optimized version for unsigned
+        }
+
+        public void WriteInt64(long value, bool zigZag = false)
+        {
+            if (zigZag)
+                WriteZigZag64(value);
+            else
+                WriteVarint64(value);
+        }
+
+        public void WriteUInt64(ulong value)
+        {
+            WriteVarintUInt64(value);
+        }
+
+        public void WriteVarintUInt64(ulong value)
+        {
+            while (value > 0x7F)
+            {
+                Length++;
+                value >>= 7;
+            }
+            Length++;
         }
 
         public void WriteFixed32(uint value)
@@ -176,7 +237,7 @@ namespace GProtobuf.Core
             if (array != null)
             {
                 var packedSize = Utils.GetVarintPackedCollectionSize(array);
-                WriteVarint32(packedSize);
+                WriteVarUInt32((uint)packedSize); // Use optimized version for size/length
                 Length += packedSize;
             }
         }
@@ -186,7 +247,7 @@ namespace GProtobuf.Core
             if (list != null)
             {
                 var packedSize = Utils.GetVarintPackedCollectionSize(list);
-                WriteVarint32(packedSize);
+                WriteVarUInt32((uint)packedSize); // Use optimized version for size/length
                 Length += packedSize;
             }
         }
@@ -196,7 +257,7 @@ namespace GProtobuf.Core
             if (array != null)
             {
                 var packedSize = Utils.GetVarintPackedCollectionSize(array); // approximation
-                WriteVarint32(packedSize);
+                WriteVarUInt32((uint)packedSize); // Use optimized version for size/length
                 Length += packedSize;
             }
         }
@@ -206,7 +267,7 @@ namespace GProtobuf.Core
             if (list != null)
             {
                 var packedSize = Utils.GetVarintPackedCollectionSize(list); // approximation
-                WriteVarint32(packedSize);
+                WriteVarUInt32((uint)packedSize); // Use optimized version for size/length
                 Length += packedSize;
             }
         }

@@ -27,54 +27,69 @@ ModelClass model = new ModelClass
 
 byte[] data, data2, modelData;
 
+SimpleTypes simpleTypes = new SimpleTypes
 {
-    var x = new C()
-    {
-        StringA = "abc",
-        //StringB = "abc1",
-        //StringC = "abc2",
-    };
+     //SByteValue = SByte.MinValue,
+     LongValue = long.MinValue,
+};
+using (var ms = new MemoryStream())
+{
+    Serializer.Serialize(ms, simpleTypes);
+    data = ms.ToArray();
 
-    StringBuilder sb = new StringBuilder();
-    for (int i = 0; i < 1000; i++)
-    {
-        sb.Append($"abc{i}");
-    }
-
-    x.StringC = sb.ToString();
-
-    using (var ms = new MemoryStream())
-    {
-        Serializer.Serialize<A>(ms, x);
-        data = ms.ToArray();
-
-        Console.WriteLine("protobuf-net: " + String.Join(',', data));
-    }
-
-    using (var ms = new MemoryStream())
-    {
-        //Serializer.Serialize(ms, b);
-        Model.Serialization.Serializers.SerializeC(ms, x);
-        data2 = ms.ToArray();
-        Console.WriteLine("GProtobuf: " + String.Join(',', data2));
-    }
-
-    Console.WriteLine("Output equals: " + data.SequenceEqual(data2));
-
-    {
-        var result3 = Model.Serialization.Deserializers.DeserializeC(data2);
-        //Console.WriteLine(result3.StringA);
-        //Console.WriteLine(result3.StringB);
-    }
-
-    using (var ms = new MemoryStream(data2))
-    {
-        //Serializer.Serialize(ms, b);
-        var result = Serializer.Deserialize<C>(ms);
-        //Console.WriteLine(result.StringA);
-        //Console.WriteLine(result.StringB);
-    }
+    Console.WriteLine("protobuf-net: " + String.Join(',', data));
 }
+
+
+
+//{
+//    var x = new C()
+//    {
+//        StringA = "abc",
+//        //StringB = "abc1",
+//        //StringC = "abc2",
+//    };
+
+//    StringBuilder sb = new StringBuilder();
+//    for (int i = 0; i < 1000; i++)
+//    {
+//        sb.Append($"abc{i}");
+//    }
+
+//    x.StringC = sb.ToString();
+
+//    using (var ms = new MemoryStream())
+//    {
+//        Serializer.Serialize<A>(ms, x);
+//        data = ms.ToArray();
+
+//        Console.WriteLine("protobuf-net: " + String.Join(',', data));
+//    }
+
+//    using (var ms = new MemoryStream())
+//    {
+//        //Serializer.Serialize(ms, b);
+//        Model.Serialization.Serializers.SerializeC(ms, x);
+//        data2 = ms.ToArray();
+//        Console.WriteLine("GProtobuf: " + String.Join(',', data2));
+//    }
+
+//    Console.WriteLine("Output equals: " + data.SequenceEqual(data2));
+
+//    {
+//        var result3 = Model.Serialization.Deserializers.DeserializeC(data2);
+//        //Console.WriteLine(result3.StringA);
+//        //Console.WriteLine(result3.StringB);
+//    }
+
+//    using (var ms = new MemoryStream(data2))
+//    {
+//        //Serializer.Serialize(ms, b);
+//        var result = Serializer.Deserialize<C>(ms);
+//        //Console.WriteLine(result.StringA);
+//        //Console.WriteLine(result.StringB);
+//    }
+//}
 //var c = new C()
 //{
 //     StringA = "abc",

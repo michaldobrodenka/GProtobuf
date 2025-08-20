@@ -3,27 +3,27 @@ using ProtoBuf;
 namespace GProtobuf.Tests.TestModel
 {
     [ProtoContract]
-    public class BasicTypesModel
+    public class BasicTypesZigZagModel
     {
         [ProtoMember(1)]
         public byte ByteValue { get; set; }
 
-        [ProtoMember(2)]
+        [ProtoMember(2, DataFormat = DataFormat.ZigZag)]
         public sbyte SByteValue { get; set; }
 
-        [ProtoMember(3)]
+        [ProtoMember(3, DataFormat = DataFormat.ZigZag)]
         public short ShortValue { get; set; }
 
         [ProtoMember(4)]
         public ushort UShortValue { get; set; }
 
-        [ProtoMember(5)]
+        [ProtoMember(5, DataFormat = DataFormat.ZigZag)]
         public int IntValue { get; set; }
 
         [ProtoMember(6)]
         public uint UIntValue { get; set; }
 
-        [ProtoMember(7)]
+        [ProtoMember(7, DataFormat = DataFormat.ZigZag)]
         public long LongValue { get; set; }
 
         [ProtoMember(8)]

@@ -9,11 +9,32 @@ using Xunit.Abstractions;
 
 namespace GProtobuf.Tests;
 
-// GP tests - serialization and deserialization using GProtobuf
-public sealed class TestsGP(ITestOutputHelper outputHelper)
+/// <summary>
+/// GP (GProtobuf to Protobuf-net) Tests
+/// 
+/// These tests verify cross-compatibility between GProtobuf and protobuf-net:
+/// - Data is serialized using GProtobuf-generated serializers
+/// - Data is deserialized using protobuf-net (reference implementation)
+/// - Ensures protobuf-net can correctly read GProtobuf serialized data
+/// - Critical for forward compatibility and interoperability
+/// 
+/// Test scenarios covered:
+/// - Basic hierarchy serialization (A -> B -> C inheritance)
+/// - Partial property serialization (only specific fields set)
+/// - Cross-type serialization (serialize as derived, deserialize as base)
+/// - Large data handling (long strings)
+/// </summary>
+public sealed class GProtobufToProtobufNetTests : BaseSerializationTest
 {
+    private readonly ITestOutputHelper _outputHelper;
+    
+    public GProtobufToProtobufNetTests(ITestOutputHelper outputHelper)
+    {
+        _outputHelper = outputHelper;
+    }
+
     [Fact]
-    public void ABCBasicHierachyGP()
+    public void ABCBasicHierarchy_GP()
     {
         var model = new C()
         {
@@ -22,92 +43,66 @@ public sealed class TestsGP(ITestOutputHelper outputHelper)
             StringC = "StringC"
         };
 
-        using var ms = new MemoryStream();
-        Serializer.Serialize(ms, model);
-
-        var data = ms.ToArray();
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeA);
+        var deserialized = DeserializeWithProtobufNet<C>(data);
 
         data.Should().NotBeNull();
         data.Length.Should().BeGreaterThan(0);
-
-        using var ms2 = new MemoryStream(data);
-        var deserialized = Serializer.Deserialize<C>(ms2);
-        //var deserialized = TestModel.Serialization.Deserializers.DeserializeA(data);
-
         deserialized.Should().BeEquivalentTo(model);
     }
 
     [Fact]
-    public void ABCOnlyCGP()
+    public void ABCOnlyC_GP()
     {
         var model = new C()
         {
             StringC = "StringC"
         };
 
-        using var ms = new MemoryStream();
-        Serializer.Serialize(ms, model);
-
-        var data = ms.ToArray();
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeA);
+        var deserialized = DeserializeWithProtobufNet<C>(data);
 
         data.Should().NotBeNull();
         data.Length.Should().BeGreaterThan(0);
-
-        using var ms2 = new MemoryStream(data);
-        var deserialized = Serializer.Deserialize<C>(ms2);
-
         deserialized.Should().BeEquivalentTo(model);
     }
 
     [Fact]
-    public void ABCOnlyAGP()
+    public void ABCOnlyA_GP()
     {
         var model = new C()
         {
             StringA = "StringA"
         };
 
-        using var ms = new MemoryStream();
-        Serializer.Serialize(ms, model);
-
-        var data = ms.ToArray();
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeA);
+        var deserialized = DeserializeWithProtobufNet<C>(data);
 
         data.Should().NotBeNull();
         data.Length.Should().BeGreaterThan(0);
-
-        using var ms2 = new MemoryStream(data);
-        var deserialized = Serializer.Deserialize<C>(ms2);
-
         deserialized.Should().BeEquivalentTo(model);
     }
 
 
     [Fact]
-    public void ABCSerializeAsCGP()
+    public void ABCSerializeAsC_GP()
     {
         // C is the most derived type, should be able to be deserialized as A
-
         var model = new C()
         {
             StringA = "StringA"
         };
 
-        using var ms = new MemoryStream();
-        Serializer.Serialize(ms, model);
-
-        var data = ms.ToArray();
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeC);
+        var deserialized = DeserializeWithProtobufNet<C>(data);
 
         data.Should().NotBeNull();
         data.Length.Should().BeGreaterThan(0);
-
-        using var ms2 = new MemoryStream(data);
-        var deserialized = Serializer.Deserialize<C>(ms2);
-
         deserialized.Should().BeEquivalentTo(model);
     }
 
     [Fact]
-    public void ABCSerializeLongStringGP()
+    public void ABCSerializeLongString_GP()
     {
         var model = new C()
         {
@@ -119,20 +114,154 @@ public sealed class TestsGP(ITestOutputHelper outputHelper)
         {
             sb.Append($"abc{i}");
         }
-
         model.StringC = sb.ToString();
 
-        using var ms = new MemoryStream();
-        Serializer.Serialize(ms, model);
-
-        var data = ms.ToArray();
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeC);
+        var deserialized = DeserializeWithProtobufNet<C>(data);
 
         data.Should().NotBeNull();
         data.Length.Should().BeGreaterThan(0);
+        deserialized.Should().BeEquivalentTo(model);
+    }
 
-        using var ms2 = new MemoryStream(data);
-        var deserialized = Serializer.Deserialize<C>(ms2);
+    [Fact]
+    public void BasicTypesAllValues_GP()
+    {
+        var model = new BasicTypesModel
+        {
+            ByteValue = 255,
+            SByteValue = -128,
+            ShortValue = -32768,
+            UShortValue = 65535,
+            IntValue = -123456,
+            UIntValue = 4294967295,
+            LongValue = -987654321012345,
+            ULongValue = 18446744073709551615,
+            FloatValue = 3.14159f,
+            DoubleValue = 2.718281828459045,
+            BoolValue = true,
+            StringValue = "Hello, Protocol Buffers!",
+            BytesValue = new byte[] { 1, 2, 3, 4, 5, 255, 0, 127 }
+        };
 
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeBasicTypesModel);
+        var deserialized = DeserializeWithProtobufNet<BasicTypesModel>(data);
+
+        data.Should().NotBeNull();
+        data.Length.Should().BeGreaterThan(0);
+        deserialized.Should().BeEquivalentTo(model);
+    }
+
+    [Fact]
+    public void BasicTypesDefaultValues_GP()
+    {
+        var model = new BasicTypesModel(); // All default values
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeBasicTypesModel);
+        var deserialized = DeserializeWithProtobufNet<BasicTypesModel>(data);
+
+        data.Should().NotBeNull();
+        deserialized.Should().BeEquivalentTo(model);
+    }
+
+    [Fact]
+    public void BasicTypesMinMaxValues_GP()
+    {
+        var model = new BasicTypesModel
+        {
+            ByteValue = byte.MaxValue,
+            SByteValue = sbyte.MinValue,
+            ShortValue = short.MinValue,
+            UShortValue = ushort.MaxValue,
+            IntValue = int.MinValue,
+            UIntValue = uint.MaxValue,
+            LongValue = long.MinValue,
+            ULongValue = ulong.MaxValue,
+            FloatValue = float.MinValue,
+            DoubleValue = double.MaxValue,
+            BoolValue = false,
+            StringValue = "",
+            BytesValue = new byte[0]
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeBasicTypesModel);
+        var deserialized = DeserializeWithProtobufNet<BasicTypesModel>(data);
+
+        data.Should().NotBeNull();
+        data.Length.Should().BeGreaterThan(0);
+        deserialized.Should().BeEquivalentTo(model);
+    }
+
+    [Fact]
+    public void BasicTypesNullValues_GP()
+    {
+        var model = new BasicTypesModel
+        {
+            ByteValue = 42,
+            IntValue = 12345,
+            DoubleValue = 123.456,
+            BoolValue = true,
+            StringValue = null, // Null string
+            BytesValue = null   // Null byte array
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeBasicTypesModel);
+        var deserialized = DeserializeWithProtobufNet<BasicTypesModel>(data);
+
+        data.Should().NotBeNull();
+        data.Length.Should().BeGreaterThan(0);
+        deserialized.Should().BeEquivalentTo(model);
+    }
+
+    [Fact]
+    public void BasicTypesZigZagAllValues_GP()
+    {
+        var model = new BasicTypesZigZagModel
+        {
+            ByteValue = 255,
+            SByteValue = -128,
+            ShortValue = -32768,
+            UShortValue = 65535,
+            IntValue = -123456,
+            UIntValue = 4294967295,
+            LongValue = -987654321012345,
+            ULongValue = 18446744073709551615,
+            FloatValue = 3.14159f,
+            DoubleValue = 2.718281828459045,
+            BoolValue = true,
+            StringValue = "Hello, ZigZag Protocol Buffers!",
+            BytesValue = new byte[] { 1, 2, 3, 4, 5, 255, 0, 127 }
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeBasicTypesZigZagModel);
+        var deserialized = DeserializeWithProtobufNet<BasicTypesZigZagModel>(data);
+
+        data.Should().NotBeNull();
+        data.Length.Should().BeGreaterThan(0);
+        deserialized.Should().BeEquivalentTo(model);
+    }
+
+    [Fact]
+    public void BasicTypesZigZagNegativeValues_GP()
+    {
+        var model = new BasicTypesZigZagModel
+        {
+            SByteValue = -1,
+            ShortValue = -1000,
+            IntValue = -123456,
+            LongValue = -987654321012345,
+            FloatValue = -123.456f,
+            DoubleValue = -789.012345,
+            BoolValue = false,
+            StringValue = "Negative ZigZag test",
+            BytesValue = new byte[] { 255, 128, 0 }
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeBasicTypesZigZagModel);
+        var deserialized = DeserializeWithProtobufNet<BasicTypesZigZagModel>(data);
+
+        data.Should().NotBeNull();
+        data.Length.Should().BeGreaterThan(0);
         deserialized.Should().BeEquivalentTo(model);
     }
 }
