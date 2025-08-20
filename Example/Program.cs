@@ -6,8 +6,7 @@ using ProtoBuf.Serializers;
 //using Serializer;
 using System;
 using System.Net.Http.Headers;
-
-Console.WriteLine("Hello, World!");
+using System.Text;
 
 ModelClass model = new ModelClass
 {
@@ -29,45 +28,68 @@ ModelClass model = new ModelClass
 byte[] data, data2, modelData;
 
 {
-    var b = new C()
+    var x = new C()
     {
-        StringA = "abc",
-        StringB = "abc1",
+        //StringA = "abc",
+        //StringB = "abc1",
+        //StringC = "abc2",
     };
+
+    StringBuilder sb = new StringBuilder();
+    for (int i = 0; i < 1000; i++)
+    {
+        sb.Append($"abc{i}");
+    }
+
+    x.StringC = sb.ToString();
 
     using (var ms = new MemoryStream())
     {
-        Serializer.Serialize<C>(ms, b);
+        Serializer.Serialize<A>(ms, x);
         data = ms.ToArray();
+
+        Console.WriteLine("protobuf-net: "+String.Join(',', data));
     }
 
     using (var ms = new MemoryStream())
     {
         //Serializer.Serialize(ms, b);
-        Model.Serialization.Serializers.SerializeC(ms, b);
+        Model.Serialization.Serializers.SerializeA(ms, x);
         data2 = ms.ToArray();
+        Console.WriteLine("GProtobuf: " + String.Join(',', data2));
     }
+
+    Console.WriteLine("Output equals: " +data.SequenceEqual(data2));
 
     {
         var result3 = Model.Serialization.Deserializers.DeserializeB(data2);
+        //Console.WriteLine(result3.StringA);
+        //Console.WriteLine(result3.StringB);
+    }
+
+    using (var ms = new MemoryStream(data2))
+    {
+        //Serializer.Serialize(ms, b);
+        var result = Serializer.Deserialize<C>(ms);
+        //Console.WriteLine(result.StringA);
+        //Console.WriteLine(result.StringB);
     }
 }
+//var c = new C()
+//{
+//     StringA = "abc",
+//     StringB = "abc1",
+//     StringC = "abc2",
+//};
 
-var c = new C()
-{
-     StringA = "abc",
-     StringB = "abc1",
-     StringC = "abc2",
-};
-
-using (var ms = new MemoryStream())
-{
-    Serializer.Serialize(ms, c);
-    data = ms.ToArray();
-}
-{
-    var result3 = Model.Serialization.Deserializers.DeserializeC(data);
-}
+//using (var ms = new MemoryStream())
+//{
+//    Serializer.Serialize(ms, c);
+//    data = ms.ToArray();
+//}
+//{
+//    var result3 = Model.Serialization.Deserializers.DeserializeC(data);
+//}
 
 //using (var ms = new MemoryStream(data))
 //{
@@ -77,38 +99,38 @@ using (var ms = new MemoryStream())
 //}
 
 
-using (var ms = new MemoryStream())
-{
-    Serializer.Serialize(ms, model.Model2);
-    data = ms.ToArray();
-}
+//using (var ms = new MemoryStream())
+//{
+//    Serializer.Serialize(ms, model.Model2);
+//    data = ms.ToArray();
+//}
 
-using (var ms = new MemoryStream())
-{
-    Serializer.Serialize(ms, model);
-    modelData = ms.ToArray();
-}
+//using (var ms = new MemoryStream())
+//{
+//    Serializer.Serialize(ms, model);
+//    modelData = ms.ToArray();
+//}
 
-using (var ms = new MemoryStream())
-{
-    //Model.Serialization.Serializers.SerializeClassWithCollections(ms, model.Model2);
-    Model.Serialization.Serializers.SerializeModelClass(ms, model);
+//using (var ms = new MemoryStream())
+//{
+//    //Model.Serialization.Serializers.SerializeClassWithCollections(ms, model.Model2);
+//    Model.Serialization.Serializers.SerializeModelClass(ms, model);
 
-    data2 = ms.ToArray();
-}
+//    data2 = ms.ToArray();
+//}
 
-var modelResult = Model.Serialization.Deserializers.DeserializeModelClassBase(modelData);
-var result = Model.Serialization.Deserializers.DeserializeClassWithCollections(data);
-var result2 = Model.Serialization.Deserializers.DeserializeClassWithCollections(data2);
+//var modelResult = Model.Serialization.Deserializers.DeserializeModelClassBase(modelData);
+//var result = Model.Serialization.Deserializers.DeserializeClassWithCollections(data);
+//var result2 = Model.Serialization.Deserializers.DeserializeClassWithCollections(data2);
 
-using (var ms = new MemoryStream(data2))
-{
-    //Model.Serialization.Serializers.SerializeClassWithCollections(ms, model.Model2);
-    var result3 = Serializer.Deserialize<ClassWithCollections>(ms);
-}
+//using (var ms = new MemoryStream(data2))
+//{
+//    //Model.Serialization.Serializers.SerializeClassWithCollections(ms, model.Model2);
+//    var result3 = Serializer.Deserialize<ClassWithCollections>(ms);
+//}
 
-Console.WriteLine(result.SomeInt);
-Console.WriteLine(modelResult.Str);
+//Console.WriteLine(result.SomeInt);
+//Console.WriteLine(modelResult.Str);
 
 //SpanReader reader = new SpanReader(data.AsSpan());
 

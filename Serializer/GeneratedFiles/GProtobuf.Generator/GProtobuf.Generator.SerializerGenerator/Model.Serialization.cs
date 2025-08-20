@@ -789,28 +789,8 @@ namespace Model.Serialization
         public static void WriteB(global::GProtobuf.Core.StreamWriter writer, global::Model.B obj)
         {
 
-            var calculator5 = new global::GProtobuf.Core.WriteSizeCalculator();
-            SizeCalculators.CalculateBContentSize(ref calculator5, obj);
             writer.WriteTag(5, WireType.Len);
-            writer.WriteVarint32((int)calculator5.Length);
-
-            switch (obj)
-            {
-                case global::Model.C obj1:
-                    var calculator10 = new global::GProtobuf.Core.WriteSizeCalculator();
-                    SizeCalculators.CalculateCSize(ref calculator10, obj1);
-                    writer.WriteTag(10, WireType.Len);
-                    writer.WriteVarint32((int)calculator10.Length);
-                    WriteC(writer, obj1);
-                    break;
-            }
-            if (obj.StringB != null)
-            {
-                writer.WriteTag(1, WireType.Len);
-                writer.WriteVarint32((uint)Encoding.UTF8.GetByteCount(obj.StringB));
-                writer.WriteString(obj.StringB);
-            }
-
+            writer.WriteVarint32(0); // No fields inside final ProtoInclude
             if (obj.StringA != null)
             {
                 writer.WriteTag(1, WireType.Len);
@@ -823,15 +803,19 @@ namespace Model.Serialization
         public static void WriteC(global::GProtobuf.Core.StreamWriter writer, global::Model.C obj)
         {
 
-            var calculator5 = new global::GProtobuf.Core.WriteSizeCalculator();
-            SizeCalculators.CalculateBContentSize(ref calculator5, obj);
             writer.WriteTag(5, WireType.Len);
+            var calculator5 = new global::GProtobuf.Core.WriteSizeCalculator();
+            calculator5.WriteTag(10, WireType.Len);
+            var tempCalculatorC = new global::GProtobuf.Core.WriteSizeCalculator();
+            SizeCalculators.CalculateCContentSize(ref tempCalculatorC, obj);
+            calculator5.WriteVarint32((int)tempCalculatorC.Length);
+            calculator5.WriteRawBytes(new byte[tempCalculatorC.Length]);
+            SizeCalculators.CalculateBContentSize(ref calculator5, obj);
             writer.WriteVarint32((int)calculator5.Length);
-
-            var calculator10 = new global::GProtobuf.Core.WriteSizeCalculator();
-            SizeCalculators.CalculateCContentSize(ref calculator10, obj);
             writer.WriteTag(10, WireType.Len);
-            writer.WriteVarint32((int)calculator10.Length);
+            var calculatorC = new global::GProtobuf.Core.WriteSizeCalculator();
+            SizeCalculators.CalculateCContentSize(ref calculatorC, obj);
+            writer.WriteVarint32((int)calculatorC.Length);
             if (obj.StringC != null)
             {
                 writer.WriteTag(1, WireType.Len);
@@ -839,18 +823,18 @@ namespace Model.Serialization
                 writer.WriteString(obj.StringC);
             }
 
-            if (obj.StringA != null)
-            {
-                writer.WriteTag(1, WireType.Len);
-                writer.WriteVarint32((uint)Encoding.UTF8.GetByteCount(obj.StringA));
-                writer.WriteString(obj.StringA);
-            }
-
             if (obj.StringB != null)
             {
                 writer.WriteTag(1, WireType.Len);
                 writer.WriteVarint32((uint)Encoding.UTF8.GetByteCount(obj.StringB));
                 writer.WriteString(obj.StringB);
+            }
+
+            if (obj.StringA != null)
+            {
+                writer.WriteTag(1, WireType.Len);
+                writer.WriteVarint32((uint)Encoding.UTF8.GetByteCount(obj.StringA));
+                writer.WriteString(obj.StringA);
             }
 
         }
@@ -947,25 +931,8 @@ namespace Model.Serialization
         public static void WriteModelClass(global::GProtobuf.Core.StreamWriter writer, global::Model.ModelClass obj)
         {
 
-            var calculator1 = new global::GProtobuf.Core.WriteSizeCalculator();
-            SizeCalculators.CalculateModelClassContentSize(ref calculator1, obj);
             writer.WriteTag(1, WireType.Len);
-            writer.WriteVarint32((int)calculator1.Length);
-            if (obj.D != 0)
-            {
-                writer.WriteTag(1, WireType.VarInt);
-                writer.WriteVarint32(obj.D);
-            }
-
-            if (obj.Model2 != null)
-            {
-                var calculator2 = new global::GProtobuf.Core.WriteSizeCalculator();
-                SizeCalculators.CalculateClassWithCollectionsSize(ref calculator2, obj.Model2);
-                writer.WriteTag(2, WireType.Len);
-                writer.WriteVarint32((int)calculator2.Length);
-                StreamWriters.WriteClassWithCollections(writer, obj.Model2);
-            }
-
+            writer.WriteVarint32(0); // No fields inside final ProtoInclude
             writer.WriteTag(3122, WireType.Fixed64b);
             writer.WriteDouble(obj.A);
 
@@ -987,10 +954,8 @@ namespace Model.Serialization
         public static void WriteSecondModelClass(global::GProtobuf.Core.StreamWriter writer, global::Model.SecondModelClass obj)
         {
 
-            var calculator2 = new global::GProtobuf.Core.WriteSizeCalculator();
-            SizeCalculators.CalculateSecondModelClassContentSize(ref calculator2, obj);
             writer.WriteTag(2, WireType.Len);
-            writer.WriteVarint32((int)calculator2.Length);
+            writer.WriteVarint32(0); // No fields inside final ProtoInclude
             writer.WriteTag(3122, WireType.Fixed64b);
             writer.WriteDouble(obj.A);
 
@@ -1065,11 +1030,9 @@ namespace Model.Serialization
                 case global::Model.B obj1:
                     calculator.WriteTag(5, WireType.Len);
                     var lengthBefore5 = calculator.Length;
-                    calculator.WriteVarint32(0); // placeholder for length
-                    var contentStartLength5 = calculator.Length;
                     CalculateBSize(ref calculator, obj1);
-                    var contentLength5 = calculator.Length - contentStartLength5;
-                    // Note: Length is calculated correctly, varint placeholder size approximation is acceptable
+                    var contentLength5 = calculator.Length - lengthBefore5;
+                    calculator.WriteVarint32((uint)contentLength5);
                     break;
             }
             if (obj.StringA != null)
@@ -1084,31 +1047,7 @@ namespace Model.Serialization
         {
 
             calculator.WriteTag(5, WireType.Len);
-            var lengthBefore5 = calculator.Length;
-            calculator.WriteVarint32(0); // placeholder for length
-            var contentStartLength5 = calculator.Length;
-            var tempCalculator5 = new global::GProtobuf.Core.WriteSizeCalculator();
-            CalculateBContentSize(ref tempCalculator5, obj);
-            calculator.WriteRawBytes(new ReadOnlySpan<byte>(new byte[tempCalculator5.Length]));
-
-            switch (obj)
-            {
-                case global::Model.C obj1:
-                    calculator.WriteTag(10, WireType.Len);
-                    var lengthBefore10 = calculator.Length;
-                    calculator.WriteVarint32(0); // placeholder for length
-                    var contentStartLength10 = calculator.Length;
-                    CalculateCSize(ref calculator, obj1);
-                    var contentLength10 = calculator.Length - contentStartLength10;
-                    // Note: Length is calculated correctly, varint placeholder size approximation is acceptable
-                    break;
-            }
-            if (obj.StringB != null)
-            {
-                calculator.WriteTag(1, WireType.Len);
-                calculator.WriteString(obj.StringB);
-            }
-
+            calculator.WriteVarint32(0); // No fields inside final ProtoInclude
             if (obj.StringA != null)
             {
                 calculator.WriteTag(1, WireType.Len);
@@ -1121,36 +1060,18 @@ namespace Model.Serialization
         {
 
             calculator.WriteTag(5, WireType.Len);
-            var lengthBefore5 = calculator.Length;
-            calculator.WriteVarint32(0); // placeholder for length
-            var contentStartLength5 = calculator.Length;
-            var tempCalculator5 = new global::GProtobuf.Core.WriteSizeCalculator();
-            CalculateBContentSize(ref tempCalculator5, obj);
-            calculator.WriteRawBytes(new ReadOnlySpan<byte>(new byte[tempCalculator5.Length]));
-
-            calculator.WriteTag(10, WireType.Len);
-            var lengthBefore10 = calculator.Length;
-            calculator.WriteVarint32(0); // placeholder for length
-            var contentStartLength10 = calculator.Length;
-            var tempCalculator10 = new global::GProtobuf.Core.WriteSizeCalculator();
-            CalculateCContentSize(ref tempCalculator10, obj);
-            calculator.WriteRawBytes(new ReadOnlySpan<byte>(new byte[tempCalculator10.Length]));
-            if (obj.StringC != null)
-            {
-                calculator.WriteTag(1, WireType.Len);
-                calculator.WriteString(obj.StringC);
-            }
-
+            var tempCalc5 = new global::GProtobuf.Core.WriteSizeCalculator();
+            tempCalc5.WriteTag(10, WireType.Len);
+            var tempCalcC = new global::GProtobuf.Core.WriteSizeCalculator();
+            CalculateCContentSize(ref tempCalcC, obj);
+            tempCalc5.WriteVarint32((uint)tempCalcC.Length);
+            tempCalc5.WriteRawBytes(new byte[tempCalcC.Length]);
+            CalculateBContentSize(ref tempCalc5, obj);
+            calculator.WriteVarint32((uint)tempCalc5.Length);
             if (obj.StringA != null)
             {
                 calculator.WriteTag(1, WireType.Len);
                 calculator.WriteString(obj.StringA);
-            }
-
-            if (obj.StringB != null)
-            {
-                calculator.WriteTag(1, WireType.Len);
-                calculator.WriteString(obj.StringB);
             }
 
         }
@@ -1161,11 +1082,9 @@ namespace Model.Serialization
             {
                 calculator.WriteTag(5, WireType.Len);
                 var lengthBefore5 = calculator.Length;
-                calculator.WriteVarint32(0); // placeholder for length
-                var contentStartLength5 = calculator.Length;
                 SizeCalculators.CalculateB1Size(ref calculator, obj.B1);
-                var contentLength5 = calculator.Length - contentStartLength5;
-                // Note: Length is calculated correctly, varint placeholder size approximation is acceptable
+                var contentLength5 = calculator.Length - lengthBefore5;
+                calculator.WriteVarint32((uint)contentLength5);
             }
 
             if (obj.StringA != null)
@@ -1182,11 +1101,9 @@ namespace Model.Serialization
             {
                 calculator.WriteTag(10, WireType.Len);
                 var lengthBefore10 = calculator.Length;
-                calculator.WriteVarint32(0); // placeholder for length
-                var contentStartLength10 = calculator.Length;
                 SizeCalculators.CalculateC1Size(ref calculator, obj.C1);
-                var contentLength10 = calculator.Length - contentStartLength10;
-                // Note: Length is calculated correctly, varint placeholder size approximation is acceptable
+                var contentLength10 = calculator.Length - lengthBefore10;
+                calculator.WriteVarint32((uint)contentLength10);
             }
 
             if (obj.StringB != null)
@@ -1215,20 +1132,16 @@ namespace Model.Serialization
                 case global::Model.ModelClass obj1:
                     calculator.WriteTag(1, WireType.Len);
                     var lengthBefore1 = calculator.Length;
-                    calculator.WriteVarint32(0); // placeholder for length
-                    var contentStartLength1 = calculator.Length;
                     CalculateModelClassSize(ref calculator, obj1);
-                    var contentLength1 = calculator.Length - contentStartLength1;
-                    // Note: Length is calculated correctly, varint placeholder size approximation is acceptable
+                    var contentLength1 = calculator.Length - lengthBefore1;
+                    calculator.WriteVarint32((uint)contentLength1);
                     break;
                 case global::Model.SecondModelClass obj1:
                     calculator.WriteTag(2, WireType.Len);
                     var lengthBefore2 = calculator.Length;
-                    calculator.WriteVarint32(0); // placeholder for length
-                    var contentStartLength2 = calculator.Length;
                     CalculateSecondModelClassSize(ref calculator, obj1);
-                    var contentLength2 = calculator.Length - contentStartLength2;
-                    // Note: Length is calculated correctly, varint placeholder size approximation is acceptable
+                    var contentLength2 = calculator.Length - lengthBefore2;
+                    calculator.WriteVarint32((uint)contentLength2);
                     break;
             }
             calculator.WriteTag(3122, WireType.Fixed64b);
@@ -1252,29 +1165,7 @@ namespace Model.Serialization
         {
 
             calculator.WriteTag(1, WireType.Len);
-            var lengthBefore1 = calculator.Length;
-            calculator.WriteVarint32(0); // placeholder for length
-            var contentStartLength1 = calculator.Length;
-            var tempCalculator1 = new global::GProtobuf.Core.WriteSizeCalculator();
-            CalculateModelClassContentSize(ref tempCalculator1, obj);
-            calculator.WriteRawBytes(new ReadOnlySpan<byte>(new byte[tempCalculator1.Length]));
-            if (obj.D != 0)
-            {
-                calculator.WriteTag(1, WireType.VarInt);
-                calculator.WriteVarint32(obj.D);
-            }
-
-            if (obj.Model2 != null)
-            {
-                calculator.WriteTag(2, WireType.Len);
-                var lengthBefore2 = calculator.Length;
-                calculator.WriteVarint32(0); // placeholder for length
-                var contentStartLength2 = calculator.Length;
-                SizeCalculators.CalculateClassWithCollectionsSize(ref calculator, obj.Model2);
-                var contentLength2 = calculator.Length - contentStartLength2;
-                // Note: Length is calculated correctly, varint placeholder size approximation is acceptable
-            }
-
+            calculator.WriteVarint32(0); // No fields inside final ProtoInclude
             calculator.WriteTag(3122, WireType.Fixed64b);
             calculator.WriteDouble(obj.A);
 
@@ -1296,12 +1187,7 @@ namespace Model.Serialization
         {
 
             calculator.WriteTag(2, WireType.Len);
-            var lengthBefore2 = calculator.Length;
-            calculator.WriteVarint32(0); // placeholder for length
-            var contentStartLength2 = calculator.Length;
-            var tempCalculator2 = new global::GProtobuf.Core.WriteSizeCalculator();
-            CalculateSecondModelClassContentSize(ref tempCalculator2, obj);
-            calculator.WriteRawBytes(new ReadOnlySpan<byte>(new byte[tempCalculator2.Length]));
+            calculator.WriteVarint32(0); // No fields inside final ProtoInclude
             calculator.WriteTag(3122, WireType.Fixed64b);
             calculator.WriteDouble(obj.A);
 
@@ -1378,12 +1264,6 @@ namespace Model.Serialization
                 calculator.WriteString(obj.StringB);
             }
 
-            if (obj.StringA != null)
-            {
-                calculator.WriteTag(1, WireType.Len);
-                calculator.WriteString(obj.StringA);
-            }
-
         }
 
         public static void CalculateCContentSize(ref global::GProtobuf.Core.WriteSizeCalculator calculator, global::Model.C obj)
@@ -1394,18 +1274,6 @@ namespace Model.Serialization
                 calculator.WriteString(obj.StringC);
             }
 
-            if (obj.StringA != null)
-            {
-                calculator.WriteTag(1, WireType.Len);
-                calculator.WriteString(obj.StringA);
-            }
-
-            if (obj.StringB != null)
-            {
-                calculator.WriteTag(1, WireType.Len);
-                calculator.WriteString(obj.StringB);
-            }
-
         }
 
         public static void CalculateA1ContentSize(ref global::GProtobuf.Core.WriteSizeCalculator calculator, global::Model.A1 obj)
@@ -1414,11 +1282,9 @@ namespace Model.Serialization
             {
                 calculator.WriteTag(5, WireType.Len);
                 var lengthBefore5 = calculator.Length;
-                calculator.WriteVarint32(0); // placeholder for length
-                var contentStartLength5 = calculator.Length;
                 SizeCalculators.CalculateB1Size(ref calculator, obj.B1);
-                var contentLength5 = calculator.Length - contentStartLength5;
-                // Note: Length is calculated correctly, varint placeholder size approximation is acceptable
+                var contentLength5 = calculator.Length - lengthBefore5;
+                calculator.WriteVarint32((uint)contentLength5);
             }
 
             if (obj.StringA != null)
@@ -1435,11 +1301,9 @@ namespace Model.Serialization
             {
                 calculator.WriteTag(10, WireType.Len);
                 var lengthBefore10 = calculator.Length;
-                calculator.WriteVarint32(0); // placeholder for length
-                var contentStartLength10 = calculator.Length;
                 SizeCalculators.CalculateC1Size(ref calculator, obj.C1);
-                var contentLength10 = calculator.Length - contentStartLength10;
-                // Note: Length is calculated correctly, varint placeholder size approximation is acceptable
+                var contentLength10 = calculator.Length - lengthBefore10;
+                calculator.WriteVarint32((uint)contentLength10);
             }
 
             if (obj.StringB != null)
@@ -1491,47 +1355,15 @@ namespace Model.Serialization
             {
                 calculator.WriteTag(2, WireType.Len);
                 var lengthBefore2 = calculator.Length;
-                calculator.WriteVarint32(0); // placeholder for length
-                var contentStartLength2 = calculator.Length;
                 SizeCalculators.CalculateClassWithCollectionsSize(ref calculator, obj.Model2);
-                var contentLength2 = calculator.Length - contentStartLength2;
-                // Note: Length is calculated correctly, varint placeholder size approximation is acceptable
-            }
-
-            calculator.WriteTag(3122, WireType.Fixed64b);
-            calculator.WriteDouble(obj.A);
-
-            if (obj.B != 0)
-            {
-                calculator.WriteTag(201, WireType.VarInt);
-                calculator.WriteVarint32(obj.B);
-            }
-
-            if (obj.Str != null)
-            {
-                calculator.WriteTag(1234568, WireType.Len);
-                calculator.WriteString(obj.Str);
+                var contentLength2 = calculator.Length - lengthBefore2;
+                calculator.WriteVarint32((uint)contentLength2);
             }
 
         }
 
         public static void CalculateSecondModelClassContentSize(ref global::GProtobuf.Core.WriteSizeCalculator calculator, global::Model.SecondModelClass obj)
         {
-            calculator.WriteTag(3122, WireType.Fixed64b);
-            calculator.WriteDouble(obj.A);
-
-            if (obj.B != 0)
-            {
-                calculator.WriteTag(201, WireType.VarInt);
-                calculator.WriteVarint32(obj.B);
-            }
-
-            if (obj.Str != null)
-            {
-                calculator.WriteTag(1234568, WireType.Len);
-                calculator.WriteString(obj.Str);
-            }
-
         }
 
         public static void CalculateClassWithCollectionsContentSize(ref global::GProtobuf.Core.WriteSizeCalculator calculator, global::Model.ClassWithCollections obj)
