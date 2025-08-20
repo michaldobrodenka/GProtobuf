@@ -98,5 +98,8 @@ namespace GProtobuf.Core
 
         public DataFormat DataFormat { get; set; }
         public List<string> Interfaces { get; set; }
+        
+        /// Is nullable non reference type
+        public bool IsNullable { get; set; } 
     }
 }

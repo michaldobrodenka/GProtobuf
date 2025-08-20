@@ -1155,7 +1155,7 @@ class ObjectTree
     private static void WriteProtoMemberSerializerWithObject(StringBuilderWithIndent sb, ProtoMemberAttribute protoMember, string objectName)
     {
         // Check if it's a nullable type
-        bool isNullable = protoMember.Type.EndsWith("?");
+        bool isNullable = protoMember.IsNullable;
         var typeName = GetClassNameFromFullName(protoMember.Type);
 
         switch (typeName)
@@ -1565,7 +1565,7 @@ class ObjectTree
     private static void WriteProtoMemberSizeCalculator(StringBuilderWithIndent sb, ProtoMemberAttribute protoMember)
     {
         // Check if it's a nullable type
-        bool isNullable = protoMember.Type.EndsWith("?");
+        bool isNullable = protoMember.IsNullable;
         var typeName = GetClassNameFromFullName(protoMember.Type);
 
         switch (typeName)

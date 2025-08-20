@@ -11,12 +11,12 @@ public sealed class SerializerGenerator : IIncrementalGenerator
 {
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
-//#if DEBUG
-//        if (!Debugger.IsAttached)
-//        {
-//            Debugger.Launch();
-//        }
-//#endif
+#if DEBUG
+        if (!Debugger.IsAttached)
+        {
+            Debugger.Launch();
+        }
+#endif
 
         var pipeline = context.SyntaxProvider.ForAttributeWithMetadataName(
             fullyQualifiedMetadataName: "ProtoBuf.ProtoContractAttribute",
@@ -78,6 +78,9 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                     var propertyType = property.Type.ToDisplayString();
                     var propertyName = property.Name;
                     var nmspace = property.Type.ContainingNamespace?.ToDisplayString() ?? string.Empty;
+                    
+                    // Detect if this is a nullable value type (Nullable<T>)
+                    bool isNullable = property.Type.OriginalDefinition?.SpecialType == SpecialType.System_Nullable_T;
 
                     // Vytvoríme inštanciu s FieldId
                     var protoMember = new Core.ProtoMemberAttribute(fieldId)
@@ -86,6 +89,7 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                         Type = propertyType,
                         Namespace = nmspace,
                         Interfaces = property.Type.AllInterfaces.Select(i => i.ToDisplayString()).ToList(),
+                        IsNullable = isNullable,
                     };
 
                     // Spracujeme voliteľné NamedArguments
