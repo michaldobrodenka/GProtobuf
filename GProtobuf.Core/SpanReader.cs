@@ -165,6 +165,12 @@ namespace GProtobuf.Core
 
             throw new InvalidOperationException($"Unexpected wire type {wireType} for float.");
         }
+
+        public static byte[] ReadByteArray(this ref SpanReader reader)
+        {
+            int length = reader.ReadVarInt32();
+            return reader.GetSlice(length).ToArray();
+        }
     }
 
     public ref partial struct SpanReader
@@ -361,6 +367,16 @@ namespace GProtobuf.Core
             float floatValue = BinaryPrimitives.ReadSingleLittleEndian(buffer.Slice(position));
             position += sizeof(float); // Posun o 4 bajty
             return floatValue;
+        }
+
+        public ulong ReadFixed64()
+        {
+            if (position + sizeof(ulong) > buffer.Length)
+                throw new InvalidOperationException("Buffer overrun");
+
+            var value = BinaryPrimitives.ReadUInt64LittleEndian(buffer.Slice(position));
+            position += sizeof(ulong); // Move by 8 bytes
+            return value;
         }
 
         //public int ReadFixedInt32()

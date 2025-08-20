@@ -1,4 +1,5 @@
 ﻿using ProtoBuf;
+using System;
 
 namespace Model;
 
@@ -8,8 +9,9 @@ public class SimpleTypes
 {
     //[ProtoMember(1)]
     //public sbyte SByteValue { get; set; }
-    [ProtoMember(1, DataFormat = DataFormat.ZigZag)]
-    public long LongValue { get; set; }
+    [ProtoMember(1)]
+    //public long LongValue { get; set; }
+    public Guid GuidValue { get; set; }
 
 }
 

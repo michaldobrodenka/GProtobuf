@@ -30,8 +30,13 @@ byte[] data, data2, modelData;
 SimpleTypes simpleTypes = new SimpleTypes
 {
      //SByteValue = SByte.MinValue,
-     LongValue = long.MinValue,
+     //LongValue = long.MinValue,
+     
 };
+
+Guid guid = Guid.Parse("01020300-0000-0000-0000-000000000001");
+simpleTypes.GuidValue = guid;
+
 using (var ms = new MemoryStream())
 {
     Serializer.Serialize(ms, simpleTypes);

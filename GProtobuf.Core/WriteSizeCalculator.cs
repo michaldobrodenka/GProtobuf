@@ -231,6 +231,12 @@ namespace GProtobuf.Core
             return currentLength;
         }
 
+        public void WriteGuid(Guid value)
+        {
+            // Guid is always 16 bytes
+            Length += 16;
+        }
+
         // Packed array methods
         public void WritePackedVarintArray(int[] array)
         {

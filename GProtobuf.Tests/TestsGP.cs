@@ -264,4 +264,71 @@ public sealed class GProtobufToProtobufNetTests : BaseSerializationTest
         data.Length.Should().BeGreaterThan(0);
         deserialized.Should().BeEquivalentTo(model);
     }
+
+    [Fact]
+    public void GuidValue_SerializeDeserialize_GP()
+    {
+        // Test basic Guid serialization/deserialization from GProtobuf to protobuf-net
+        var testGuid = new Guid("12345678-1234-5678-9abc-123456789abc");
+        var model = new TestModel.GuidTypesModel
+        {
+            GuidValue = testGuid,
+            EmptyGuidValue = Guid.Empty,
+            AnotherGuidValue = Guid.NewGuid()
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeGuidTypesModel);
+        var deserialized = DeserializeWithProtobufNet<TestModel.GuidTypesModel>(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.GuidValue.Should().Be(testGuid, "specific Guid should roundtrip correctly");
+        deserialized.EmptyGuidValue.Should().Be(Guid.Empty, "Guid.Empty should roundtrip correctly");
+        deserialized.AnotherGuidValue.Should().Be(model.AnotherGuidValue, "generated Guid should roundtrip correctly");
+    }
+
+    [Fact]
+    public void GuidEmpty_ShouldNotSerialize_GP()
+    {
+        // Test that Guid.Empty values are not serialized (same as null for reference types)
+        var model = new TestModel.GuidTypesModel
+        {
+            GuidValue = Guid.Empty,
+            EmptyGuidValue = Guid.Empty,
+            AnotherGuidValue = Guid.Empty
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeGuidTypesModel);
+        
+        // All fields are Guid.Empty, so the serialized data should be minimal (just empty message)
+        data.Should().NotBeNull();
+        data.Length.Should().Be(0, "Guid.Empty values should not be serialized, resulting in empty data");
+
+        // Verify protobuf-net can still deserialize the empty data correctly
+        var deserialized = DeserializeWithProtobufNet<TestModel.GuidTypesModel>(data);
+        deserialized.Should().NotBeNull();
+        deserialized.GuidValue.Should().Be(Guid.Empty);
+        deserialized.EmptyGuidValue.Should().Be(Guid.Empty);
+        deserialized.AnotherGuidValue.Should().Be(Guid.Empty);
+    }
+
+    [Fact]
+    public void GuidValue_CrossCompatibility_GP()
+    {
+        // Test cross-compatibility: GProtobuf serialization -> protobuf-net deserialization
+        var testGuid = Guid.Parse("12030201-0000-0000-1100-000000000001");
+        var model = new TestModel.GuidTypesModel
+        {
+            GuidValue = testGuid,
+            EmptyGuidValue = Guid.Empty,
+            AnotherGuidValue = Guid.Empty
+        };
+
+        var gprotobufData = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeGuidTypesModel);
+        var protobufNetDeserialized = DeserializeWithProtobufNet<TestModel.GuidTypesModel>(gprotobufData);
+
+        protobufNetDeserialized.Should().NotBeNull();
+        protobufNetDeserialized.GuidValue.Should().Be(testGuid, "protobuf-net should correctly deserialize GProtobuf-serialized Guid");
+        protobufNetDeserialized.EmptyGuidValue.Should().Be(Guid.Empty, "empty Guid should remain empty");
+        protobufNetDeserialized.AnotherGuidValue.Should().Be(Guid.Empty, "empty Guid should remain empty");
+    }
 }

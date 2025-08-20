@@ -48,6 +48,11 @@ namespace GProtobuf.Core
             Stream.Write(MemoryMarshal.Cast<int, byte>(MemoryMarshal.CreateReadOnlySpan(ref intValue, 1)));
         }
 
+        public void WriteFixed64(ulong ulongValue)
+        {
+            Stream.Write(MemoryMarshal.Cast<ulong, byte>(MemoryMarshal.CreateReadOnlySpan(ref ulongValue, 1)));
+        }
+
         public void WriteVarint32(int intValue)
         {
             var value = (uint)intValue; // Prekonvertujeme int na uint pre spravne Varint kodovanie pre int32 v Protobuf
@@ -193,6 +198,14 @@ namespace GProtobuf.Core
                     ArrayPool<byte>.Shared.Return(rentedBuffer);
                 }
             }
+        }
+
+        public void WriteGuid(Guid value)
+        {
+            // Write Guid as 16-byte array (same as protobuf-net)
+            Span<byte> buffer = stackalloc byte[16];
+            value.TryWriteBytes(buffer);
+            Stream.Write(buffer);
         }
     }
 }
