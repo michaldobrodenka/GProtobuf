@@ -48,5 +48,9 @@ namespace GProtobuf.Tests.TestModel
         // Test with FixedSize encoding
         [ProtoMember(14, DataFormat = DataFormat.FixedSize)]
         public int? NullableFixedSizeIntValue { get; set; }
+
+        // Test nullable Guid
+        [ProtoMember(15)]
+        public Guid? NullableGuidValue { get; set; }
     }
 }

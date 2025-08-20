@@ -516,4 +516,56 @@ public sealed class GProtobufToGProtobufTests : BaseSerializationTest
         
         deserialized.NullableFixedSizeIntValue.Should().Be(987654321);
     }
+
+    [Fact]
+    public void NullableTypes_GuidNull_GG()
+    {
+        var model = new TestModel.NullableTypesModel
+        {
+            NullableGuidValue = null
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeNullableTypesModel);
+        var deserialized = DeserializeWithGProtobuf(data, bytes => TestModel.Serialization.Deserializers.DeserializeNullableTypesModel(bytes));
+
+        data.Should().NotBeNull();
+        data.Length.Should().Be(0, "nullable Guid with null value should not be serialized");
+        
+        deserialized.NullableGuidValue.Should().BeNull();
+    }
+
+    [Fact]
+    public void NullableTypes_GuidWithValue_GG()
+    {
+        var testGuid = Guid.NewGuid();
+        var model = new TestModel.NullableTypesModel
+        {
+            NullableGuidValue = testGuid
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeNullableTypesModel);
+        var deserialized = DeserializeWithGProtobuf(data, bytes => TestModel.Serialization.Deserializers.DeserializeNullableTypesModel(bytes));
+
+        data.Should().NotBeNull();
+        data.Length.Should().BeGreaterThan(0, "nullable Guid with value should be serialized");
+        
+        deserialized.NullableGuidValue.Should().Be(testGuid);
+    }
+
+    [Fact]
+    public void NullableTypes_GuidEmpty_GG()
+    {
+        var model = new TestModel.NullableTypesModel
+        {
+            NullableGuidValue = Guid.Empty
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeNullableTypesModel);
+        var deserialized = DeserializeWithGProtobuf(data, bytes => TestModel.Serialization.Deserializers.DeserializeNullableTypesModel(bytes));
+
+        data.Should().NotBeNull();
+        data.Length.Should().BeGreaterThan(0, "nullable Guid with Guid.Empty should still be serialized");
+        
+        deserialized.NullableGuidValue.Should().Be(Guid.Empty);
+    }
 }

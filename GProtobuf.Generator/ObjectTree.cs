@@ -1470,21 +1470,42 @@ class ObjectTree
 
             case "Guid":
             case "System.Guid":
-                sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != Guid.Empty)");
-                sb.StartNewBlock();
-                sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Len);");
-                sb.AppendIndentedLine($"writer.WriteVarUInt32(18u); // BCL Guid format: 2 fixed64 fields = 2*(1+8) = 18 bytes");
-                sb.AppendIndentedLine($"// Convert Guid to BCL format (2 fixed64 fields)");
-                sb.AppendIndentedLine($"var guidBytes = {objectName}.{protoMember.Name}.ToByteArray();");
-                sb.AppendIndentedLine($"var low = System.BitConverter.ToUInt64(guidBytes, 0);");
-                sb.AppendIndentedLine($"var high = System.BitConverter.ToUInt64(guidBytes, 8);");
-                sb.AppendIndentedLine($"// Field 1: low (fixed64)");
-                sb.AppendIndentedLine($"writer.WriteTag(1, WireType.Fixed64b);");
-                sb.AppendIndentedLine($"writer.WriteFixed64(low);");
-                sb.AppendIndentedLine($"// Field 2: high (fixed64)");
-                sb.AppendIndentedLine($"writer.WriteTag(2, WireType.Fixed64b);");
-                sb.AppendIndentedLine($"writer.WriteFixed64(high);");
-                sb.EndBlock();
+                if (isNullable)
+                {
+                    sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name}.HasValue)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Len);");
+                    sb.AppendIndentedLine($"writer.WriteVarUInt32(18u); // BCL Guid format: 2 fixed64 fields = 2*(1+8) = 18 bytes");
+                    sb.AppendIndentedLine($"// Convert Guid to BCL format (2 fixed64 fields)");
+                    sb.AppendIndentedLine($"var guidBytes = {objectName}.{protoMember.Name}.Value.ToByteArray();");
+                    sb.AppendIndentedLine($"var low = System.BitConverter.ToUInt64(guidBytes, 0);");
+                    sb.AppendIndentedLine($"var high = System.BitConverter.ToUInt64(guidBytes, 8);");
+                    sb.AppendIndentedLine($"// Field 1: low (fixed64)");
+                    sb.AppendIndentedLine($"writer.WriteTag(1, WireType.Fixed64b);");
+                    sb.AppendIndentedLine($"writer.WriteFixed64(low);");
+                    sb.AppendIndentedLine($"// Field 2: high (fixed64)");
+                    sb.AppendIndentedLine($"writer.WriteTag(2, WireType.Fixed64b);");
+                    sb.AppendIndentedLine($"writer.WriteFixed64(high);");
+                    sb.EndBlock();
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != Guid.Empty)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Len);");
+                    sb.AppendIndentedLine($"writer.WriteVarUInt32(18u); // BCL Guid format: 2 fixed64 fields = 2*(1+8) = 18 bytes");
+                    sb.AppendIndentedLine($"// Convert Guid to BCL format (2 fixed64 fields)");
+                    sb.AppendIndentedLine($"var guidBytes = {objectName}.{protoMember.Name}.ToByteArray();");
+                    sb.AppendIndentedLine($"var low = System.BitConverter.ToUInt64(guidBytes, 0);");
+                    sb.AppendIndentedLine($"var high = System.BitConverter.ToUInt64(guidBytes, 8);");
+                    sb.AppendIndentedLine($"// Field 1: low (fixed64)");
+                    sb.AppendIndentedLine($"writer.WriteTag(1, WireType.Fixed64b);");
+                    sb.AppendIndentedLine($"writer.WriteFixed64(low);");
+                    sb.AppendIndentedLine($"// Field 2: high (fixed64)");
+                    sb.AppendIndentedLine($"writer.WriteTag(2, WireType.Fixed64b);");
+                    sb.AppendIndentedLine($"writer.WriteFixed64(high);");
+                    sb.EndBlock();
+                }
                 break;
 
             case "byte[]":
@@ -1873,17 +1894,34 @@ class ObjectTree
 
             case "Guid":
             case "System.Guid":
-                sb.AppendIndentedLine($"if (obj.{protoMember.Name} != Guid.Empty)");
-                sb.StartNewBlock();
-                sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
-                sb.AppendIndentedLine($"calculator.WriteVarUInt32(18u); // BCL Guid: 2*(tag+fixed64) = 2*(1+8) = 18 bytes");
-                sb.AppendIndentedLine($"// Field 1: low (tag + fixed64)");
-                sb.AppendIndentedLine($"calculator.WriteTag(1, WireType.Fixed64b);");
-                sb.AppendIndentedLine($"calculator.WriteFixed64(0ul); // placeholder");
-                sb.AppendIndentedLine($"// Field 2: high (tag + fixed64)");
-                sb.AppendIndentedLine($"calculator.WriteTag(2, WireType.Fixed64b);");
-                sb.AppendIndentedLine($"calculator.WriteFixed64(0ul); // placeholder");
-                sb.EndBlock();
+                if (isNullable)
+                {
+                    sb.AppendIndentedLine($"if (obj.{protoMember.Name}.HasValue)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+                    sb.AppendIndentedLine($"calculator.WriteVarUInt32(18u); // BCL Guid: 2*(tag+fixed64) = 2*(1+8) = 18 bytes");
+                    sb.AppendIndentedLine($"// Field 1: low (tag + fixed64)");
+                    sb.AppendIndentedLine($"calculator.WriteTag(1, WireType.Fixed64b);");
+                    sb.AppendIndentedLine($"calculator.WriteFixed64(0ul); // placeholder");
+                    sb.AppendIndentedLine($"// Field 2: high (tag + fixed64)");
+                    sb.AppendIndentedLine($"calculator.WriteTag(2, WireType.Fixed64b);");
+                    sb.AppendIndentedLine($"calculator.WriteFixed64(0ul); // placeholder");
+                    sb.EndBlock();
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"if (obj.{protoMember.Name} != Guid.Empty)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+                    sb.AppendIndentedLine($"calculator.WriteVarUInt32(18u); // BCL Guid: 2*(tag+fixed64) = 2*(1+8) = 18 bytes");
+                    sb.AppendIndentedLine($"// Field 1: low (tag + fixed64)");
+                    sb.AppendIndentedLine($"calculator.WriteTag(1, WireType.Fixed64b);");
+                    sb.AppendIndentedLine($"calculator.WriteFixed64(0ul); // placeholder");
+                    sb.AppendIndentedLine($"// Field 2: high (tag + fixed64)");
+                    sb.AppendIndentedLine($"calculator.WriteTag(2, WireType.Fixed64b);");
+                    sb.AppendIndentedLine($"calculator.WriteFixed64(0ul); // placeholder");
+                    sb.EndBlock();
+                }
                 break;
 
             case "byte[]":

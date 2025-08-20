@@ -353,4 +353,19 @@ public sealed class ProtobufNetToGProtobufTests : BaseSerializationTest
         deserialized.NullableDoubleValue.Should().Be(3.14159);
         deserialized.NullableBoolValue.Should().Be(true);
     }
+
+    [Fact]
+    public void NullableTypes_GuidCompatibleWithProtobufNet_PG()
+    {
+        var testGuid = Guid.NewGuid();
+        var model = new TestModel.NullableTypesModel
+        {
+            NullableGuidValue = testGuid
+        };
+
+        var data = SerializeWithProtobufNet(model);
+        var deserialized = DeserializeWithGProtobuf(data, bytes => TestModel.Serialization.Deserializers.DeserializeNullableTypesModel(bytes));
+
+        deserialized.NullableGuidValue.Should().Be(testGuid);
+    }
 }
