@@ -37,14 +37,14 @@ byte[] data, data2, modelData;
 
     using (var ms = new MemoryStream())
     {
-        Serializer.Serialize<B>(ms, b);
+        Serializer.Serialize<C>(ms, b);
         data = ms.ToArray();
     }
 
     using (var ms = new MemoryStream())
     {
         //Serializer.Serialize(ms, b);
-        Model.Serialization.Serializers.SerializeB(ms, b);
+        Model.Serialization.Serializers.SerializeC(ms, b);
         data2 = ms.ToArray();
     }
 
