@@ -30,7 +30,7 @@ byte[] data, data2, modelData;
 {
     var x = new C()
     {
-        //StringA = "abc",
+        StringA = "abc",
         //StringB = "abc1",
         //StringC = "abc2",
     };
@@ -48,21 +48,21 @@ byte[] data, data2, modelData;
         Serializer.Serialize<A>(ms, x);
         data = ms.ToArray();
 
-        Console.WriteLine("protobuf-net: "+String.Join(',', data));
+        Console.WriteLine("protobuf-net: " + String.Join(',', data));
     }
 
     using (var ms = new MemoryStream())
     {
         //Serializer.Serialize(ms, b);
-        Model.Serialization.Serializers.SerializeA(ms, x);
+        Model.Serialization.Serializers.SerializeC(ms, x);
         data2 = ms.ToArray();
         Console.WriteLine("GProtobuf: " + String.Join(',', data2));
     }
 
-    Console.WriteLine("Output equals: " +data.SequenceEqual(data2));
+    Console.WriteLine("Output equals: " + data.SequenceEqual(data2));
 
     {
-        var result3 = Model.Serialization.Deserializers.DeserializeB(data2);
+        var result3 = Model.Serialization.Deserializers.DeserializeC(data2);
         //Console.WriteLine(result3.StringA);
         //Console.WriteLine(result3.StringB);
     }
@@ -109,6 +109,8 @@ byte[] data, data2, modelData;
 //{
 //    Serializer.Serialize(ms, model);
 //    modelData = ms.ToArray();
+
+//    Console.WriteLine("protobuf-net: " + String.Join(',', modelData));
 //}
 
 //using (var ms = new MemoryStream())
@@ -117,11 +119,17 @@ byte[] data, data2, modelData;
 //    Model.Serialization.Serializers.SerializeModelClass(ms, model);
 
 //    data2 = ms.ToArray();
+
+//    Console.WriteLine("GProtobuf: " + String.Join(',', data2));
 //}
 
+//Console.WriteLine("Output equals: " + modelData.SequenceEqual(data2));
+
 //var modelResult = Model.Serialization.Deserializers.DeserializeModelClassBase(modelData);
-//var result = Model.Serialization.Deserializers.DeserializeClassWithCollections(data);
-//var result2 = Model.Serialization.Deserializers.DeserializeClassWithCollections(data2);
+////var result = Model.Serialization.Deserializers.DeserializeClassWithCollections(data);
+//var result2 = Model.Serialization.Deserializers.DeserializeModelClassBase(data2);
+
+Console.ReadLine();
 
 //using (var ms = new MemoryStream(data2))
 //{
