@@ -2,6 +2,57 @@
 
 namespace Model;
 
+
+[ProtoContract]
+[ProtoInclude(5, typeof(B))]
+public class A
+{
+    [ProtoMember(1)]
+    public string StringA { get; set; }
+}
+
+[ProtoContract]
+[ProtoInclude(10,typeof(C))]
+public class B : A 
+{
+    [ProtoMember(1)]
+    public string StringB { get; set; }
+}
+
+[ProtoContract]
+public class C : B
+{
+    [ProtoMember(1)]
+    public string StringC { get; set; }
+}
+
+[ProtoContract]
+public class A1
+{
+    [ProtoMember(5)]
+    public B1 B1 { get; set; }
+
+    [ProtoMember(1)]
+    public string StringA { get; set; }
+}
+
+[ProtoContract]
+public class B1
+{
+    [ProtoMember(10)]
+    public C1 C1 { get; set; }
+
+    [ProtoMember(1)]
+    public string StringB { get; set; }
+}
+
+[ProtoContract]
+public class C1
+{
+    [ProtoMember(1)]
+    public string StringC { get; set; }
+}
+
 [ProtoContract]
 [ProtoInclude(1, typeof(ModelClass))]
 [ProtoInclude(2, typeof(SecondModelClass))]

@@ -1,11 +1,13 @@
 ﻿using GProtobuf.Core;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace GProtobuf.Generator;
 
 public sealed record TypeDefinition(
     bool IsStruct,
+    bool IsAbstract,
     string FullName,
     List<ProtoIncludeAttribute> ProtoIncludes, // List of ProtoInclude derived classes
     List<ProtoMemberAttribute> ProtoMembers);
@@ -16,9 +18,123 @@ class ObjectTree
 
     private Dictionary<string, string> baseClassesForTypes = new();
 
-    public void AddType(string nmspace, string fullName, bool isStruct, List<ProtoIncludeAttribute> protoIncludes, List<ProtoMemberAttribute> protoMembers)
+    private TypeDefinition FindTypeByFullName(string fullName)
     {
-        AddType(nmspace, new TypeDefinition(isStruct, fullName, protoIncludes, protoMembers));
+        foreach (var typeList in types.Values)
+        {
+            var type = typeList.FirstOrDefault(t => t.FullName == fullName);
+            if (type != null)
+                return type;
+        }
+        return null;
+    }
+
+    private void WriteAncestorFields(StringBuilderWithIndent sb, string baseClassName)
+    {
+        var baseType = FindTypeByFullName(baseClassName);
+        if (baseType == null) return;
+
+        // First write ancestor's ancestors (recursively)
+        if (baseClassesForTypes.TryGetValue(baseType.FullName, out var grandParentClassName))
+        {
+            WriteAncestorFields(sb, grandParentClassName);
+        }
+
+        // Then write this ancestor's fields
+        if (baseType.ProtoMembers != null)
+        {
+            foreach (var baseMember in baseType.ProtoMembers)
+            {
+                WriteProtoMember(sb, baseMember);
+            }
+        }
+    }
+
+    private void WriteInheritedFieldsForContent(StringBuilderWithIndent sb, string typeName)
+    {
+        // Write inherited fields from all ancestors hierarchically
+        if (baseClassesForTypes.TryGetValue(typeName, out var baseClassName))
+        {
+            WriteAncestorFields(sb, baseClassName);
+        }
+    }
+
+    private string FindUltimateBaseClass(string typeName)
+    {
+        string currentType = typeName;
+        string lastBaseType = currentType;
+        
+        // Walk up the inheritance chain to find the ultimate base class
+        while (baseClassesForTypes.TryGetValue(currentType, out var baseType))
+        {
+            lastBaseType = baseType;
+            currentType = baseType;
+        }
+        
+        return lastBaseType;
+    }
+
+    private void WriteAllInheritanceFieldIds(StringBuilderWithIndent sb, string typeName)
+    {
+        var fieldIds = new List<(int FieldId, string CurrentTypeName)>();
+        
+        // Collect all field IDs in the inheritance chain
+        CollectInheritanceFieldIds(typeName, fieldIds);
+        
+        // Generate if statements for all field IDs
+        foreach (var (fieldId, currentTypeName) in fieldIds)
+        {
+            sb.AppendIndentedLine($"if (fieldId == {fieldId})");
+            sb.StartNewBlock();
+            sb.AppendIndentedLine($"var length = reader.ReadVarInt32();");
+            sb.AppendIndentedLine($"var reader1 = new SpanReader(reader.GetSlice(length));");
+            sb.AppendIndentedLine($"var contentResult = Read{GetClassNameFromFullName(currentTypeName)}Content(ref reader1);");
+            
+            // Add type check and cast if this is not the exact type expected
+            if (currentTypeName != typeName)
+            {
+                sb.AppendIndentedLine($"if (contentResult is global::{typeName} castResult)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"result = castResult;");
+                sb.AppendIndentedLine($"continue;");
+                sb.EndBlock();
+                sb.AppendIndentedLine($"throw new InvalidOperationException($\"Expected type {typeName} but got {{contentResult?.GetType().Name ?? \"null\"}}\");");
+            }
+            else
+            {
+                sb.AppendIndentedLine($"result = contentResult;");
+                sb.AppendIndentedLine($"continue;");
+            }
+            
+            sb.EndBlock();
+            sb.AppendNewLine();
+        }
+    }
+
+    private void CollectInheritanceFieldIds(string typeName, List<(int FieldId, string CurrentTypeName)> fieldIds)
+    {
+        // Check if this type has a base class
+        if (baseClassesForTypes.TryGetValue(typeName, out var baseClassName))
+        {
+            // First collect field IDs from parent's hierarchy  
+            CollectInheritanceFieldIds(baseClassName, fieldIds);
+            
+            // Then add the field ID that references current type from its base class
+            var baseType = FindTypeByFullName(baseClassName);
+            if (baseType != null)
+            {
+                var protoInclude = baseType.ProtoIncludes.FirstOrDefault(pi => pi.Type == typeName);
+                if (protoInclude != null)
+                {
+                    fieldIds.Add((protoInclude.FieldId, typeName));
+                }
+            }
+        }
+    }
+
+    public void AddType(string nmspace, string fullName, bool isStruct, bool isAbstract, List<ProtoIncludeAttribute> protoIncludes, List<ProtoMemberAttribute> protoMembers)
+    {
+        AddType(nmspace, new TypeDefinition(isStruct, isAbstract, fullName, protoIncludes, protoMembers));
     }
 
     public void AddType(string @namespace, TypeDefinition typeDefinition)
@@ -56,7 +172,7 @@ class ObjectTree
         }
     }
 
-    private static void GenerateCode(
+    private void GenerateCode(
         StringBuilderWithIndent sb,
         KeyValuePair<string, List<TypeDefinition>> namespaceWithObjects,
         string nmspace)
@@ -111,33 +227,150 @@ class ObjectTree
             sb.AppendIndentedLine($"public static global::{obj.FullName} Read{GetClassNameFromFullName(obj.FullName)}(ref SpanReader reader)");
             sb.StartNewBlock();
 
-            if (obj.ProtoIncludes.Count == 0)
-                sb.AppendIndentedLine($"global::{obj.FullName} result = new global::{obj.FullName}();\r\n");
+            // Check if this type is part of inheritance hierarchy (has ProtoIncludes OR is referenced in base class ProtoInclude)
+            bool isPartOfInheritanceHierarchy = obj.ProtoIncludes.Count > 0 || baseClassesForTypes.ContainsKey(obj.FullName);
+            
+            if (!isPartOfInheritanceHierarchy)
+            {
+                // Simple case - no inheritance, just read content
+                sb.AppendIndentedLine($"return Read{GetClassNameFromFullName(obj.FullName)}Content(ref reader);");
+            }
             else
+            {
+                // Complex case - check for ProtoInclude first
                 sb.AppendIndentedLine($"global::{obj.FullName} result = default(global::{obj.FullName});\r\n");
+                sb.AppendIndentedLine($"while(!reader.IsEnd)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"var (wireType, fieldId) = reader.ReadWireTypeAndFieldId();\r\n");
 
-            sb.AppendIndentedLine($"while(!reader.IsEnd)");
-            sb.StartNewBlock();
-            sb.AppendIndentedLine($"var (wireType, fieldId) = reader.ReadWireTypeAndFieldId();\r\n");
-
-            if (obj.ProtoIncludes != null)
-            {
                 WriteProtoIncludesInDeserializers(sb, obj);
-            }
 
-            if (obj.ProtoMembers != null)
-            {
-                foreach (var protoMember in obj.ProtoMembers)
+                // In main Read methods, write ONLY ultimate base class fields
+                // All other type-specific fields are handled in ReadXContent methods
+                if (baseClassesForTypes.ContainsKey(obj.FullName))
                 {
-                    WriteProtoMember(sb, protoMember);
+                    // This is a derived class - write only ultimate base class fields
+                    var ultimateBaseClassName = FindUltimateBaseClass(obj.FullName);
+                    var ultimateBaseType = FindTypeByFullName(ultimateBaseClassName);
+                    
+                    if (ultimateBaseType != null && ultimateBaseType.ProtoMembers != null)
+                    {
+                        foreach (var baseMember in ultimateBaseType.ProtoMembers)
+                        {
+                            WriteProtoMember(sb, baseMember);
+                        }
+                    }
                 }
-            }
-            sb.AppendIndentedLine($"// default");
-            sb.AppendIndentedLine($"reader.SkipField(wireType);");
-            sb.EndBlock();// end of main while loop
+                else if (obj.ProtoMembers != null)
+                {
+                    // This is a base class - write own members
+                    foreach (var protoMember in obj.ProtoMembers)
+                    {
+                        WriteProtoMember(sb, protoMember);
+                    }
+                }
 
+                sb.AppendIndentedLine($"// default");
+                sb.AppendIndentedLine($"reader.SkipField(wireType);");
+                sb.EndBlock();
+                sb.AppendIndentedLine($"return result;");
+            }
+            sb.EndBlock();
             sb.AppendNewLine();
-            sb.AppendIndentedLine($"return result;");
+        }
+
+        sb.AppendNewLine();
+
+        // Generate Content reading methods
+        foreach (var obj in objects)
+        {
+            sb.AppendIndentedLine($"public static global::{obj.FullName} Read{GetClassNameFromFullName(obj.FullName)}Content(ref SpanReader reader)");
+            sb.StartNewBlock();
+
+            // Check if this type is part of inheritance hierarchy (has ProtoIncludes OR is referenced in base class ProtoInclude)
+            bool isPartOfInheritanceHierarchy = obj.ProtoIncludes.Count > 0 || baseClassesForTypes.ContainsKey(obj.FullName);
+            
+            if (!isPartOfInheritanceHierarchy)
+            {
+                // Simple case - no inheritance, just create and fill instance
+                sb.AppendIndentedLine($"global::{obj.FullName} result = new global::{obj.FullName}();\r\n");
+                sb.AppendIndentedLine($"while(!reader.IsEnd)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"var (wireType, fieldId) = reader.ReadWireTypeAndFieldId();\r\n");
+
+                if (obj.ProtoMembers != null)
+                {
+                    foreach (var protoMember in obj.ProtoMembers)
+                    {
+                        WriteProtoMember(sb, protoMember);
+                    }
+                }
+
+
+                sb.AppendIndentedLine($"// default");
+                sb.AppendIndentedLine($"reader.SkipField(wireType);");
+                sb.EndBlock();
+                sb.AppendIndentedLine($"return result;");
+            }
+            else
+            {
+                // Complex case - check for ProtoInclude first and determine correct type
+                // For non-abstract types, create instance immediately to handle cases with no type-specific fields
+                if (obj.IsAbstract)
+                {
+                    sb.AppendIndentedLine($"global::{obj.FullName} result = default(global::{obj.FullName});\r\n");
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"global::{obj.FullName} result = new global::{obj.FullName}();\r\n");
+                }
+                
+                sb.AppendIndentedLine($"while(!reader.IsEnd)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"var (wireType, fieldId) = reader.ReadWireTypeAndFieldId();\r\n");
+
+                // Write own ProtoIncludes first (derived classes)
+                if (obj.ProtoIncludes.Count > 0)
+                {
+                    foreach (var protoInclude in obj.ProtoIncludes)
+                    {
+                        sb.AppendIndentedLine($"if (fieldId == {protoInclude.FieldId})");
+                        sb.StartNewBlock();
+                        sb.AppendIndentedLine($"var length = reader.ReadVarInt32();");
+                        sb.AppendIndentedLine($"var reader1 = new SpanReader(reader.GetSlice(length));");
+                        sb.AppendIndentedLine($"result = Read{GetClassNameFromFullName(protoInclude.Type)}Content(ref reader1);");
+                        sb.AppendIndentedLine($"continue;");
+                        sb.EndBlock();
+                        sb.AppendNewLine();
+                    }
+                }
+
+                // Only for abstract types, check if instance was created via ProtoInclude
+                if (obj.IsAbstract)
+                {
+                    sb.AppendIndentedLine($"if (result == null)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"throw new InvalidOperationException($\"ProtoInclude field must be first for abstract type {obj.FullName}. Is {{fieldId}} defined in ProtoInclude attributes?\");");
+                    sb.EndBlock();
+                    sb.AppendNewLine();
+                }
+
+                // Write fields specific to this type
+                if (obj.ProtoMembers != null)
+                {
+                    foreach (var protoMember in obj.ProtoMembers)
+                    {
+                        WriteProtoMember(sb, protoMember);
+                    }
+                }
+
+
+                sb.AppendIndentedLine($"// default");
+                sb.AppendIndentedLine($"reader.SkipField(wireType);");
+                sb.EndBlock();
+                sb.AppendIndentedLine($"return result;");
+            }
+            
             sb.EndBlock();
             sb.AppendNewLine();
         }
@@ -164,11 +397,12 @@ class ObjectTree
                     var className = GetClassNameFromFullName(include.Type);
                     sb.AppendIndentedLine($"case global::{include.Type} obj1:");
                     sb.IncreaseIndent();
+                    sb.AppendIndentedLine($"var calculator{include.FieldId} = new global::GProtobuf.Core.WriteSizeCalculator();");
+                    sb.AppendIndentedLine($"SizeCalculators.Calculate{className}Size(ref calculator{include.FieldId}, obj1);");
                     sb.AppendIndentedLine($"writer.WriteTag({include.FieldId}, WireType.Len);");
-                    sb.AppendIndentedLine("writer.WriteVarint32(0);"); // todo protobuf-net writes length here
-                    
+                    sb.AppendIndentedLine($"writer.WriteVarint32((int)calculator{include.FieldId}.Length);");
                     sb.AppendIndentedLine($"Write{className}(writer, obj1);");
-                    sb.AppendIndentedLine("return;");
+                    sb.AppendIndentedLine("break;");
                     sb.DecreaseIndent();
                 }
                 sb.EndBlock();
@@ -187,33 +421,97 @@ class ObjectTree
         }
 
         sb.EndBlock();
-        sb.EndBlock();
-    }
 
-    private static void WriteProtoIncludesInDeserializers(StringBuilderWithIndent sb, TypeDefinition obj)
-    {
-        if (obj.ProtoIncludes.Count <= 0) return;
+        sb.AppendNewLine();
 
-        foreach (var protoInclude in obj.ProtoIncludes)
+        // Generate SizeCalculators
+        sb.AppendIndentedLine("public static class SizeCalculators");
+        sb.StartNewBlock();
+
+        foreach (var obj in objects)
         {
-            //protoInclude.Type
-            sb.AppendIndentedLine($"if (fieldId == {protoInclude.FieldId})");
+            sb.AppendIndentedLine($"public static void Calculate{GetClassNameFromFullName(obj.FullName)}Size(ref global::GProtobuf.Core.WriteSizeCalculator calculator, global::{obj.FullName} obj)");
             sb.StartNewBlock();
-            sb.AppendIndentedLine($"var length = reader.ReadVarInt32();");
-            sb.AppendIndentedLine($"var reader1 = new SpanReader(reader.GetSlice(length));");
-            //sb.AppendLine($"\t\t\t\t\tresult = reader1.Read{GetClassNameFromFullName(protoInclude.Type)}();");
-            sb.AppendIndentedLine($"result = global::{protoInclude.Namespace}.Serialization.SpanReaders.Read{GetClassNameFromFullName(protoInclude.Type)}(ref reader1);");
 
-            sb.AppendIndentedLine($"continue;");
-            //sb.AppendIndentedLine($"\t\t\t\t}}\r\n");
+            if (obj.ProtoIncludes.Count > 0)
+            {
+                sb.AppendNewLine();
+                sb.AppendIndentedLine("switch (obj)");
+                sb.StartNewBlock();
+                foreach (var include in obj.ProtoIncludes)
+                {
+                    var className = GetClassNameFromFullName(include.Type);
+                    sb.AppendIndentedLine($"case global::{include.Type} obj1:");
+                    sb.IncreaseIndent();
+                    sb.AppendIndentedLine($"calculator.WriteTag({include.FieldId}, WireType.Len);");
+                    sb.AppendIndentedLine($"var lengthBefore{include.FieldId} = calculator.Length;");
+                    sb.AppendIndentedLine($"calculator.WriteVarint32(0); // placeholder for length");
+                    sb.AppendIndentedLine($"var contentStartLength{include.FieldId} = calculator.Length;");
+                    sb.AppendIndentedLine($"Calculate{className}Size(ref calculator, obj1);");
+                    sb.AppendIndentedLine($"var contentLength{include.FieldId} = calculator.Length - contentStartLength{include.FieldId};");
+                    sb.AppendIndentedLine($"// Note: Length is calculated correctly, varint placeholder size approximation is acceptable");
+                    sb.AppendIndentedLine("break;");
+                    sb.DecreaseIndent();
+                }
+                sb.EndBlock();
+            }
+
+            if (obj.ProtoMembers != null)
+            {
+                foreach (var protoMember in obj.ProtoMembers)
+                {
+                    WriteProtoMemberSizeCalculator(sb, protoMember);
+                }
+            }
+
             sb.EndBlock();
             sb.AppendNewLine();
         }
+
+        sb.EndBlock();
+        sb.EndBlock();
+    }
+
+    private void WriteProtoIncludesInDeserializers(StringBuilderWithIndent sb, TypeDefinition obj)
+    {
+        // Write own ProtoIncludes first (derived classes)
+        if (obj.ProtoIncludes.Count > 0)
+        {
+            foreach (var protoInclude in obj.ProtoIncludes)
+            {
+                sb.AppendIndentedLine($"if (fieldId == {protoInclude.FieldId})");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"var length = reader.ReadVarInt32();");
+                sb.AppendIndentedLine($"var reader1 = new SpanReader(reader.GetSlice(length));");
+                sb.AppendIndentedLine($"var contentResult = Read{GetClassNameFromFullName(protoInclude.Type)}Content(ref reader1);");
+                sb.AppendIndentedLine($"result = contentResult;");
+                sb.AppendIndentedLine($"continue;");
+                sb.EndBlock();
+                sb.AppendNewLine();
+            }
+        }
+
+        // Generate all ProtoInclude field IDs in the entire inheritance hierarchy for this type
+        WriteAllInheritanceFieldIds(sb, obj.FullName);
         
         sb.AppendIndentedLine($"if (result == null)");
-        sb.AppendIndentedLine($"throw new InvalidOperationException($\"ProtoInclude field must be first. Is {{fieldId}} defined in ProtoInclude attributes?\");\r\n");
+        sb.StartNewBlock();
+        // If this type is referenced in base class ProtoInclude, it must have field ID at the beginning
+        bool isInBaseProtoInclude = baseClassesForTypes.ContainsKey(obj.FullName);
+        if (obj.IsAbstract || isInBaseProtoInclude)
+        {
+            string typeDescription = obj.IsAbstract ? "abstract type" : "ProtoInclude type";
+            sb.AppendIndentedLine($"throw new InvalidOperationException($\"ProtoInclude field must be first for {typeDescription} {obj.FullName}. Is {{fieldId}} defined in ProtoInclude attributes?\");");
+        }
+        else
+        {
+            sb.AppendIndentedLine($"result = new global::{obj.FullName}();");
+        }
+        sb.EndBlock();
+        sb.AppendNewLine();
         // todo hybrid binary tree for many proto includes
     }
+
 
     private static void WriteProtoMember(StringBuilderWithIndent sb, ProtoMemberAttribute protoMember)
     {
@@ -451,12 +749,131 @@ class ObjectTree
             default:
                 sb.AppendIndentedLine($"if (obj.{protoMember.Name} != null)");
                 sb.StartNewBlock();
-                sb.AppendIndentedLine($"var ms = new MemoryStream();");
-                sb.AppendIndentedLine($"global::{protoMember.Namespace}.Serialization.Serializers.Serialize{GetClassNameFromFullName(protoMember.Type)}(ms, obj.{protoMember.Name});");
+                sb.AppendIndentedLine($"var calculator{protoMember.FieldId} = new global::GProtobuf.Core.WriteSizeCalculator();");
+                sb.AppendIndentedLine($"SizeCalculators.Calculate{GetClassNameFromFullName(protoMember.Type)}Size(ref calculator{protoMember.FieldId}, obj.{protoMember.Name});");
                 sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Len);");
-                sb.AppendIndentedLine($"writer.WriteVarint32((int)ms.Length);");
-                sb.AppendIndentedLine($"ms.Position = 0;");
-                sb.AppendIndentedLine($"ms.CopyTo(writer.Stream);");
+                sb.AppendIndentedLine($"writer.WriteVarint32((int)calculator{protoMember.FieldId}.Length);");
+                sb.AppendIndentedLine($"StreamWriters.Write{GetClassNameFromFullName(protoMember.Type)}(writer, obj.{protoMember.Name});");
+                sb.EndBlock();
+                break;
+        }
+
+        sb.AppendNewLine();
+    }
+
+    private static void WriteProtoMemberSizeCalculator(StringBuilderWithIndent sb, ProtoMemberAttribute protoMember)
+    {
+        var typeName = GetClassNameFromFullName(protoMember.Type);
+
+        switch (typeName)
+        {
+            case "System.Int32":
+            case "Int32":
+            case "int":
+                sb.AppendIndentedLine($"if (obj.{protoMember.Name} != 0)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                switch (protoMember.DataFormat)
+                {
+                    case DataFormat.FixedSize:
+                        sb.AppendIndentedLine($"calculator.WriteFixedSizeInt32(obj.{protoMember.Name});");
+                        break;
+                    case DataFormat.ZigZag:
+                        sb.AppendIndentedLine($"calculator.WriteZigZag32(obj.{protoMember.Name});");
+                        break;
+                    default:
+                        sb.AppendIndentedLine($"calculator.WriteVarint32(obj.{protoMember.Name});");
+                        break;
+                }
+                sb.EndBlock();
+                break;
+
+            case "Double":
+            case "double":
+                sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Fixed64b);");
+                sb.AppendIndentedLine($"calculator.WriteDouble(obj.{protoMember.Name});");
+                break;
+
+            case "Single":
+            case "single":
+            case "float":
+                sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Fixed32b);");
+                sb.AppendIndentedLine($"calculator.WriteFloat(obj.{protoMember.Name});");
+                break;
+
+            case "String":
+            case "System.String":
+            case "string":
+                sb.AppendIndentedLine($"if (obj.{protoMember.Name} != null)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+                sb.AppendIndentedLine($"calculator.WriteString(obj.{protoMember.Name});");
+                sb.EndBlock();
+                break;
+
+            case "byte[]":
+            case "Byte[]":
+            case "System.Byte[]":
+                sb.AppendIndentedLine($"if (obj.{protoMember.Name} != null)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+                sb.AppendIndentedLine($"calculator.WriteBytes(obj.{protoMember.Name});");
+                sb.EndBlock();
+                break;
+
+            case "System.Int32[]":
+            case "Int32[]":
+            case "int[]":
+                sb.AppendIndentedLine($"if (obj.{protoMember.Name} != null)");
+                sb.StartNewBlock();
+                if (protoMember.IsPacked)
+                {
+                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+                    switch (protoMember.DataFormat)
+                    {
+                        case DataFormat.FixedSize:
+                            sb.AppendIndentedLine($"calculator.WritePackedFixedSizeIntArray(obj.{protoMember.Name});");
+                            break;
+                        case DataFormat.ZigZag:
+                            sb.AppendIndentedLine($"calculator.WritePackedZigZagArray(obj.{protoMember.Name});");
+                            break;
+                        default:
+                            sb.AppendIndentedLine($"calculator.WritePackedVarintArray(obj.{protoMember.Name});");
+                            break;
+                    }
+                }
+                else
+                {
+                    // Non-packed arrays - calculate each element separately
+                    switch (protoMember.DataFormat)
+                    {
+                        case DataFormat.FixedSize:
+                            sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.Fixed32b);");
+                            sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteVarint32(tagAndWire); calculator.WriteFixedSizeInt32(v); }}");
+                            break;
+                        case DataFormat.ZigZag:
+                            sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.VarInt);");
+                            sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteVarint32(tagAndWire); calculator.WriteZigZag32(v); }}");
+                            break;
+                        default:
+                            sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.VarInt);");
+                            sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteVarint32(tagAndWire); calculator.WriteVarint32(v); }}");
+                            break;
+                    }
+                }
+                sb.EndBlock();
+                break;
+
+            default:
+                sb.AppendIndentedLine($"if (obj.{protoMember.Name} != null)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+                sb.AppendIndentedLine($"var lengthBefore{protoMember.FieldId} = calculator.Length;");
+                sb.AppendIndentedLine($"calculator.WriteVarint32(0); // placeholder for length");
+                sb.AppendIndentedLine($"var contentStartLength{protoMember.FieldId} = calculator.Length;");
+                sb.AppendIndentedLine($"SizeCalculators.Calculate{GetClassNameFromFullName(protoMember.Type)}Size(ref calculator, obj.{protoMember.Name});");
+                sb.AppendIndentedLine($"var contentLength{protoMember.FieldId} = calculator.Length - contentStartLength{protoMember.FieldId};");
+                sb.AppendIndentedLine($"// Note: Length is calculated correctly, varint placeholder size approximation is acceptable");
                 sb.EndBlock();
                 break;
         }

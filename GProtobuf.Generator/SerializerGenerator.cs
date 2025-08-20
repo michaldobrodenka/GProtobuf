@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -10,6 +11,13 @@ public sealed class SerializerGenerator : IIncrementalGenerator
 {
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
+//#if DEBUG
+//        if (!Debugger.IsAttached)
+//        {
+//            Debugger.Launch();
+//        }
+//#endif
+
         var pipeline = context.SyntaxProvider.ForAttributeWithMetadataName(
             fullyQualifiedMetadataName: "ProtoBuf.ProtoContractAttribute",
             predicate: static (node, _) => node is ClassDeclarationSyntax,
@@ -21,6 +29,7 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                 var protoMembers = GetProtoMemberAttributes(typeWithAttribute);
                 var typeDefinition = new TypeDefinition(
                     IsStruct: false, // todo implement support for structs
+                    IsAbstract: typeWithAttribute.IsAbstract,
                     typeWithAttribute.ToDisplayString(),
                     protoIncludes,
                     protoMembers);

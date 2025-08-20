@@ -28,6 +28,55 @@ ModelClass model = new ModelClass
 
 byte[] data, data2, modelData;
 
+{
+    var b = new C()
+    {
+        StringA = "abc",
+        StringB = "abc1",
+    };
+
+    using (var ms = new MemoryStream())
+    {
+        Serializer.Serialize<B>(ms, b);
+        data = ms.ToArray();
+    }
+
+    using (var ms = new MemoryStream())
+    {
+        //Serializer.Serialize(ms, b);
+        Model.Serialization.Serializers.SerializeB(ms, b);
+        data2 = ms.ToArray();
+    }
+
+    {
+        var result3 = Model.Serialization.Deserializers.DeserializeB(data2);
+    }
+}
+
+var c = new C()
+{
+     StringA = "abc",
+     StringB = "abc1",
+     StringC = "abc2",
+};
+
+using (var ms = new MemoryStream())
+{
+    Serializer.Serialize(ms, c);
+    data = ms.ToArray();
+}
+{
+    var result3 = Model.Serialization.Deserializers.DeserializeC(data);
+}
+
+//using (var ms = new MemoryStream(data))
+//{
+//    //Model.Serialization.Serializers.SerializeClassWithCollections(ms, model.Model2);
+//    //var result3 = Serializer.Deserialize<A1>(ms);
+
+//}
+
+
 using (var ms = new MemoryStream())
 {
     Serializer.Serialize(ms, model.Model2);
@@ -42,7 +91,8 @@ using (var ms = new MemoryStream())
 
 using (var ms = new MemoryStream())
 {
-    Model.Serialization.Serializers.SerializeClassWithCollections(ms, model.Model2);
+    //Model.Serialization.Serializers.SerializeClassWithCollections(ms, model.Model2);
+    Model.Serialization.Serializers.SerializeModelClass(ms, model);
 
     data2 = ms.ToArray();
 }

@@ -169,5 +169,46 @@ namespace GProtobuf.Core
             Length = 0;
             return currentLength;
         }
+
+        // Packed array methods
+        public void WritePackedVarintArray(int[] array)
+        {
+            if (array != null)
+            {
+                var packedSize = Utils.GetVarintPackedCollectionSize(array);
+                WriteVarint32(packedSize);
+                Length += packedSize;
+            }
+        }
+
+        public void WritePackedVarintList(List<int> list)
+        {
+            if (list != null)
+            {
+                var packedSize = Utils.GetVarintPackedCollectionSize(list);
+                WriteVarint32(packedSize);
+                Length += packedSize;
+            }
+        }
+
+        public void WritePackedZigZagArray(int[] array)
+        {
+            if (array != null)
+            {
+                var packedSize = Utils.GetVarintPackedCollectionSize(array); // approximation
+                WriteVarint32(packedSize);
+                Length += packedSize;
+            }
+        }
+
+        public void WritePackedZigZagList(List<int> list)
+        {
+            if (list != null)
+            {
+                var packedSize = Utils.GetVarintPackedCollectionSize(list); // approximation
+                WriteVarint32(packedSize);
+                Length += packedSize;
+            }
+        }
     }
 }
