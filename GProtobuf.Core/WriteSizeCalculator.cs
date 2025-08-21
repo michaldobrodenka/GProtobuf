@@ -8,7 +8,7 @@ namespace GProtobuf.Core
 {
     public ref struct WriteSizeCalculator
     {
-        public long Length { get; private set; }
+        public int Length { get; private set; }
 
         public WriteSizeCalculator()
         {
@@ -125,6 +125,33 @@ namespace GProtobuf.Core
             Length += bytes.Length; // Bytes themselves
         }
 
+        /// <summary>
+        /// Writes raw bytes without length prefix (for internal use)
+        /// </summary>
+        public void WriteRawBytesOnly(byte[] bytes)
+        {
+            if (bytes != null)
+            {
+                Length += bytes.Length;
+            }
+        }
+
+        /// <summary>
+        /// Writes raw bytes without length prefix (for internal use)
+        /// </summary>
+        public void WriteRawBytesOnly(ReadOnlySpan<byte> bytes)
+        {
+            Length += bytes.Length;
+        }
+
+        /// <summary>
+        /// Adds byte length to the calculator without allocating bytes (zero-allocation size calculation)
+        /// </summary>
+        public void AddByteLength(int byteLength)
+        {
+            Length += byteLength;
+        }
+
         public void WriteRawBytes(byte[] bytes)
         {
             if (bytes != null)
@@ -224,9 +251,9 @@ namespace GProtobuf.Core
         }
 
         // Helper method to get current length and reset
-        public long GetLengthAndReset()
+        public int GetLengthAndReset()
         {
-            long currentLength = Length;
+            int currentLength = Length;
             Length = 0;
             return currentLength;
         }

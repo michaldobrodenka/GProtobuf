@@ -1779,5 +1779,26 @@ public sealed class GProtobufToGProtobufTests : BaseSerializationTest
         deserialized.NestedMessageList[0].Score.Should().Be(3.14);
     }
 
+    [Fact]
+    public void PrimitiveCollections_ByteCollections_GG()
+    {
+        var model = new PrimitiveCollectionsTestModel
+        {
+            ByteList = new List<byte> { 1, 2, 3, 255, 0, 128 },
+            ByteICollection = new List<byte> { 10, 20, 30 },
+            ByteIList = new List<byte> { 100, 200 },
+            ByteIEnumerable = new List<byte> { 42 }
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializePrimitiveCollectionsTestModel);
+        var deserialized = DeserializeWithGProtobuf(data, bytes => TestModel.Serialization.Deserializers.DeserializePrimitiveCollectionsTestModel(bytes));
+
+        deserialized.Should().NotBeNull();
+        deserialized.ByteList.Should().Equal(1, 2, 3, 255, 0, 128);
+        deserialized.ByteICollection.Should().Equal(10, 20, 30);
+        deserialized.ByteIList.Should().Equal(100, 200);
+        deserialized.ByteIEnumerable.Should().Equal(42);
+    }
+
     #endregion
 }

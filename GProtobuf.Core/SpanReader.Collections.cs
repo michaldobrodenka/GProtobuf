@@ -41,7 +41,7 @@ namespace GProtobuf.Core
 
         public int[] ReadPackedFixedSizeInt32Array()
         {
-            var length = ReadVarInt32();
+            var length = ReadVarUInt32();
 
             if (length == 0)
                 return Array.Empty<int>();
@@ -52,10 +52,10 @@ namespace GProtobuf.Core
             if (length % 4 != 0)
                 throw new InvalidOperationException("Invalid packed fixed size array length.");
 
-            var slice = buffer.Slice(position, length);
-            position += length;
+            var slice = buffer.Slice(position, (int)length);
+            position += (int)length;
 
-            int count = length / 4;
+            int count = (int)length / 4;
             int[] fixedSizeResult = new int[count];
             int p = 0;
             for (int i = 0; i < count; i++)
@@ -442,7 +442,7 @@ namespace GProtobuf.Core
         /// </summary>
         public short[] ReadPackedFixedSizeInt16Array()
         {
-            var length = ReadVarInt32();
+            var length = ReadVarUInt32();
 
             if (length == 0)
                 return Array.Empty<short>();
@@ -450,19 +450,20 @@ namespace GProtobuf.Core
             if (position + length > buffer.Length)
                 throw new InvalidOperationException("Buffer overrun");
 
-            if (length % 2 != 0)
-                throw new InvalidOperationException("Invalid packed fixed size short array length.");
+            if (length % 4 != 0)
+                throw new InvalidOperationException("Invalid packed fixed size short array length (must be multiple of 4 bytes - protobuf uses fixed32 for 16-bit values).");
 
-            var slice = buffer.Slice(position, length);
-            position += length;
+            var slice = buffer.Slice(position, (int)length);
+            position += (int)length;
 
-            int count = length / 2;
+            int count = (int)length / 4;
             short[] result = new short[count];
             int p = 0;
             for (int i = 0; i < count; i++)
             {
-                result[i] = BinaryPrimitives.ReadInt16LittleEndian(slice.Slice(p, 2));
-                p += 2;
+                int value = BinaryPrimitives.ReadInt32LittleEndian(slice.Slice(p, 4));
+                result[i] = (short)value; // Convert from int32 to short (protobuf doesn't have fixed16)
+                p += 4;
             }
 
             return result;
@@ -507,7 +508,7 @@ namespace GProtobuf.Core
         /// </summary>
         public ushort[] ReadPackedFixedSizeUInt16Array()
         {
-            var length = ReadVarInt32();
+            var length = ReadVarUInt32();
 
             if (length == 0)
                 return Array.Empty<ushort>();
@@ -515,19 +516,20 @@ namespace GProtobuf.Core
             if (position + length > buffer.Length)
                 throw new InvalidOperationException("Buffer overrun");
 
-            if (length % 2 != 0)
-                throw new InvalidOperationException("Invalid packed fixed size ushort array length.");
+            if (length % 4 != 0)
+                throw new InvalidOperationException("Invalid packed fixed size ushort array length (must be multiple of 4 bytes - protobuf uses fixed32 for 16-bit values).");
 
-            var slice = buffer.Slice(position, length);
-            position += length;
+            var slice = buffer.Slice(position, (int)length);
+            position += (int)length;
 
-            int count = length / 2;
+            int count = (int)length / 4;
             ushort[] result = new ushort[count];
             int p = 0;
             for (int i = 0; i < count; i++)
             {
-                result[i] = BinaryPrimitives.ReadUInt16LittleEndian(slice.Slice(p, 2));
-                p += 2;
+                uint value = BinaryPrimitives.ReadUInt32LittleEndian(slice.Slice(p, 4));
+                result[i] = (ushort)value; // Convert from uint32 to ushort (protobuf doesn't have fixed16)
+                p += 4;
             }
 
             return result;

@@ -209,6 +209,25 @@ namespace GProtobuf.Core
             Stream.Write(buffer);
         }
 
+        /// <summary>
+        /// Writes a byte array directly to stream (for protobuf bytes fields)
+        /// </summary>
+        public void WriteBytes(byte[] bytes)
+        {
+            if (bytes != null)
+            {
+                Stream.Write(bytes);
+            }
+        }
+
+        /// <summary>
+        /// Writes a span of bytes directly to stream (for protobuf bytes fields)
+        /// </summary>
+        public void WriteBytes(ReadOnlySpan<byte> bytes)
+        {
+            Stream.Write(bytes);
+        }
+
         #region Long/Int64 Methods
 
         /// <summary>

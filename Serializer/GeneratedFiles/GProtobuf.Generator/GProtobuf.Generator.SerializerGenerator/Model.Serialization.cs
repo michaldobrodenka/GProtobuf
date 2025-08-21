@@ -471,9 +471,9 @@ namespace Model.Serialization
                         }
                     }
                     // Convert back to Guid
-                    var guidBytes = new byte[16];
-                    System.BitConverter.GetBytes(low).CopyTo(guidBytes, 0);
-                    System.BitConverter.GetBytes(high).CopyTo(guidBytes, 8);
+                    Span<byte> guidBytes = stackalloc byte[16];
+                    System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(guidBytes, low);
+                    System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(guidBytes.Slice(8), high);
                     result.GuidValue = new Guid(guidBytes);
                     continue;
                 }
@@ -747,19 +747,22 @@ namespace Model.Serialization
 
                 if (fieldId == 6)
                 {
-                    result.Bytes = reader.ReadByteArray();
+                    var byteArray = reader.ReadByteArray();
+                    result.Bytes = byteArray;
                     continue;
                 }
 
                 if (fieldId == 7)
                 {
-                    result.PackedInts = reader.ReadPackedVarIntInt32Array(false);
+                    var primitiveArray = reader.ReadPackedVarIntInt32Array(false);
+                    result.PackedInts = primitiveArray;
                     continue;
                 }
 
                 if (fieldId == 8)
                 {
-                    result.PackedFixedSizeInts = reader.ReadPackedFixedSizeInt32Array();
+                    var primitiveArray = reader.ReadPackedFixedSizeInt32Array();
+                    result.PackedFixedSizeInts = primitiveArray;
                     continue;
                 }
 
@@ -768,21 +771,18 @@ namespace Model.Serialization
                     List<int> resultList = new();
                     var wireType1 = wireType;
                     var fieldId1 = fieldId;
-
-                    while (!reader.IsEnd)
+                    while (fieldId1 == fieldId && wireType1 == WireType.VarInt)
                     {
-                        var number = reader.ReadVarInt32();
+                        resultList.Add(reader.ReadVarInt32());
+                        if (reader.EndOfData) break;
                         var p = reader.Position;
-                        resultList.Add(number);
-                        if (reader.IsEnd) break; // End of buffer, no more data
-                        (wireType1, fieldId1) = reader.ReadWireTypeAndFieldId();
+                        (wireType1, fieldId1) = reader.ReadKey();
                         if (fieldId1 != fieldId)
                         {
                             reader.Position = p; // rewind
                             break;
                         }
                     }
-
                     result.NonPackedInts = resultList.ToArray();
                     continue;
                 }
@@ -792,21 +792,18 @@ namespace Model.Serialization
                     List<int> resultList = new();
                     var wireType1 = wireType;
                     var fieldId1 = fieldId;
-
-                    while (!reader.IsEnd)
+                    while (fieldId1 == fieldId && wireType1 == WireType.Fixed32b)
                     {
-                        var number = reader.ReadFixedInt32();
+                        resultList.Add(reader.ReadFixedInt32());
+                        if (reader.EndOfData) break;
                         var p = reader.Position;
-                        resultList.Add(number);
-                        if (reader.IsEnd) break; // End of buffer, no more data
-                        (wireType1, fieldId1) = reader.ReadWireTypeAndFieldId();
+                        (wireType1, fieldId1) = reader.ReadKey();
                         if (fieldId1 != fieldId)
                         {
                             reader.Position = p; // rewind
                             break;
                         }
                     }
-
                     result.NonPackedFixedSizeInts = resultList.ToArray();
                     continue;
                 }
@@ -854,7 +851,7 @@ namespace Model.Serialization
                         var tempCalcC10 = new global::GProtobuf.Core.WriteSizeCalculator();
                         SizeCalculators.CalculateCContentSize(ref tempCalcC10, objC10);
                         calculator5_B.WriteVarUInt32((uint)tempCalcC10.Length);
-                        calculator5_B.WriteRawBytes(new byte[tempCalcC10.Length]);
+                        calculator5_B.AddByteLength(tempCalcC10.Length);
                     }
                     SizeCalculators.CalculateBContentSize(ref calculator5_B, obj1);
                     writer.WriteTag(5, WireType.Len);
@@ -926,7 +923,7 @@ namespace Model.Serialization
             var tempCalculatorC = new global::GProtobuf.Core.WriteSizeCalculator();
             SizeCalculators.CalculateCContentSize(ref tempCalculatorC, instance);
             calculator5.WriteVarUInt32((uint)tempCalculatorC.Length);
-            calculator5.WriteRawBytes(new byte[tempCalculatorC.Length]);
+            calculator5.AddByteLength(tempCalculatorC.Length);
             SizeCalculators.CalculateBContentSize(ref calculator5, instance);
             writer.WriteVarUInt32((uint)calculator5.Length);
             writer.WriteTag(10, WireType.Len);
@@ -1141,36 +1138,52 @@ namespace Model.Serialization
             {
                 writer.WriteTag(6, WireType.Len);
                 writer.WriteVarUInt32((uint)instance.Bytes.Length);
-                writer.Stream.Write(instance.Bytes);
+                writer.WriteBytes(instance.Bytes);
             }
-
             if (instance.PackedInts != null)
             {
                 writer.WriteTag(7, WireType.Len);
-                var packedSize = Utils.GetVarintPackedCollectionSize(instance.PackedInts);
-                writer.WriteVarUInt32((uint)packedSize);
-                foreach(var v in instance.PackedInts) writer.WriteVarint32(v);
+                var calculator = new global::GProtobuf.Core.WriteSizeCalculator();
+                foreach(var item in instance.PackedInts)
+                {
+                    calculator.WriteVarint32(item);
+                }
+                writer.WriteVarUInt32((uint)calculator.Length);
+                foreach(var item in instance.PackedInts)
+                {
+                    writer.WriteVarint32(item);
+                }
             }
-
             if (instance.PackedFixedSizeInts != null)
             {
                 writer.WriteTag(8, WireType.Len);
-                writer.WriteVarUInt32((uint)(instance.PackedFixedSizeInts.Length << 2));
-                writer.WritePackedFixedSizeIntArray(instance.PackedFixedSizeInts);
+                var calculator = new global::GProtobuf.Core.WriteSizeCalculator();
+                foreach(var item in instance.PackedFixedSizeInts)
+                {
+                    calculator.WriteFixedSizeInt32(item);
+                }
+                writer.WriteVarUInt32((uint)calculator.Length);
+                foreach(var item in instance.PackedFixedSizeInts)
+                {
+                    writer.WriteFixedSizeInt32(item);
+                }
             }
-
             if (instance.NonPackedInts != null)
             {
-                var tagAndWire = Utils.GetTagAndWireType(9, WireType.VarInt);
-                foreach(var v in instance.NonPackedInts) { writer.WriteVarint32(tagAndWire); writer.WriteVarint32(v); }
+                foreach(var item in instance.NonPackedInts)
+                {
+                    writer.WriteTag(9, WireType.VarInt);
+                    writer.WriteVarint32(item);
+                }
             }
-
             if (instance.NonPackedFixedSizeInts != null)
             {
-                var tagAndWire = Utils.GetTagAndWireType(10, WireType.Fixed32b);
-                foreach(var v in instance.NonPackedFixedSizeInts) { writer.WriteVarint32(tagAndWire); writer.WriteFixedSizeInt32(v); }
+                foreach(var item in instance.NonPackedFixedSizeInts)
+                {
+                    writer.WriteTag(10, WireType.Fixed32b);
+                    writer.WriteFixedSizeInt32(item);
+                }
             }
-
         }
 
 
@@ -1243,7 +1256,7 @@ namespace Model.Serialization
             var tempCalcC = new global::GProtobuf.Core.WriteSizeCalculator();
             CalculateCContentSize(ref tempCalcC, obj);
             tempCalc5.WriteVarUInt32((uint)tempCalcC.Length);
-            tempCalc5.WriteRawBytes(new byte[tempCalcC.Length]);
+            tempCalc5.AddByteLength(tempCalcC.Length);
             CalculateBContentSize(ref tempCalc5, obj);
             calculator.WriteVarUInt32((uint)tempCalc5.Length);
             if (obj.StringA != null)
@@ -1398,31 +1411,44 @@ namespace Model.Serialization
                 calculator.WriteTag(6, WireType.Len);
                 calculator.WriteBytes(obj.Bytes);
             }
-
             if (obj.PackedInts != null)
             {
                 calculator.WriteTag(7, WireType.Len);
-                calculator.WritePackedVarintArray(obj.PackedInts);
+                var tempCalculator = new global::GProtobuf.Core.WriteSizeCalculator();
+                foreach(var item in obj.PackedInts)
+                {
+                    tempCalculator.WriteVarint32(item);
+                }
+                calculator.WriteVarUInt32((uint)tempCalculator.Length);
+                calculator.AddByteLength(tempCalculator.Length);
             }
-
             if (obj.PackedFixedSizeInts != null)
             {
                 calculator.WriteTag(8, WireType.Len);
-                calculator.WritePackedFixedSizeIntArray(obj.PackedFixedSizeInts);
+                var tempCalculator = new global::GProtobuf.Core.WriteSizeCalculator();
+                foreach(var item in obj.PackedFixedSizeInts)
+                {
+                    tempCalculator.WriteFixedSizeInt32(item);
+                }
+                calculator.WriteVarUInt32((uint)tempCalculator.Length);
+                calculator.AddByteLength(tempCalculator.Length);
             }
-
             if (obj.NonPackedInts != null)
             {
-                var tagAndWire = Utils.GetTagAndWireType(9, WireType.VarInt);
-                foreach(var v in obj.NonPackedInts) { calculator.WriteVarint32(tagAndWire); calculator.WriteVarint32(v); }
+                foreach(var item in obj.NonPackedInts)
+                {
+                    calculator.WriteTag(9, WireType.VarInt);
+                    calculator.WriteVarint32(item);
+                }
             }
-
             if (obj.NonPackedFixedSizeInts != null)
             {
-                var tagAndWire = Utils.GetTagAndWireType(10, WireType.Fixed32b);
-                foreach(var v in obj.NonPackedFixedSizeInts) { calculator.WriteVarint32(tagAndWire); calculator.WriteFixedSizeInt32(v); }
+                foreach(var item in obj.NonPackedFixedSizeInts)
+                {
+                    calculator.WriteTag(10, WireType.Fixed32b);
+                    calculator.WriteFixedSizeInt32(item);
+                }
             }
-
         }
 
 
@@ -1575,31 +1601,44 @@ namespace Model.Serialization
                 calculator.WriteTag(6, WireType.Len);
                 calculator.WriteBytes(obj.Bytes);
             }
-
             if (obj.PackedInts != null)
             {
                 calculator.WriteTag(7, WireType.Len);
-                calculator.WritePackedVarintArray(obj.PackedInts);
+                var tempCalculator = new global::GProtobuf.Core.WriteSizeCalculator();
+                foreach(var item in obj.PackedInts)
+                {
+                    tempCalculator.WriteVarint32(item);
+                }
+                calculator.WriteVarUInt32((uint)tempCalculator.Length);
+                calculator.AddByteLength(tempCalculator.Length);
             }
-
             if (obj.PackedFixedSizeInts != null)
             {
                 calculator.WriteTag(8, WireType.Len);
-                calculator.WritePackedFixedSizeIntArray(obj.PackedFixedSizeInts);
+                var tempCalculator = new global::GProtobuf.Core.WriteSizeCalculator();
+                foreach(var item in obj.PackedFixedSizeInts)
+                {
+                    tempCalculator.WriteFixedSizeInt32(item);
+                }
+                calculator.WriteVarUInt32((uint)tempCalculator.Length);
+                calculator.AddByteLength(tempCalculator.Length);
             }
-
             if (obj.NonPackedInts != null)
             {
-                var tagAndWire = Utils.GetTagAndWireType(9, WireType.VarInt);
-                foreach(var v in obj.NonPackedInts) { calculator.WriteVarint32(tagAndWire); calculator.WriteVarint32(v); }
+                foreach(var item in obj.NonPackedInts)
+                {
+                    calculator.WriteTag(9, WireType.VarInt);
+                    calculator.WriteVarint32(item);
+                }
             }
-
             if (obj.NonPackedFixedSizeInts != null)
             {
-                var tagAndWire = Utils.GetTagAndWireType(10, WireType.Fixed32b);
-                foreach(var v in obj.NonPackedFixedSizeInts) { calculator.WriteVarint32(tagAndWire); calculator.WriteFixedSizeInt32(v); }
+                foreach(var item in obj.NonPackedFixedSizeInts)
+                {
+                    calculator.WriteTag(10, WireType.Fixed32b);
+                    calculator.WriteFixedSizeInt32(item);
+                }
             }
-
         }
 
 

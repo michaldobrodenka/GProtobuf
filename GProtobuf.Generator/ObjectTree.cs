@@ -500,7 +500,7 @@ class ObjectTree
                         sb.AppendIndentedLine($"var tempCalculatorC = new global::GProtobuf.Core.WriteSizeCalculator();");
                         sb.AppendIndentedLine($"SizeCalculators.Calculate{GetClassNameFromFullName(classC)}ContentSize(ref tempCalculatorC, instance);");
                         sb.AppendIndentedLine($"calculator{protoIncludeAtoB.FieldId}.WriteVarUInt32((uint)tempCalculatorC.Length);");
-                        sb.AppendIndentedLine($"calculator{protoIncludeAtoB.FieldId}.WriteRawBytes(new byte[tempCalculatorC.Length]);");
+                        sb.AppendIndentedLine($"calculator{protoIncludeAtoB.FieldId}.AddByteLength(tempCalculatorC.Length);");
                         sb.AppendIndentedLine($"SizeCalculators.Calculate{GetClassNameFromFullName(classB)}ContentSize(ref calculator{protoIncludeAtoB.FieldId}, instance);");
                         sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)calculator{protoIncludeAtoB.FieldId}.Length);");
                         
@@ -621,7 +621,7 @@ class ObjectTree
                                 sb.AppendIndentedLine($"var tempCalcC{bInclude.FieldId} = new global::GProtobuf.Core.WriteSizeCalculator();");
                                 sb.AppendIndentedLine($"SizeCalculators.Calculate{cClassName}ContentSize(ref tempCalcC{bInclude.FieldId}, objC{bInclude.FieldId});");
                                 sb.AppendIndentedLine($"calculator{include.FieldId}_{className}.WriteVarUInt32((uint)tempCalcC{bInclude.FieldId}.Length);");
-                                sb.AppendIndentedLine($"calculator{include.FieldId}_{className}.WriteRawBytes(new byte[tempCalcC{bInclude.FieldId}.Length]);");
+                                sb.AppendIndentedLine($"calculator{include.FieldId}_{className}.AddByteLength(tempCalcC{bInclude.FieldId}.Length);");
                                 sb.EndBlock();
                             }
                         }
@@ -756,7 +756,7 @@ class ObjectTree
                         sb.AppendIndentedLine($"var tempCalcC = new global::GProtobuf.Core.WriteSizeCalculator();");
                         sb.AppendIndentedLine($"Calculate{GetClassNameFromFullName(classC)}ContentSize(ref tempCalcC, obj);");
                         sb.AppendIndentedLine($"tempCalc{protoIncludeAtoB.FieldId}.WriteVarUInt32((uint)tempCalcC.Length);");
-                        sb.AppendIndentedLine($"tempCalc{protoIncludeAtoB.FieldId}.WriteRawBytes(new byte[tempCalcC.Length]);");
+                        sb.AppendIndentedLine($"tempCalc{protoIncludeAtoB.FieldId}.AddByteLength(tempCalcC.Length);");
                         
                         sb.AppendIndentedLine($"Calculate{GetClassNameFromFullName(classB)}ContentSize(ref tempCalc{protoIncludeAtoB.FieldId}, obj);");
                         sb.AppendIndentedLine($"calculator.WriteVarUInt32((uint)tempCalc{protoIncludeAtoB.FieldId}.Length);");
@@ -938,8 +938,18 @@ class ObjectTree
         
         var typeName = GetClassNameFromFullName(protoMember.Type);
         
-        // Check if this is a collection type (string[], Message[], List<T>, ICollection<T>, etc.)
-        if (IsArrayType(protoMember))
+        // Check collection types in priority order
+        if (IsByteCollectionType(protoMember))
+        {
+            WriteByteCollectionProtoMember(sb, protoMember);
+            return;
+        }
+        else if (IsPrimitiveCollectionType(protoMember))
+        {
+            WritePrimitiveCollectionProtoMember(sb, protoMember);
+            return;
+        }
+        else if (IsArrayType(protoMember))
         {
             WriteArrayProtoMember(sb, protoMember);
             return;
@@ -1073,9 +1083,9 @@ class ObjectTree
                 sb.EndBlock();
                 sb.EndBlock();
                 sb.AppendIndentedLine($"// Convert back to Guid");
-                sb.AppendIndentedLine($"var guidBytes = new byte[16];");
-                sb.AppendIndentedLine($"System.BitConverter.GetBytes(low).CopyTo(guidBytes, 0);");
-                sb.AppendIndentedLine($"System.BitConverter.GetBytes(high).CopyTo(guidBytes, 8);");
+                sb.AppendIndentedLine($"Span<byte> guidBytes = stackalloc byte[16];");
+                sb.AppendIndentedLine($"System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(guidBytes, low);");
+                sb.AppendIndentedLine($"System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(guidBytes.Slice(8), high);");
                 sb.AppendIndentedLine($"result.{protoMember.Name} = new Guid(guidBytes);");
                 break;
 
@@ -1520,8 +1530,18 @@ class ObjectTree
         bool isNullable = protoMember.IsNullable;
         var typeName = GetClassNameFromFullName(protoMember.Type);
 
-        // Check if this is a collection type (string[], Message[], List<T>, ICollection<T>, etc.)
-        if (IsArrayType(protoMember))
+        // Check collection types in priority order
+        if (IsByteCollectionType(protoMember))
+        {
+            WriteByteCollectionProtoMemberSerializer(sb, protoMember, objectName);
+            return;
+        }
+        else if (IsPrimitiveCollectionType(protoMember))
+        {
+            WritePrimitiveCollectionProtoMemberSerializer(sb, protoMember, objectName);
+            return;
+        }
+        else if (IsArrayType(protoMember))
         {
             WriteArrayProtoMemberSerializer(sb, protoMember, objectName);
             return;
@@ -1999,7 +2019,7 @@ class ObjectTree
                             sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Len);");
                             sb.AppendIndentedLine($"var packedSize = Utils.GetVarintPackedCollectionSize({objectName}.{protoMember.Name});");
                             sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)packedSize);");
-                            sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteVarInt64(v); }}");
+                            sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteVarint64(v); }}");
                             break;
                     }
                 }
@@ -2017,7 +2037,7 @@ class ObjectTree
                             break;
                         default:
                             sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.VarInt);");
-                            sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteVarint32(tagAndWire); writer.WriteVarInt64(v); }}");
+                            sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteVarint32(tagAndWire); writer.WriteVarint64(v); }}");
                             break;
                     }
                 }
@@ -2255,8 +2275,18 @@ class ObjectTree
         bool isNullable = protoMember.IsNullable;
         var typeName = GetClassNameFromFullName(protoMember.Type);
 
-        // Check if this is a collection type (string[], Message[], List<T>, ICollection<T>, etc.)
-        if (IsArrayType(protoMember))
+        // Check collection types in priority order
+        if (IsByteCollectionType(protoMember))
+        {
+            WriteByteCollectionProtoMemberSizeCalculator(sb, protoMember);
+            return;
+        }
+        else if (IsPrimitiveCollectionType(protoMember))
+        {
+            WritePrimitiveCollectionProtoMemberSizeCalculator(sb, protoMember);
+            return;
+        }
+        else if (IsArrayType(protoMember))
         {
             WriteArrayProtoMemberSizeCalculator(sb, protoMember);
             return;
@@ -2724,7 +2754,7 @@ class ObjectTree
                             break;
                         default:
                             sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.VarInt);");
-                            sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteVarint32(tagAndWire); calculator.WriteVarInt64(v); }}");
+                            sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteVarint32(tagAndWire); calculator.WriteVarint64(v); }}");
                             break;
                     }
                 }
@@ -3019,6 +3049,7 @@ class ObjectTree
     
     /// <summary>
     /// Checks if the given element type represents a primitive that already has specialized array support
+    /// Note: byte is excluded because List&lt;byte&gt; should serialize as byte[] (length-delimited)
     /// </summary>
     private static bool IsPrimitiveArrayType(string elementTypeName)
     {
@@ -3030,7 +3061,7 @@ class ObjectTree
             "float" or "System.Single" => true,
             "double" or "System.Double" => true,
             "bool" or "System.Boolean" => true,
-            "byte" or "System.Byte" => true,
+            "byte" or "System.Byte" => false,  // Special case: byte collections serialize as byte[]
             "sbyte" or "System.SByte" => true,
             "short" or "System.Int16" => true,
             "ushort" or "System.UInt16" => true,
@@ -3038,6 +3069,27 @@ class ObjectTree
             "ulong" or "System.UInt64" => true,
             _ => false
         };
+    }
+
+    /// <summary>
+    /// Checks if the given ProtoMember represents a byte collection type that should serialize as byte[]
+    /// </summary>
+    private static bool IsByteCollectionType(ProtoMemberAttribute protoMember)
+    {
+        if (!protoMember.IsCollection) return false;
+        var elementType = GetClassNameFromFullName(protoMember.CollectionElementType);
+        return elementType == "byte" || elementType == "System.Byte";
+    }
+
+    /// <summary>
+    /// Checks if the given ProtoMember represents a primitive collection type (int, float, etc.) 
+    /// that should use specialized primitive array logic
+    /// </summary>
+    private static bool IsPrimitiveCollectionType(ProtoMemberAttribute protoMember)
+    {
+        if (!protoMember.IsCollection) return false;
+        var elementType = GetClassNameFromFullName(protoMember.CollectionElementType);
+        return IsPrimitiveArrayType(elementType);
     }
     
     /// <summary>
@@ -3131,7 +3183,7 @@ class ObjectTree
             case CollectionKind.ConcreteCollection:
                 // For concrete types like List<T> or custom collections
                 var concreteType = protoMember.Type;
-                if (concreteType.StartsWith("List<") || concreteType == "System.Collections.Generic.List`1")
+                if (concreteType.StartsWith("List<") || concreteType.StartsWith("System.Collections.Generic.List<") || concreteType == "System.Collections.Generic.List`1")
                 {
                     // List<T> → assign directly
                     sb.AppendIndentedLine($"result.{protoMember.Name} = resultList;");
@@ -3253,7 +3305,7 @@ class ObjectTree
             sb.AppendIndentedLine($"var itemCalculator = new global::GProtobuf.Core.WriteSizeCalculator();");
             sb.AppendIndentedLine($"SizeCalculators.Calculate{GetClassNameFromFullName(elementType)}Size(ref itemCalculator, item);");
             sb.AppendIndentedLine($"calculator.WriteVarUInt32((uint)itemCalculator.Length);");
-            sb.AppendIndentedLine($"calculator.WriteRawBytes(new byte[itemCalculator.Length]);");
+            sb.AppendIndentedLine($"calculator.AddByteLength(itemCalculator.Length);");
             sb.EndBlock();
             sb.AppendIndentedLine($"else");
             sb.StartNewBlock();
@@ -3263,6 +3315,618 @@ class ObjectTree
         }
         
         sb.EndBlock();
+    }
+
+    /// <summary>
+    /// Writes the deserialization logic for byte collection types (List&lt;byte&gt;, ICollection&lt;byte&gt;, etc.)
+    /// These are serialized as byte[] (length-delimited) for protobuf-net compatibility
+    /// </summary>
+    private static void WriteByteCollectionProtoMember(StringBuilderWithIndent sb, ProtoMemberAttribute protoMember)
+    {
+        // Deserialize as byte[]
+        sb.AppendIndentedLine($"var byteArray = reader.ReadByteArray();");
+        
+        // Convert to appropriate collection type
+        switch (protoMember.CollectionKind)
+        {
+            case CollectionKind.Array:
+                sb.AppendIndentedLine($"result.{protoMember.Name} = byteArray;");
+                break;
+            case CollectionKind.InterfaceCollection:
+                // ICollection<byte>, IList<byte>, IEnumerable<byte> → assign List<byte>
+                sb.AppendIndentedLine($"result.{protoMember.Name} = new List<byte>(byteArray);");
+                break;
+            case CollectionKind.ConcreteCollection:
+                var concreteType = protoMember.Type;
+                if (concreteType.StartsWith("List<") || concreteType.StartsWith("System.Collections.Generic.List<") || concreteType == "System.Collections.Generic.List`1")
+                {
+                    // List<byte> → assign List<byte>
+                    sb.AppendIndentedLine($"result.{protoMember.Name} = new List<byte>(byteArray);");
+                }
+                else
+                {
+                    // Custom collection type → create instance and add items via ICollection<byte>
+                    sb.AppendIndentedLine($"var customCollection = new {concreteType}();");
+                    sb.AppendIndentedLine($"var iCollection = (global::System.Collections.Generic.ICollection<byte>)customCollection;");
+                    sb.AppendIndentedLine($"foreach (var b in byteArray) iCollection.Add(b);");
+                    sb.AppendIndentedLine($"result.{protoMember.Name} = customCollection;");
+                }
+                break;
+        }
+        
+        sb.AppendIndentedLine($"continue;");
+        sb.EndBlock();
+        sb.AppendNewLine();
+    }
+
+    /// <summary>
+    /// Writes the deserialization logic for primitive collection types (List&lt;int&gt;, ICollection&lt;float&gt;, etc.)
+    /// These use packed/non-packed arrays with DataFormat support
+    /// </summary>
+    private static void WritePrimitiveCollectionProtoMember(StringBuilderWithIndent sb, ProtoMemberAttribute protoMember)
+    {
+        var elementType = protoMember.CollectionElementType;
+        var elementTypeName = GetClassNameFromFullName(elementType);
+        
+        if (protoMember.IsPacked)
+        {
+            // Packed reading - use specialized array readers
+            var arrayReadMethod = GetPrimitiveArrayReadMethod(elementTypeName, protoMember.DataFormat, true);
+            sb.AppendIndentedLine($"var primitiveArray = {arrayReadMethod};");
+            
+            // Convert to appropriate collection type
+            switch (protoMember.CollectionKind)
+            {
+                case CollectionKind.Array:
+                    sb.AppendIndentedLine($"result.{protoMember.Name} = primitiveArray;");
+                    break;
+                case CollectionKind.InterfaceCollection:
+                    // ICollection<T>, IList<T>, IEnumerable<T> → assign List<T>
+                    sb.AppendIndentedLine($"result.{protoMember.Name} = new List<{elementType}>(primitiveArray);");
+                    break;
+                case CollectionKind.ConcreteCollection:
+                    var concreteType = protoMember.Type;
+                    if (concreteType.StartsWith("List<") || concreteType == "System.Collections.Generic.List`1")
+                    {
+                        // List<T> → assign List<T>
+                        sb.AppendIndentedLine($"result.{protoMember.Name} = new List<{elementType}>(primitiveArray);");
+                    }
+                    else
+                    {
+                        // Custom collection type → create instance and add items via ICollection<T>
+                        sb.AppendIndentedLine($"var customCollection = new {concreteType}();");
+                        sb.AppendIndentedLine($"var iCollection = (global::System.Collections.Generic.ICollection<{elementType}>)customCollection;");
+                        sb.AppendIndentedLine($"foreach (var item in primitiveArray) iCollection.Add(item);");
+                        sb.AppendIndentedLine($"result.{protoMember.Name} = customCollection;");
+                    }
+                    break;
+            }
+        }
+        else
+        {
+            // Non-packed reading - generate loop-based reading similar to existing array logic
+            var elementReadMethod = GetPrimitiveElementReadMethod(elementTypeName, protoMember.DataFormat);
+            sb.AppendIndentedLine($"List<{elementType}> resultList = new();");
+            sb.AppendIndentedLine($"var wireType1 = wireType;");
+            sb.AppendIndentedLine($"var fieldId1 = fieldId;");
+            sb.AppendIndentedLine($"while (fieldId1 == fieldId && wireType1 == {GetExpectedWireType(elementTypeName, protoMember.DataFormat)})");
+            sb.StartNewBlock();
+            sb.AppendIndentedLine($"resultList.Add({elementReadMethod});");
+            sb.AppendIndentedLine($"if (reader.EndOfData) break;");
+            sb.AppendIndentedLine($"var p = reader.Position;");
+            sb.AppendIndentedLine($"(wireType1, fieldId1) = reader.ReadKey();");
+            sb.AppendIndentedLine($"if (fieldId1 != fieldId)");
+            sb.StartNewBlock();
+            sb.AppendIndentedLine($"reader.Position = p; // rewind");
+            sb.AppendIndentedLine($"break;");
+            sb.EndBlock();
+            sb.EndBlock();
+            
+            // Convert resultList to appropriate collection type  
+            switch (protoMember.CollectionKind)
+            {
+                case CollectionKind.Array:
+                    sb.AppendIndentedLine($"result.{protoMember.Name} = resultList.ToArray();");
+                    break;
+                case CollectionKind.InterfaceCollection:
+                case CollectionKind.ConcreteCollection:
+                    // For non-packed, we built List<T> directly, so assign it
+                    sb.AppendIndentedLine($"result.{protoMember.Name} = resultList;");
+                    break;
+            }
+        }
+        
+        sb.AppendIndentedLine($"continue;");
+        sb.EndBlock();
+        sb.AppendNewLine();
+    }
+
+    /// <summary>
+    /// Gets the appropriate SpanReader method for reading primitive arrays
+    /// </summary>
+    private static string GetPrimitiveArrayReadMethod(string elementTypeName, DataFormat dataFormat, bool isPacked)
+    {
+        if (!isPacked)
+        {
+            // Non-packed reading - need to generate loop-based reading code
+            // This should not be used for this function - non-packed arrays use different logic
+            throw new InvalidOperationException($"GetPrimitiveArrayReadMethod should only be called for packed arrays. Use WritePrimitiveCollectionProtoMember for non-packed.");
+        }
+        
+        return elementTypeName switch
+        {
+            "int" or "System.Int32" => dataFormat switch
+            {
+                DataFormat.FixedSize => "reader.ReadPackedFixedSizeInt32Array()",
+                DataFormat.ZigZag => "reader.ReadPackedVarIntInt32Array(true)",
+                _ => "reader.ReadPackedVarIntInt32Array(false)"
+            },
+            "long" or "System.Int64" => dataFormat switch  
+            {
+                DataFormat.FixedSize => "reader.ReadPackedFixedSizeInt64Array()",
+                DataFormat.ZigZag => "reader.ReadPackedVarIntInt64Array(true)",
+                _ => "reader.ReadPackedVarIntInt64Array(false)"
+            },
+            "float" or "System.Single" => "reader.ReadPackedFloatArray()",
+            "double" or "System.Double" => "reader.ReadPackedDoubleArray()",
+            "bool" or "System.Boolean" => "reader.ReadPackedBoolArray()",
+            "sbyte" or "System.SByte" => dataFormat == DataFormat.ZigZag 
+                ? "reader.ReadPackedSByteArray(true)" 
+                : "reader.ReadPackedSByteArray(false)",
+            "short" or "System.Int16" => dataFormat switch
+            {
+                DataFormat.FixedSize => "reader.ReadPackedFixedSizeInt16Array()",
+                DataFormat.ZigZag => "reader.ReadPackedInt16Array(true)",
+                _ => "reader.ReadPackedInt16Array(false)"
+            },
+            "ushort" or "System.UInt16" => dataFormat == DataFormat.FixedSize
+                ? "reader.ReadPackedFixedSizeUInt16Array()"
+                : "reader.ReadPackedUInt16Array()",
+            "uint" or "System.UInt32" => dataFormat == DataFormat.FixedSize
+                ? "reader.ReadPackedFixedSizeUInt32Array()"
+                : "reader.ReadPackedUInt32Array()",
+            "ulong" or "System.UInt64" => dataFormat == DataFormat.FixedSize
+                ? "reader.ReadPackedFixedSizeUInt64Array()"
+                : "reader.ReadPackedUInt64Array()",
+            _ => throw new InvalidOperationException($"Unsupported primitive type for collections: {elementTypeName}")
+        };
+    }
+
+    /// <summary>
+    /// Writes the serialization logic for byte collection types
+    /// </summary>
+    private static void WriteByteCollectionProtoMemberSerializer(StringBuilderWithIndent sb, ProtoMemberAttribute protoMember, string objectName)
+    {
+        sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != null)");
+        sb.StartNewBlock();
+        sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Len);");
+        
+        // Convert collection to byte array and write directly
+        if (protoMember.CollectionKind == Core.CollectionKind.Array)
+        {
+            // Already byte[], write directly
+            sb.AppendIndentedLine($"writer.WriteVarUInt32((uint){objectName}.{protoMember.Name}.Length);");
+            sb.AppendIndentedLine($"writer.WriteBytes({objectName}.{protoMember.Name});");
+        }
+        else
+        {
+            // Collection type - use span for zero allocation
+            var collectionType = protoMember.Type;
+            if (collectionType.Contains("List<") || collectionType.Contains("System.Collections.Generic.List"))
+            {
+                // List<byte> - use CollectionsMarshal.AsSpan for zero allocation
+                sb.AppendIndentedLine($"var byteSpan = System.Runtime.InteropServices.CollectionsMarshal.AsSpan((List<byte>){objectName}.{protoMember.Name});");
+                sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)byteSpan.Length);");
+                sb.AppendIndentedLine($"writer.WriteBytes(byteSpan);");
+            }
+            else
+            {
+                // Other collection types (ICollection, IList, IEnumerable) - must convert to array
+                sb.AppendIndentedLine($"var byteArray = {objectName}.{protoMember.Name}.ToArray();");
+                sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)byteArray.Length);");
+                sb.AppendIndentedLine($"writer.WriteBytes(byteArray);");
+            }
+        }
+        
+        sb.EndBlock();
+    }
+
+    /// <summary>
+    /// Writes the serialization logic for primitive collection types
+    /// </summary>
+    private static void WritePrimitiveCollectionProtoMemberSerializer(StringBuilderWithIndent sb, ProtoMemberAttribute protoMember, string objectName)
+    {
+        var elementType = protoMember.CollectionElementType;
+        var elementTypeName = GetClassNameFromFullName(elementType);
+        
+        sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != null)");
+        sb.StartNewBlock();
+        
+        if (protoMember.IsPacked)
+        {
+            // Packed serialization - iterate directly over collection
+            sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Len);");
+            sb.AppendIndentedLine($"var calculator = new global::GProtobuf.Core.WriteSizeCalculator();");
+            var elementWriteMethod = GetPrimitiveElementWriteMethod(elementTypeName, protoMember.DataFormat);
+            sb.AppendIndentedLine($"foreach(var item in {objectName}.{protoMember.Name})");
+            sb.StartNewBlock();
+            sb.AppendIndentedLine($"{elementWriteMethod.Replace("writer.", "calculator.")};"); // Calculate size first
+            sb.EndBlock();
+            sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)calculator.Length);");
+            sb.AppendIndentedLine($"foreach(var item in {objectName}.{protoMember.Name})");
+            sb.StartNewBlock();
+            sb.AppendIndentedLine($"{elementWriteMethod};"); // Write actual data
+            sb.EndBlock();
+        }
+        else
+        {
+            // Non-packed serialization - write individual elements
+            var elementWriteMethod = GetPrimitiveElementWriteMethod(elementTypeName, protoMember.DataFormat);
+            sb.AppendIndentedLine($"foreach(var item in {objectName}.{protoMember.Name})");
+            sb.StartNewBlock();
+            sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, {GetWireTypeForElement(elementTypeName, protoMember.DataFormat)});");
+            sb.AppendIndentedLine($"{elementWriteMethod.Replace("item", "item")};");
+            sb.EndBlock();
+        }
+        
+        sb.EndBlock();
+    }
+
+    /// <summary>
+    /// Writes the size calculation logic for byte collection types
+    /// </summary>
+    private static void WriteByteCollectionProtoMemberSizeCalculator(StringBuilderWithIndent sb, ProtoMemberAttribute protoMember)
+    {
+        sb.AppendIndentedLine($"if (obj.{protoMember.Name} != null)");
+        sb.StartNewBlock();
+        sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+        
+        if (protoMember.CollectionKind == Core.CollectionKind.Array)
+        {
+            // Already byte[], calculate directly
+            sb.AppendIndentedLine($"calculator.WriteBytes(obj.{protoMember.Name});");
+        }
+        else
+        {
+            // Collection type, calculate count and add raw bytes
+            var countProperty = GetCollectionCountExpression(protoMember);
+            sb.AppendIndentedLine($"var count = obj.{protoMember.Name}.{countProperty};");
+            sb.AppendIndentedLine($"calculator.WriteVarUInt32((uint)count);");
+            sb.AppendIndentedLine($"calculator.AddByteLength(count);");
+        }
+        
+        sb.EndBlock();
+    }
+
+    /// <summary>
+    /// Writes the size calculation logic for primitive collection types
+    /// </summary>
+    private static void WritePrimitiveCollectionProtoMemberSizeCalculator(StringBuilderWithIndent sb, ProtoMemberAttribute protoMember)
+    {
+        var elementType = protoMember.CollectionElementType;
+        var elementTypeName = GetClassNameFromFullName(elementType);
+        
+        sb.AppendIndentedLine($"if (obj.{protoMember.Name} != null)");
+        sb.StartNewBlock();
+        
+        if (protoMember.IsPacked)
+        {
+            // Packed size calculation - iterate directly over collection
+            sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+            sb.AppendIndentedLine($"var tempCalculator = new global::GProtobuf.Core.WriteSizeCalculator();");
+            var elementSizeMethod = GetPrimitiveElementSizeMethod(elementTypeName, protoMember.DataFormat);
+            sb.AppendIndentedLine($"foreach(var item in obj.{protoMember.Name})");
+            sb.StartNewBlock();
+            sb.AppendIndentedLine($"{elementSizeMethod.Replace("calculator.", "tempCalculator.")};");
+            sb.EndBlock();
+            sb.AppendIndentedLine($"calculator.WriteVarUInt32((uint)tempCalculator.Length);");
+            sb.AppendIndentedLine($"calculator.AddByteLength(tempCalculator.Length);");
+        }
+        else
+        {
+            // Non-packed size calculation
+            var elementSizeMethod = GetPrimitiveElementSizeMethod(elementTypeName, protoMember.DataFormat);
+            sb.AppendIndentedLine($"foreach(var item in obj.{protoMember.Name})");
+            sb.StartNewBlock();
+            sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, {GetWireTypeForElement(elementTypeName, protoMember.DataFormat)});");
+            sb.AppendIndentedLine($"{elementSizeMethod};");
+            sb.EndBlock();
+        }
+        
+        sb.EndBlock();
+    }
+
+    private static string GetPrimitiveArrayWriteMethod(string elementTypeName, DataFormat dataFormat)
+    {
+        return elementTypeName switch
+        {
+            "int" or "System.Int32" => dataFormat switch
+            {
+                DataFormat.FixedSize => "writer.WritePackedFixedSizeIntArray(tempArray)",
+                DataFormat.ZigZag => "foreach(var item in tempArray) writer.WriteZigZag32(item)",
+                _ => "foreach(var item in tempArray) writer.WriteVarint32(item)"
+            },
+            "float" or "System.Single" => "foreach(var item in tempArray) writer.WriteFloat(item)",
+            "double" or "System.Double" => "foreach(var item in tempArray) writer.WriteDouble(item)",
+            "bool" or "System.Boolean" => "foreach(var item in tempArray) writer.WriteBool(item)",
+            "byte" or "System.Byte" => "foreach(var item in tempArray) writer.WriteByte(item)",
+            "sbyte" or "System.SByte" => dataFormat switch
+            {
+                DataFormat.ZigZag => "foreach(var item in tempArray) writer.WriteSByte(item, true)",
+                _ => "foreach(var item in tempArray) writer.WriteSByte(item)"
+            },
+            "short" or "System.Int16" => dataFormat switch
+            {
+                DataFormat.FixedSize => "foreach(var item in tempArray) writer.WriteFixedInt32(item)",
+                DataFormat.ZigZag => "foreach(var item in tempArray) writer.WriteInt16(item, true)",
+                _ => "foreach(var item in tempArray) writer.WriteInt16(item)"
+            },
+            "ushort" or "System.UInt16" => dataFormat switch
+            {
+                DataFormat.FixedSize => "foreach(var item in tempArray) writer.WriteFixedUInt32(item)",
+                _ => "foreach(var item in tempArray) writer.WriteUInt16(item)"
+            },
+            "uint" or "System.UInt32" => dataFormat switch
+            {
+                DataFormat.FixedSize => "foreach(var item in tempArray) writer.WriteFixedUInt32(item)",
+                _ => "foreach(var item in tempArray) writer.WriteUInt32(item)"
+            },
+            "long" or "System.Int64" => dataFormat switch
+            {
+                DataFormat.FixedSize => "foreach(var item in tempArray) writer.WriteFixedInt64(item)",
+                DataFormat.ZigZag => "foreach(var item in tempArray) writer.WriteZigZagVarInt64(item)",
+                _ => "foreach(var item in tempArray) writer.WriteVarint64(item)"
+            },
+            "ulong" or "System.UInt64" => dataFormat switch
+            {
+                DataFormat.FixedSize => "foreach(var item in tempArray) writer.WriteFixedUInt64(item)",
+                _ => "foreach(var item in tempArray) writer.WriteUInt64(item)"
+            },
+            _ => $"foreach(var item in tempArray) writer.Write{elementTypeName}(item)"
+        };
+    }
+
+    private static string GetPrimitiveElementWriteMethod(string elementTypeName, DataFormat dataFormat)
+    {
+        return elementTypeName switch
+        {
+            "int" or "System.Int32" => dataFormat switch
+            {
+                DataFormat.FixedSize => "writer.WriteFixedSizeInt32(item)",
+                DataFormat.ZigZag => "writer.WriteZigZag32(item)",
+                _ => "writer.WriteVarint32(item)"
+            },
+            "float" or "System.Single" => "writer.WriteFloat(item)",
+            "double" or "System.Double" => "writer.WriteDouble(item)",
+            "bool" or "System.Boolean" => "writer.WriteBool(item)",
+            "byte" or "System.Byte" => "writer.WriteByte(item)",
+            "sbyte" or "System.SByte" => dataFormat switch
+            {
+                DataFormat.ZigZag => "writer.WriteSByte(item, true)",
+                _ => "writer.WriteSByte(item)"
+            },
+            "short" or "System.Int16" => dataFormat switch
+            {
+                DataFormat.FixedSize => "writer.WriteFixedInt32(item)",
+                DataFormat.ZigZag => "writer.WriteInt16(item, true)",
+                _ => "writer.WriteInt16(item)"
+            },
+            "ushort" or "System.UInt16" => dataFormat switch
+            {
+                DataFormat.FixedSize => "writer.WriteFixedUInt32(item)",
+                _ => "writer.WriteUInt16(item)"
+            },
+            "uint" or "System.UInt32" => dataFormat switch
+            {
+                DataFormat.FixedSize => "writer.WriteFixedUInt32(item)",
+                _ => "writer.WriteUInt32(item)"
+            },
+            "long" or "System.Int64" => dataFormat switch
+            {
+                DataFormat.FixedSize => "writer.WriteFixedInt64(item)",
+                DataFormat.ZigZag => "writer.WriteZigZagVarInt64(item)",
+                _ => "writer.WriteVarint64(item)"
+            },
+            "ulong" or "System.UInt64" => dataFormat switch
+            {
+                DataFormat.FixedSize => "writer.WriteFixedUInt64(item)",
+                _ => "writer.WriteUInt64(item)"
+            },
+            _ => $"writer.Write{elementTypeName}(item)"
+        };
+    }
+
+    private static string GetWireTypeForElement(string elementTypeName, DataFormat dataFormat)
+    {
+        return elementTypeName switch
+        {
+            "int" or "System.Int32" => dataFormat == DataFormat.FixedSize ? "WireType.Fixed32b" : "WireType.VarInt",
+            "long" or "System.Int64" => dataFormat == DataFormat.FixedSize ? "WireType.Fixed64b" : "WireType.VarInt",
+            "float" or "System.Single" => "WireType.Fixed32b",
+            "double" or "System.Double" => "WireType.Fixed64b",
+            "bool" or "System.Boolean" => "WireType.VarInt",
+            _ => "WireType.VarInt"
+        };
+    }
+
+    private static string GetPrimitiveArraySizeMethod(string elementTypeName, DataFormat dataFormat)
+    {
+        return elementTypeName switch
+        {
+            "int" or "System.Int32" => dataFormat switch
+            {
+                DataFormat.FixedSize => "calculator.WritePackedFixedSizeIntArray(tempArray)",
+                DataFormat.ZigZag => "foreach(var item in tempArray) calculator.WriteZigZag32(item)",
+                _ => "foreach(var item in tempArray) calculator.WriteVarint32(item)"
+            },
+            "float" or "System.Single" => "foreach(var item in tempArray) calculator.WriteFloat(item)",
+            "double" or "System.Double" => "foreach(var item in tempArray) calculator.WriteDouble(item)",
+            "bool" or "System.Boolean" => "foreach(var item in tempArray) calculator.WriteBool(item)",
+            "byte" or "System.Byte" => "foreach(var item in tempArray) calculator.WriteByte(item)",
+            "sbyte" or "System.SByte" => dataFormat switch
+            {
+                DataFormat.ZigZag => "foreach(var item in tempArray) calculator.WriteSByte(item, true)",
+                _ => "foreach(var item in tempArray) calculator.WriteSByte(item)"
+            },
+            "short" or "System.Int16" => dataFormat switch
+            {
+                DataFormat.FixedSize => "foreach(var item in tempArray) calculator.WriteFixedInt32(item)",
+                DataFormat.ZigZag => "foreach(var item in tempArray) calculator.WriteInt16(item, true)",
+                _ => "foreach(var item in tempArray) calculator.WriteInt16(item)"
+            },
+            "ushort" or "System.UInt16" => dataFormat switch
+            {
+                DataFormat.FixedSize => "foreach(var item in tempArray) calculator.WriteFixedUInt32(item)",
+                _ => "foreach(var item in tempArray) calculator.WriteUInt16(item)"
+            },
+            "uint" or "System.UInt32" => dataFormat switch
+            {
+                DataFormat.FixedSize => "foreach(var item in tempArray) calculator.WriteFixedUInt32(item)",
+                _ => "foreach(var item in tempArray) calculator.WriteUInt32(item)"
+            },
+            "long" or "System.Int64" => dataFormat switch
+            {
+                DataFormat.FixedSize => "foreach(var item in tempArray) calculator.WriteFixedInt64(item)",
+                DataFormat.ZigZag => "foreach(var item in tempArray) calculator.WriteZigZagVarInt64(item)",
+                _ => "foreach(var item in tempArray) calculator.WriteVarint64(item)"
+            },
+            "ulong" or "System.UInt64" => dataFormat switch
+            {
+                DataFormat.FixedSize => "foreach(var item in tempArray) calculator.WriteFixedUInt64(item)",
+                _ => "foreach(var item in tempArray) calculator.WriteUInt64(item)"
+            },
+            _ => $"foreach(var item in tempArray) calculator.Write{elementTypeName}(item)"
+        };
+    }
+
+    private static string GetPrimitiveElementSizeMethod(string elementTypeName, DataFormat dataFormat)
+    {
+        return elementTypeName switch
+        {
+            "int" or "System.Int32" => dataFormat switch
+            {
+                DataFormat.FixedSize => "calculator.WriteFixedSizeInt32(item)",
+                DataFormat.ZigZag => "calculator.WriteZigZag32(item)",
+                _ => "calculator.WriteVarint32(item)"
+            },
+            "float" or "System.Single" => "calculator.WriteFloat(item)",
+            "double" or "System.Double" => "calculator.WriteDouble(item)",
+            "bool" or "System.Boolean" => "calculator.WriteBool(item)",
+            "byte" or "System.Byte" => "calculator.WriteByte(item)",
+            "sbyte" or "System.SByte" => dataFormat switch
+            {
+                DataFormat.ZigZag => "calculator.WriteSByte(item, true)",
+                _ => "calculator.WriteSByte(item)"
+            },
+            "short" or "System.Int16" => dataFormat switch
+            {
+                DataFormat.FixedSize => "calculator.WriteFixedInt32(item)",
+                DataFormat.ZigZag => "calculator.WriteInt16(item, true)",
+                _ => "calculator.WriteInt16(item)"
+            },
+            "ushort" or "System.UInt16" => dataFormat switch
+            {
+                DataFormat.FixedSize => "calculator.WriteFixedUInt32(item)",
+                _ => "calculator.WriteUInt16(item)"
+            },
+            "uint" or "System.UInt32" => dataFormat switch
+            {
+                DataFormat.FixedSize => "calculator.WriteFixedUInt32(item)",
+                _ => "calculator.WriteUInt32(item)"
+            },
+            "long" or "System.Int64" => dataFormat switch
+            {
+                DataFormat.FixedSize => "calculator.WriteFixedInt64(item)",
+                DataFormat.ZigZag => "calculator.WriteZigZagVarInt64(item)",
+                _ => "calculator.WriteVarint64(item)"
+            },
+            "ulong" or "System.UInt64" => dataFormat switch
+            {
+                DataFormat.FixedSize => "calculator.WriteFixedUInt64(item)",
+                _ => "calculator.WriteUInt64(item)"
+            },
+            _ => $"calculator.Write{elementTypeName}(item)"
+        };
+    }
+    
+    /// <summary>
+    /// Returns the appropriate property/method to get collection count
+    /// </summary>
+    private static string GetCollectionCountExpression(ProtoMemberAttribute protoMember)
+    {
+        return protoMember.CollectionKind switch
+        {
+            Core.CollectionKind.Array => "Length",
+            Core.CollectionKind.InterfaceCollection when protoMember.Type.Contains("IEnumerable<") && !protoMember.Type.Contains("ICollection<") && !protoMember.Type.Contains("IList<") => "Count()",
+            _ => "Count"
+        };
+    }
+    
+    /// <summary>
+    /// Gets the SpanReader method for reading individual primitive elements
+    /// </summary>
+    private static string GetPrimitiveElementReadMethod(string elementTypeName, DataFormat dataFormat)
+    {
+        return elementTypeName switch
+        {
+            "int" or "System.Int32" => dataFormat switch
+            {
+                DataFormat.FixedSize => "reader.ReadFixedInt32()",
+                DataFormat.ZigZag => "reader.ReadZigZagVarInt32()",
+                _ => "reader.ReadVarInt32()"
+            },
+            "long" or "System.Int64" => dataFormat switch
+            {
+                DataFormat.FixedSize => "reader.ReadFixedInt64()",
+                DataFormat.ZigZag => "reader.ReadZigZagVarInt64()",
+                _ => "reader.ReadVarInt64()"
+            },
+            "float" or "System.Single" => "reader.ReadFloat(wireType1)",
+            "double" or "System.Double" => "reader.ReadDouble(wireType1)",
+            "bool" or "System.Boolean" => "reader.ReadBool(wireType1)",
+            "byte" or "System.Byte" => "reader.ReadByte(wireType1)",
+            "sbyte" or "System.SByte" => dataFormat == DataFormat.ZigZag 
+                ? "reader.ReadSByte(wireType1, true)" 
+                : "reader.ReadSByte(wireType1)",
+            "short" or "System.Int16" => dataFormat switch
+            {
+                DataFormat.FixedSize => "reader.ReadFixedInt16()",
+                DataFormat.ZigZag => "reader.ReadInt16(wireType1, true)",
+                _ => "reader.ReadInt16(wireType1)"
+            },
+            "ushort" or "System.UInt16" => dataFormat == DataFormat.FixedSize
+                ? "reader.ReadFixedUInt16()"
+                : "reader.ReadUInt16(wireType1)",
+            "uint" or "System.UInt32" => dataFormat == DataFormat.FixedSize
+                ? "reader.ReadFixedUInt32()"
+                : "reader.ReadUInt32(wireType1)",
+            "ulong" or "System.UInt64" => dataFormat == DataFormat.FixedSize
+                ? "reader.ReadFixedUInt64()"
+                : "reader.ReadUInt64(wireType1)",
+            _ => throw new InvalidOperationException($"Unsupported primitive type: {elementTypeName}")
+        };
+    }
+
+    /// <summary>
+    /// Gets the expected wire type for a primitive element
+    /// </summary>
+    private static string GetExpectedWireType(string elementTypeName, DataFormat dataFormat)
+    {
+        return elementTypeName switch
+        {
+            "int" or "System.Int32" => dataFormat == DataFormat.FixedSize ? "WireType.Fixed32b" : "WireType.VarInt",
+            "long" or "System.Int64" => dataFormat == DataFormat.FixedSize ? "WireType.Fixed64b" : "WireType.VarInt",
+            "float" or "System.Single" => "WireType.Fixed32b",
+            "double" or "System.Double" => "WireType.Fixed64b",
+            "bool" or "System.Boolean" => "WireType.VarInt",
+            "byte" or "System.Byte" => "WireType.VarInt",
+            "sbyte" or "System.SByte" => "WireType.VarInt",
+            "short" or "System.Int16" => dataFormat == DataFormat.FixedSize ? "WireType.Fixed32b" : "WireType.VarInt",
+            "ushort" or "System.UInt16" => dataFormat == DataFormat.FixedSize ? "WireType.Fixed32b" : "WireType.VarInt",
+            "uint" or "System.UInt32" => dataFormat == DataFormat.FixedSize ? "WireType.Fixed32b" : "WireType.VarInt",
+            "ulong" or "System.UInt64" => dataFormat == DataFormat.FixedSize ? "WireType.Fixed64b" : "WireType.VarInt",
+            _ => "WireType.VarInt"
+        };
     }
     
     #endregion
