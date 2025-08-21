@@ -1332,4 +1332,260 @@ public sealed class GProtobufToProtobufNetTests : BaseSerializationTest
     }
 
     #endregion
+
+    #region String Array Tests (GProtobuf to Protobuf-net)
+
+    [Fact]
+    public void StringArrays_BasicValues_GP()
+    {
+        var model = new StringArraysTestModel
+        {
+            BasicStringArray = new string[] { "hello", "world", "protobuf", "test" }
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeStringArraysTestModel);
+        var deserialized = DeserializeWithProtobufNet<StringArraysTestModel>(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.BasicStringArray.Should().Equal("hello", "world", "protobuf", "test");
+    }
+
+    [Fact]
+    public void StringArrays_EmptyAndNullArrays_GP()
+    {
+        var model = new StringArraysTestModel
+        {
+            EmptyStringArray = new string[0],
+            NullStringArray = null
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeStringArraysTestModel);
+        var deserialized = DeserializeWithProtobufNet<StringArraysTestModel>(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.EmptyStringArray.Should().BeNullOrEmpty();
+        deserialized.NullStringArray.Should().BeNull();
+    }
+
+    [Fact]
+    public void StringArrays_WithNullElements_GP()
+    {
+        var model = new StringArraysTestModel
+        {
+            StringArrayWithNulls = new string[] { "first", null, "third", null, "fifth" }
+        };
+
+        // GProtobuf should throw exception when trying to serialize null elements (same as protobuf-net)
+        var act = () => SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeStringArraysTestModel);
+        act.Should().Throw<InvalidOperationException>()
+           .WithMessage("*element of type string was null*");
+    }
+
+    [Fact]
+    public void StringArrays_SpecialCharactersAndUnicode_GP()
+    {
+        var model = new StringArraysTestModel
+        {
+            SpecialCharStringArray = new string[] { "hello\nworld", "tab\there", "quote\"test" },
+            UnicodeStringArray = new string[] { "Ľubomír", "Žitný", "Košice", "Bratislava", "ťŠčÝáé" }
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeStringArraysTestModel);
+        var deserialized = DeserializeWithProtobufNet<StringArraysTestModel>(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.SpecialCharStringArray.Should().Equal("hello\nworld", "tab\there", "quote\"test");
+        deserialized.UnicodeStringArray.Should().Equal("Ľubomír", "Žitný", "Košice", "Bratislava", "ťŠčÝáé");
+    }
+
+    [Fact]
+    public void StringArrays_UnicodeCharacters_GP()
+    {
+        var model = new StringArraysTestModel
+        {
+            UnicodeStringArray = new string[] { 
+                "Hello", 
+                "Héllo", 
+                "привет", 
+                "你好", 
+                "🎉", 
+                "Åčéňť",
+                "ľščťžýáíé"
+            }
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeStringArraysTestModel);
+        var deserialized = DeserializeWithProtobufNet<StringArraysTestModel>(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.UnicodeStringArray.Should().Equal("Hello", "Héllo", "привет", "你好", "🎉", "Åčéňť", "ľščťžýáíé");
+    }
+
+    [Fact]
+    public void StringArrays_LongStrings_GP()
+    {
+        // Create long strings
+        var longString1 = new string('A', 1000);
+        var longString2 = new string('B', 2000);
+        var longString3 = string.Join("", Enumerable.Range(0, 100).Select(i => $"Item{i}_"));
+        
+        var model = new StringArraysTestModel
+        {
+            LongStringArray = new string[] { longString1, longString2, longString3 }
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeStringArraysTestModel);
+        var deserialized = DeserializeWithProtobufNet<StringArraysTestModel>(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.LongStringArray.Should().Equal(longString1, longString2, longString3);
+    }
+
+    #endregion
+
+    #region Message Array Tests (GProtobuf to Protobuf-net)
+
+    [Fact]
+    public void MessageArrays_SimpleMessages_GP()
+    {
+        var model = new MessageArraysTestModel
+        {
+            SimpleMessages = new SimpleMessage[]
+            {
+                new SimpleMessage { Name = "First", Value = 100 },
+                new SimpleMessage { Name = "Second", Value = 200 },
+                new SimpleMessage { Name = "Third", Value = 300 }
+            }
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeMessageArraysTestModel);
+        var deserialized = DeserializeWithProtobufNet<MessageArraysTestModel>(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.SimpleMessages.Should().HaveCount(3);
+        deserialized.SimpleMessages[0].Should().BeEquivalentTo(new SimpleMessage { Name = "First", Value = 100 });
+        deserialized.SimpleMessages[1].Should().BeEquivalentTo(new SimpleMessage { Name = "Second", Value = 200 });
+        deserialized.SimpleMessages[2].Should().BeEquivalentTo(new SimpleMessage { Name = "Third", Value = 300 });
+    }
+
+    [Fact]
+    public void MessageArrays_EmptyAndNullArrays_GP()
+    {
+        var model = new MessageArraysTestModel
+        {
+            EmptyMessageArray = new SimpleMessage[0],
+            NullMessageArray = null
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeMessageArraysTestModel);
+        var deserialized = DeserializeWithProtobufNet<MessageArraysTestModel>(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.EmptyMessageArray.Should().BeNullOrEmpty();
+        deserialized.NullMessageArray.Should().BeNull();
+    }
+
+    [Fact]
+    public void MessageArrays_WithNullElements_GP()
+    {
+        var model = new MessageArraysTestModel
+        {
+            MessageArrayWithNulls = new SimpleMessage[]
+            {
+                new SimpleMessage { Name = "First", Value = 100 },
+                null,
+                new SimpleMessage { Name = "Third", Value = 300 }
+            }
+        };
+
+        // GProtobuf should throw exception when trying to serialize null elements (same as protobuf-net)
+        var act = () => SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeMessageArraysTestModel);
+        act.Should().Throw<InvalidOperationException>()
+           .WithMessage("*element of type SimpleMessage was null*");
+    }
+
+    [Fact]
+    public void MessageArrays_NestedMessages_GP()
+    {
+        var model = new MessageArraysTestModel
+        {
+            NestedMessages = new NestedMessage[]
+            {
+                new NestedMessage 
+                { 
+                    Title = "First Nested",
+                    Inner = new SimpleMessage { Name = "Inner1", Value = 111 },
+                    Score = 3.14
+                },
+                new NestedMessage 
+                { 
+                    Title = "Second Nested",
+                    Inner = new SimpleMessage { Name = "Inner2", Value = 222 },
+                    Score = 2.71
+                }
+            }
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeMessageArraysTestModel);
+        var deserialized = DeserializeWithProtobufNet<MessageArraysTestModel>(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.NestedMessages.Should().HaveCount(2);
+        
+        var expected1 = new NestedMessage 
+        { 
+            Title = "First Nested",
+            Inner = new SimpleMessage { Name = "Inner1", Value = 111 },
+            Score = 3.14
+        };
+        var expected2 = new NestedMessage 
+        { 
+            Title = "Second Nested",
+            Inner = new SimpleMessage { Name = "Inner2", Value = 222 },
+            Score = 2.71
+        };
+        
+        deserialized.NestedMessages[0].Should().BeEquivalentTo(expected1);
+        deserialized.NestedMessages[1].Should().BeEquivalentTo(expected2);
+    }
+
+    [Fact]
+    public void MessageArrays_ComplexScenario_GP()
+    {
+        var model = new MessageArraysTestModel
+        {
+            ComplexMessageArray = new NestedMessage[]
+            {
+                new NestedMessage 
+                { 
+                    Title = "Complex 1",
+                    Inner = new SimpleMessage { Name = "Inner 1", Value = 111 },
+                    Score = 10.5
+                },
+                new NestedMessage 
+                { 
+                    Title = "Complex 2",
+                    Inner = new SimpleMessage { Name = "Inner 2", Value = 222 },
+                    Score = 20.5
+                },
+                new NestedMessage 
+                { 
+                    Title = "Complex 3", 
+                    Inner = null, // This should be OK as Inner is optional field
+                    Score = 30.5
+                }
+            }
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeMessageArraysTestModel);
+        var deserialized = DeserializeWithProtobufNet<MessageArraysTestModel>(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.ComplexMessageArray.Should().HaveCount(3);
+        deserialized.ComplexMessageArray[0].Title.Should().Be("Complex 1");
+        deserialized.ComplexMessageArray[0].Inner.Should().BeEquivalentTo(new SimpleMessage { Name = "Inner 1", Value = 111 });
+        deserialized.ComplexMessageArray[2].Inner.Should().BeNull();
+    }
+
+    #endregion
 }

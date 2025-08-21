@@ -935,7 +935,17 @@ class ObjectTree
     {
         sb.AppendIndentedLine($"if (fieldId == {protoMember.FieldId})");
         sb.StartNewBlock();
-        switch(GetClassNameFromFullName(protoMember.Type))
+        
+        var typeName = GetClassNameFromFullName(protoMember.Type);
+        
+        // Check if this is an array type (string[], Message[], etc.)
+        if (IsArrayType(typeName))
+        {
+            WriteArrayProtoMember(sb, protoMember, typeName);
+            return;
+        }
+        
+        switch(typeName)
         {
             case "System.Int32":
             case "Int32":
@@ -1509,6 +1519,13 @@ class ObjectTree
         // Check if it's a nullable type
         bool isNullable = protoMember.IsNullable;
         var typeName = GetClassNameFromFullName(protoMember.Type);
+
+        // Check if this is an array type (string[], Message[], etc.)
+        if (IsArrayType(typeName))
+        {
+            WriteArrayProtoMemberSerializer(sb, protoMember, typeName, objectName);
+            return;
+        }
 
         switch (typeName)
         {
@@ -2238,6 +2255,13 @@ class ObjectTree
         bool isNullable = protoMember.IsNullable;
         var typeName = GetClassNameFromFullName(protoMember.Type);
 
+        // Check if this is an array type (string[], Message[], etc.)
+        if (IsArrayType(typeName))
+        {
+            WriteArrayProtoMemberSizeCalculator(sb, protoMember, typeName);
+            return;
+        }
+
         switch (typeName)
         {
             case "System.Int32":
@@ -2931,4 +2955,269 @@ class ObjectTree
         string[] parts = fullTypeName.Split('.');
         return parts.Length > 0 ? parts[parts.Length - 1] : string.Empty;
     }
+    
+    public static string GetNamespaceFromType(string fullTypeName)
+    {
+        if (string.IsNullOrWhiteSpace(fullTypeName))
+            return string.Empty;
+
+        // Odstránime ? na konci (nullable)
+        if (fullTypeName.EndsWith("?"))
+        {
+            fullTypeName = fullTypeName.Substring(0, fullTypeName.Length - 1);
+        }
+
+        // Rozdelíme podľa bodiek a vezmeme všetky časti okrem poslednej
+        string[] parts = fullTypeName.Split('.');
+        if (parts.Length <= 1)
+            return string.Empty; // No namespace
+            
+        return string.Join(".", parts.Take(parts.Length - 1));
+    }
+    
+    #region Array Support Helper Methods
+    
+    /// <summary>
+    /// Checks if the given type name represents an array type (e.g., "string[]", "Person[]")
+    /// BUT excludes primitive arrays which have their own specialized implementation
+    /// </summary>
+    private static bool IsArrayType(string typeName)
+    {
+        if (!typeName.EndsWith("[]") && !(typeName.StartsWith("List<") && typeName.EndsWith(">")))
+            return false;
+            
+        // Get element type
+        var elementType = GetArrayElementType(typeName);
+        var elementTypeName = GetClassNameFromFullName(elementType);
+        
+        // Exclude primitive arrays - they have their own specialized implementation with packed/zigzag/fixed options
+        if (IsPrimitiveArrayType(elementTypeName))
+            return false;
+            
+        // Only non-primitive arrays (string[], Message[]) use generic array logic
+        return true;
+    }
+    
+    /// <summary>
+    /// Checks if the given element type represents a primitive that already has specialized array support
+    /// </summary>
+    private static bool IsPrimitiveArrayType(string elementTypeName)
+    {
+        return elementTypeName switch
+        {
+            // These primitive types already have specialized array implementations
+            "int" or "System.Int32" => true,
+            "long" or "System.Int64" => true,
+            "float" or "System.Single" => true,
+            "double" or "System.Double" => true,
+            "bool" or "System.Boolean" => true,
+            "byte" or "System.Byte" => true,
+            "sbyte" or "System.SByte" => true,
+            "short" or "System.Int16" => true,
+            "ushort" or "System.UInt16" => true,
+            "uint" or "System.UInt32" => true,
+            "ulong" or "System.UInt64" => true,
+            _ => false
+        };
+    }
+    
+    /// <summary>
+    /// Gets the element type from an array type name (e.g., "string[]" -> "string", "List<Person>" -> "Person")
+    /// </summary>
+    private static string GetArrayElementType(string arrayTypeName)
+    {
+        if (arrayTypeName.EndsWith("[]"))
+        {
+            return arrayTypeName.Substring(0, arrayTypeName.Length - 2);
+        }
+        
+        if (arrayTypeName.StartsWith("List<") && arrayTypeName.EndsWith(">"))
+        {
+            return arrayTypeName.Substring(5, arrayTypeName.Length - 6);
+        }
+        
+        return arrayTypeName;
+    }
+    
+    /// <summary>
+    /// Checks if the given type is a primitive type that can be handled directly
+    /// Note: string is primitive but NOT in specialized array category (no packed/zigzag/fixed options)
+    /// </summary>
+    private static bool IsPrimitiveType(string typeName)
+    {
+        return typeName switch
+        {
+            "string" or "System.String" => true,
+            _ => IsPrimitiveArrayType(typeName) // reuse the logic for numeric primitives
+        };
+    }
+    
+    /// <summary>
+    /// Writes the deserialization logic for array types (string[], Message[], etc.)
+    /// </summary>
+    private static void WriteArrayProtoMember(StringBuilderWithIndent sb, ProtoMemberAttribute protoMember, string arrayTypeName)
+    {
+        var elementType = GetArrayElementType(arrayTypeName);
+        var elementTypeName = GetClassNameFromFullName(elementType);
+        
+        // For arrays, we always expect repeated fields (non-packed for length-delimited types)
+        sb.AppendIndentedLine($"List<{elementType}> resultList = new();");
+        sb.AppendIndentedLine($"var wireType1 = wireType;");
+        sb.AppendIndentedLine($"var fieldId1 = fieldId;");
+        
+        // All length-delimited types (strings, messages) use wire type 2 (Len)
+        sb.AppendIndentedLine($"while (fieldId1 == fieldId && wireType1 == WireType.Len)");
+        sb.StartNewBlock();
+        
+        if (elementTypeName == "string" || elementTypeName == "System.String")
+        {
+            // String arrays - direct string reading
+            sb.AppendIndentedLine($"resultList.Add(reader.ReadString(wireType));");
+        }
+        else if (IsPrimitiveArrayType(elementTypeName))
+        {
+            // This should NOT happen - primitive arrays should use specialized implementation
+            sb.AppendIndentedLine($"throw new InvalidOperationException(\"Primitive array {elementTypeName}[] should use specialized implementation, not generic array logic\");");
+        }
+        else
+        {
+            // Custom message types - deserialize nested messages
+            sb.AppendIndentedLine($"var length = reader.ReadVarInt32();");
+            sb.AppendIndentedLine($"var reader1 = new SpanReader(reader.GetSlice(length));");
+            sb.AppendIndentedLine($"var item = global::{protoMember.Namespace}.Serialization.SpanReaders.Read{GetClassNameFromFullName(elementType)}(ref reader1);");
+            sb.AppendIndentedLine($"resultList.Add(item);");
+        }
+        
+        // Standard array reading loop continuation logic
+        sb.AppendIndentedLine($"if (reader.EndOfData) break;");
+        sb.AppendIndentedLine($"var p = reader.Position;");
+        sb.AppendIndentedLine($"(wireType1, fieldId1) = reader.ReadKey();");
+        sb.AppendIndentedLine($"if (fieldId1 != fieldId)");
+        sb.StartNewBlock();
+        sb.AppendIndentedLine($"reader.Position = p; // rewind");
+        sb.AppendIndentedLine($"break;");
+        sb.EndBlock();
+        sb.EndBlock();
+        
+        // Convert to array and assign
+        sb.AppendIndentedLine($"result.{protoMember.Name} = resultList.ToArray();");
+        sb.AppendIndentedLine($"continue;");
+        sb.EndBlock();
+        sb.AppendNewLine();
+    }
+    
+    /// <summary>
+    /// Writes the serialization logic for array types (string[], Message[], etc.)
+    /// </summary>
+    private static void WriteArrayProtoMemberSerializer(StringBuilderWithIndent sb, ProtoMemberAttribute protoMember, string arrayTypeName, string objectName)
+    {
+        var elementType = GetArrayElementType(arrayTypeName);
+        var elementTypeName = GetClassNameFromFullName(elementType);
+        
+        // Check if array is not null
+        sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != null)");
+        sb.StartNewBlock();
+        
+        if (elementTypeName == "string" || elementTypeName == "System.String")
+        {
+            // String arrays - each string gets its own tag + length + content
+            sb.AppendIndentedLine($"foreach (var item in {objectName}.{protoMember.Name})");
+            sb.StartNewBlock();
+            sb.AppendIndentedLine($"if (item != null)");
+            sb.StartNewBlock();
+            sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Len);");
+            sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)System.Text.Encoding.UTF8.GetByteCount(item));");
+            sb.AppendIndentedLine($"writer.WriteString(item);");
+            sb.EndBlock();
+            sb.AppendIndentedLine($"else");
+            sb.StartNewBlock();
+            sb.AppendIndentedLine($"throw new System.InvalidOperationException(\"An element of type string was null; this might be as contents in a list/array\");");
+            sb.EndBlock();
+            sb.EndBlock();
+        }
+        else if (IsPrimitiveArrayType(elementTypeName))
+        {
+            // This should NOT happen - primitive arrays should use specialized implementation
+            sb.AppendIndentedLine($"throw new InvalidOperationException(\"Primitive array {elementTypeName}[] should use specialized implementation, not generic array logic\");");
+        }
+        else
+        {
+            // Custom message types - each message gets its own tag + length + serialized content
+            sb.AppendIndentedLine($"foreach (var item in {objectName}.{protoMember.Name})");
+            sb.StartNewBlock();
+            sb.AppendIndentedLine($"if (item != null)");
+            sb.StartNewBlock();
+            sb.AppendIndentedLine($"var calculator = new global::GProtobuf.Core.WriteSizeCalculator();");
+            sb.AppendIndentedLine($"SizeCalculators.Calculate{GetClassNameFromFullName(elementType)}Size(ref calculator, item);");
+            sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Len);");
+            sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)calculator.Length);");
+            sb.AppendIndentedLine($"StreamWriters.Write{GetClassNameFromFullName(elementType)}(writer, item);");
+            sb.EndBlock();
+            sb.AppendIndentedLine($"else");
+            sb.StartNewBlock();
+            sb.AppendIndentedLine($"throw new System.InvalidOperationException(\"An element of type {GetClassNameFromFullName(elementType)} was null; this might be as contents in a list/array\");");
+            sb.EndBlock();
+            sb.EndBlock();
+        }
+        
+        sb.EndBlock();
+    }
+    
+    /// <summary>
+    /// Writes the size calculation logic for array types (string[], Message[], etc.)
+    /// </summary>
+    private static void WriteArrayProtoMemberSizeCalculator(StringBuilderWithIndent sb, ProtoMemberAttribute protoMember, string arrayTypeName)
+    {
+        var elementType = GetArrayElementType(arrayTypeName);
+        var elementTypeName = GetClassNameFromFullName(elementType);
+        
+        // Check if array is not null
+        sb.AppendIndentedLine($"if (obj.{protoMember.Name} != null)");
+        sb.StartNewBlock();
+        
+        if (elementTypeName == "string" || elementTypeName == "System.String")
+        {
+            // String arrays - each string gets tag + length + content
+            sb.AppendIndentedLine($"foreach (var item in obj.{protoMember.Name})");
+            sb.StartNewBlock();
+            sb.AppendIndentedLine($"if (item != null)");
+            sb.StartNewBlock();
+            sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+            sb.AppendIndentedLine($"calculator.WriteString(item);");
+            sb.EndBlock();
+            sb.AppendIndentedLine($"else");
+            sb.StartNewBlock();
+            sb.AppendIndentedLine($"throw new System.InvalidOperationException(\"An element of type string was null; this might be as contents in a list/array\");");
+            sb.EndBlock();
+            sb.EndBlock();
+        }
+        else if (IsPrimitiveArrayType(elementTypeName))
+        {
+            // This should NOT happen - primitive arrays should use specialized implementation
+            sb.AppendIndentedLine($"throw new InvalidOperationException(\"Primitive array {elementTypeName}[] should use specialized implementation, not generic array logic\");");
+        }
+        else
+        {
+            // Custom message types - each message gets tag + length + content
+            sb.AppendIndentedLine($"foreach (var item in obj.{protoMember.Name})");
+            sb.StartNewBlock();
+            sb.AppendIndentedLine($"if (item != null)");
+            sb.StartNewBlock();
+            sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+            sb.AppendIndentedLine($"var itemCalculator = new global::GProtobuf.Core.WriteSizeCalculator();");
+            sb.AppendIndentedLine($"SizeCalculators.Calculate{GetClassNameFromFullName(elementType)}Size(ref itemCalculator, item);");
+            sb.AppendIndentedLine($"calculator.WriteVarUInt32((uint)itemCalculator.Length);");
+            sb.AppendIndentedLine($"calculator.WriteRawBytes(new byte[itemCalculator.Length]);");
+            sb.EndBlock();
+            sb.AppendIndentedLine($"else");
+            sb.StartNewBlock();
+            sb.AppendIndentedLine($"throw new System.InvalidOperationException(\"An element of type {GetClassNameFromFullName(elementType)} was null; this might be as contents in a list/array\");");
+            sb.EndBlock();
+            sb.EndBlock();
+        }
+        
+        sb.EndBlock();
+    }
+    
+    #endregion
 }

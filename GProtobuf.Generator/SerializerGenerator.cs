@@ -77,7 +77,7 @@ public sealed class SerializerGenerator : IIncrementalGenerator
 
                     var propertyType = property.Type.ToDisplayString();
                     var propertyName = property.Name;
-                    var nmspace = property.Type.ContainingNamespace?.ToDisplayString() ?? string.Empty;
+                    var nmspace = typeSymbol.ContainingNamespace?.ToDisplayString() ?? string.Empty;
                     
                     // Detect if this is a nullable value type (Nullable<T>)
                     bool isNullable = property.Type.OriginalDefinition?.SpecialType == SpecialType.System_Nullable_T;

@@ -1233,6 +1233,295 @@ public sealed class ProtobufNetToGProtobufTests : BaseSerializationTest
 
     #endregion
 
+    #region String Arrays Tests (protobuf-net to GProtobuf)
+
+    [Fact]
+    public void StringArrays_BasicValues_PG()
+    {
+        var model = new StringArraysTestModel
+        {
+            BasicStringArray = new string[] { "Hello", "World", "Test", "Array" }
+        };
+
+        var data = SerializeWithProtobufNet(model);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializeStringArraysTestModel(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.BasicStringArray.Should().Equal("Hello", "World", "Test", "Array");
+    }
+
+    [Fact]
+    public void StringArrays_EmptyAndNullArrays_PG()
+    {
+        var model = new StringArraysTestModel
+        {
+            EmptyStringArray = new string[0],
+            NullStringArray = null
+        };
+
+        var data = SerializeWithProtobufNet(model);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializeStringArraysTestModel(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.EmptyStringArray.Should().BeNullOrEmpty();
+        deserialized.NullStringArray.Should().BeNull();
+    }
+
+    [Fact]
+    public void StringArrays_UnicodeCharacters_PG()
+    {
+        var model = new StringArraysTestModel
+        {
+            UnicodeStringArray = new string[] { 
+                "Hello", 
+                "Héllo", 
+                "привет", 
+                "你好", 
+                "🎉", 
+                "Åčéňť",
+                "ľščťžýáíé"
+            }
+        };
+
+        var data = SerializeWithProtobufNet(model);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializeStringArraysTestModel(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.UnicodeStringArray.Should().Equal(
+            "Hello", "Héllo", "привет", "你好", "🎉", "Åčéňť", "ľščťžýáíé");
+    }
+
+    [Fact]
+    public void StringArrays_LongStrings_PG()
+    {
+        var longString1 = new string('A', 1000);
+        var longString2 = new string('B', 2000);
+        
+        var model = new StringArraysTestModel
+        {
+            LongStringArray = new string[] { longString1, longString2 }
+        };
+
+        var data = SerializeWithProtobufNet(model);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializeStringArraysTestModel(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.LongStringArray.Should().Equal(longString1, longString2);
+    }
+
+    [Fact]
+    public void StringArrays_WithNullElements_PG()
+    {
+        var model = new StringArraysTestModel
+        {
+            StringArrayWithNulls = new string[] { "first", null, "third", null, "fifth" }
+        };
+
+        // protobuf-net should throw exception when trying to serialize null elements
+        var act = () => SerializeWithProtobufNet(model);
+        act.Should().Throw<Exception>()
+           .WithMessage("*element*null*");
+    }
+
+    [Fact]
+    public void StringArrays_SpecialCharacters_PG()
+    {
+        var model = new StringArraysTestModel
+        {
+            SpecialCharStringArray = new string[] { "hello\nworld", "tab\there", "quote\"test" }
+        };
+
+        var data = SerializeWithProtobufNet(model);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializeStringArraysTestModel(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.SpecialCharStringArray.Should().Equal("hello\nworld", "tab\there", "quote\"test");
+    }
+
+    #endregion
+
+    #region Message Arrays Tests (protobuf-net to GProtobuf)
+
+    [Fact]
+    public void MessageArrays_SimpleMessages_PG()
+    {
+        var model = new MessageArraysTestModel
+        {
+            SimpleMessages = new SimpleMessage[]
+            {
+                new SimpleMessage { Name = "First", Value = 1 },
+                new SimpleMessage { Name = "Second", Value = 2 },
+                new SimpleMessage { Name = "Third", Value = 3 }
+            }
+        };
+
+        var data = SerializeWithProtobufNet(model);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializeMessageArraysTestModel(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.SimpleMessages.Should().NotBeNull();
+        deserialized.SimpleMessages.Should().HaveCount(3);
+        deserialized.SimpleMessages[0].Name.Should().Be("First");
+        deserialized.SimpleMessages[0].Value.Should().Be(1);
+        deserialized.SimpleMessages[1].Name.Should().Be("Second");
+        deserialized.SimpleMessages[1].Value.Should().Be(2);
+        deserialized.SimpleMessages[2].Name.Should().Be("Third");
+        deserialized.SimpleMessages[2].Value.Should().Be(3);
+    }
+
+    [Fact]
+    public void MessageArrays_NestedMessages_PG()
+    {
+        var model = new MessageArraysTestModel
+        {
+            NestedMessages = new NestedMessage[]
+            {
+                new NestedMessage 
+                { 
+                    Title = "First Nested",
+                    Inner = new SimpleMessage { Name = "Inner1", Value = 10 },
+                    Score = 95.5
+                },
+                new NestedMessage 
+                { 
+                    Title = "Second Nested",
+                    Inner = new SimpleMessage { Name = "Inner2", Value = 20 },
+                    Score = 87.3
+                }
+            }
+        };
+
+        var data = SerializeWithProtobufNet(model);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializeMessageArraysTestModel(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.NestedMessages.Should().NotBeNull();
+        deserialized.NestedMessages.Should().HaveCount(2);
+        
+        deserialized.NestedMessages[0].Title.Should().Be("First Nested");
+        deserialized.NestedMessages[0].Inner.Should().NotBeNull();
+        deserialized.NestedMessages[0].Inner.Name.Should().Be("Inner1");
+        deserialized.NestedMessages[0].Inner.Value.Should().Be(10);
+        deserialized.NestedMessages[0].Score.Should().Be(95.5);
+        
+        deserialized.NestedMessages[1].Title.Should().Be("Second Nested");
+        deserialized.NestedMessages[1].Inner.Should().NotBeNull();
+        deserialized.NestedMessages[1].Inner.Name.Should().Be("Inner2");
+        deserialized.NestedMessages[1].Inner.Value.Should().Be(20);
+        deserialized.NestedMessages[1].Score.Should().Be(87.3);
+    }
+
+    [Fact]
+    public void MessageArrays_EmptyAndNullArrays_PG()
+    {
+        var model = new MessageArraysTestModel
+        {
+            EmptyMessageArray = new SimpleMessage[0],
+            NullMessageArray = null
+        };
+
+        var data = SerializeWithProtobufNet(model);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializeMessageArraysTestModel(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.EmptyMessageArray.Should().BeNullOrEmpty();
+        deserialized.NullMessageArray.Should().BeNull();
+    }
+
+    [Fact]
+    public void MessageArrays_CrossCompatibility_PG()
+    {
+        var model = new MessageArraysTestModel
+        {
+            SimpleMessages = new SimpleMessage[]
+            {
+                new SimpleMessage { Name = "Compatible", Value = 42 }
+            },
+            NestedMessages = new NestedMessage[]
+            {
+                new NestedMessage 
+                { 
+                    Title = "Nested Compatible",
+                    Inner = new SimpleMessage { Name = "Nested Inner", Value = 100 },
+                    Score = 99.9
+                }
+            }
+        };
+
+        var data = SerializeWithProtobufNet(model);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializeMessageArraysTestModel(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.SimpleMessages.Should().HaveCount(1);
+        deserialized.SimpleMessages[0].Name.Should().Be("Compatible");
+        deserialized.SimpleMessages[0].Value.Should().Be(42);
+        
+        deserialized.NestedMessages.Should().HaveCount(1);
+        deserialized.NestedMessages[0].Title.Should().Be("Nested Compatible");
+        deserialized.NestedMessages[0].Inner.Name.Should().Be("Nested Inner");
+        deserialized.NestedMessages[0].Inner.Value.Should().Be(100);
+        deserialized.NestedMessages[0].Score.Should().Be(99.9);
+    }
+
+    [Fact]
+    public void MessageArrays_WithNullElements_PG()
+    {
+        var model = new MessageArraysTestModel
+        {
+            MessageArrayWithNulls = new SimpleMessage[]
+            {
+                new SimpleMessage { Name = "First", Value = 100 },
+                null,
+                new SimpleMessage { Name = "Third", Value = 300 }
+            }
+        };
+
+        // protobuf-net should throw exception when trying to serialize null elements
+        var act = () => SerializeWithProtobufNet(model);
+        act.Should().Throw<Exception>()
+           .WithMessage("*element*null*");
+    }
+
+    [Fact]
+    public void MessageArrays_ComplexScenario_PG()
+    {
+        var model = new MessageArraysTestModel
+        {
+            ComplexMessageArray = new NestedMessage[]
+            {
+                new NestedMessage 
+                { 
+                    Title = "Complex 1",
+                    Inner = new SimpleMessage { Name = "Inner 1", Value = 111 },
+                    Score = 10.5
+                },
+                new NestedMessage 
+                { 
+                    Title = "Complex 2",
+                    Inner = new SimpleMessage { Name = "Inner 2", Value = 222 },
+                    Score = 20.5
+                },
+                new NestedMessage 
+                { 
+                    Title = "Complex 3", 
+                    Inner = null, // This should be OK as Inner is optional field
+                    Score = 30.5
+                }
+            }
+        };
+
+        var data = SerializeWithProtobufNet(model);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializeMessageArraysTestModel(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.ComplexMessageArray.Should().HaveCount(3);
+        deserialized.ComplexMessageArray[0].Title.Should().Be("Complex 1");
+        deserialized.ComplexMessageArray[0].Inner.Should().BeEquivalentTo(new SimpleMessage { Name = "Inner 1", Value = 111 });
+        deserialized.ComplexMessageArray[2].Inner.Should().BeNull();
+    }
+
+    #endregion
+
     #region Additional Bidirectional Compatibility Tests
 
     [Fact]
