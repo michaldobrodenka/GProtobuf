@@ -171,6 +171,14 @@ namespace GProtobuf.Core
             int length = reader.ReadVarInt32();
             return reader.GetSlice(length).ToArray();
         }
+
+        /// <summary>
+        /// Reads a boolean value as a varint (0 = false, non-zero = true).
+        /// </summary>
+        public static bool ReadBool(this ref SpanReader reader)
+        {
+            return reader.ReadVarInt32() != 0;
+        }
     }
 
     public ref partial struct SpanReader
@@ -200,6 +208,11 @@ namespace GProtobuf.Core
         }
 
         public bool IsEnd => position >= buffer.Length;
+        
+        /// <summary>
+        /// Gets a value indicating whether the reader has reached the end of the data.
+        /// </summary>
+        public bool EndOfData => position >= buffer.Length;
 
         //public byte ReadByte2()
         //{
@@ -288,16 +301,6 @@ namespace GProtobuf.Core
             } while ((b & 0x80) != 0);
 
             return result;
-        }
-
-        public int ReadFixedInt32()
-        {
-            if (position + sizeof(int) > buffer.Length)
-                throw new InvalidOperationException("Buffer overrun");
-
-            int intValue = BinaryPrimitives.ReadInt32LittleEndian(buffer.Slice(position));
-            position += sizeof(int); // Posun o 4 bajty
-            return intValue;
         }
 
         public int ReadZigZagVarInt32()
@@ -403,15 +406,83 @@ namespace GProtobuf.Core
             return value;
         }
 
-        //public int ReadFixedInt32()
-        //{
-        //    if (position + sizeof(int) > buffer.Length)
-        //        throw new InvalidOperationException("Buffer overrun");
+        /// <summary>
+        /// Reads a fixed-size 64-bit signed integer (8 bytes, little-endian).
+        /// </summary>
+        public long ReadFixedInt64()
+        {
+            if (position + sizeof(long) > buffer.Length)
+                throw new InvalidOperationException("Buffer overrun");
 
-        //    int value = BinaryPrimitives.ReadInt32LittleEndian(buffer.Slice(position));
-        //    position += sizeof(int); // Posun o 4 bajty
-        //    return value;
-        //}
+            var value = BinaryPrimitives.ReadInt64LittleEndian(buffer.Slice(position));
+            position += sizeof(long); // Move by 8 bytes
+            return value;
+        }
+
+        /// <summary>
+        /// Reads a fixed-size 16-bit signed integer (2 bytes, little-endian).
+        /// </summary>
+        public short ReadFixedInt16()
+        {
+            if (position + sizeof(short) > buffer.Length)
+                throw new InvalidOperationException("Buffer overrun");
+
+            var value = BinaryPrimitives.ReadInt16LittleEndian(buffer.Slice(position));
+            position += sizeof(short); // Move by 2 bytes
+            return value;
+        }
+
+        /// <summary>
+        /// Reads a fixed-size 16-bit unsigned integer (2 bytes, little-endian).
+        /// </summary>
+        public ushort ReadFixedUInt16()
+        {
+            if (position + sizeof(ushort) > buffer.Length)
+                throw new InvalidOperationException("Buffer overrun");
+
+            var value = BinaryPrimitives.ReadUInt16LittleEndian(buffer.Slice(position));
+            position += sizeof(ushort); // Move by 2 bytes
+            return value;
+        }
+
+        /// <summary>
+        /// Reads a fixed-size 32-bit unsigned integer (4 bytes, little-endian).
+        /// </summary>
+        public uint ReadFixedUInt32()
+        {
+            if (position + sizeof(uint) > buffer.Length)
+                throw new InvalidOperationException("Buffer overrun");
+
+            var value = BinaryPrimitives.ReadUInt32LittleEndian(buffer.Slice(position));
+            position += sizeof(uint); // Move by 4 bytes
+            return value;
+        }
+
+        /// <summary>
+        /// Reads a fixed-size 64-bit unsigned integer (8 bytes, little-endian).
+        /// </summary>
+        public ulong ReadFixedUInt64()
+        {
+            if (position + sizeof(ulong) > buffer.Length)
+                throw new InvalidOperationException("Buffer overrun");
+
+            var value = BinaryPrimitives.ReadUInt64LittleEndian(buffer.Slice(position));
+            position += sizeof(ulong); // Move by 8 bytes
+            return value;
+        }
+
+        /// <summary>
+        /// Reads a fixed-size 32-bit signed integer (4 bytes, little-endian).
+        /// </summary>
+        public int ReadFixedInt32()
+        {
+            if (position + sizeof(int) > buffer.Length)
+                throw new InvalidOperationException("Buffer overrun");
+
+            int value = BinaryPrimitives.ReadInt32LittleEndian(buffer.Slice(position));
+            position += sizeof(int); // Move by 4 bytes
+            return value;
+        }
 
         //public int ReadVarIntAsDouble()
         //{
@@ -443,6 +514,14 @@ namespace GProtobuf.Core
             var fieldId = typeAndFieldId >> 3;
 
             return (type, fieldId);
+        }
+
+        /// <summary>
+        /// Reads a key (tag) and returns the field ID and wire type.
+        /// </summary>
+        public (WireType wireType, int fieldId) ReadKey()
+        {
+            return ReadWireTypeAndFieldId();
         }
 
    

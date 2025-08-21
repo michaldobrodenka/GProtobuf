@@ -953,4 +953,388 @@ public sealed class ProtobufNetToGProtobufTests : BaseSerializationTest
     }
 
     #endregion
+
+    #region PrimitiveArrays Tests (Protobuf-net to GProtobuf)
+
+    [Fact]
+    public void PrimitiveArrays_FloatArrays_PG()
+    {
+        var model = new PrimitiveArraysTestModel
+        {
+            FloatArray = new float[] { 1.5f, -2.3f, 0.0f, float.MaxValue, float.MinValue },
+            FloatArrayPacked = new float[] { 3.14f, 2.71f, -1.0f, 100.5f }
+        };
+
+        var data = SerializeWithProtobufNet(model);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializePrimitiveArraysTestModel(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.FloatArray.Should().Equal(1.5f, -2.3f, 0.0f, float.MaxValue, float.MinValue);
+        deserialized.FloatArrayPacked.Should().Equal(3.14f, 2.71f, -1.0f, 100.5f);
+    }
+
+    [Fact]
+    public void PrimitiveArrays_DoubleArrays_PG()
+    {
+        var model = new PrimitiveArraysTestModel
+        {
+            DoubleArray = new double[] { 1.5, -2.3, 0.0, double.MaxValue, double.MinValue },
+            DoubleArrayPacked = new double[] { Math.PI, Math.E, -1.0, 1000.123456789 }
+        };
+
+        var data = SerializeWithProtobufNet(model);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializePrimitiveArraysTestModel(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.DoubleArray.Should().Equal(1.5, -2.3, 0.0, double.MaxValue, double.MinValue);
+        deserialized.DoubleArrayPacked.Should().Equal(Math.PI, Math.E, -1.0, 1000.123456789);
+    }
+
+    [Fact]
+    public void PrimitiveArrays_LongArrays_PG()
+    {
+        var model = new PrimitiveArraysTestModel
+        {
+            LongArray = new long[] { 1L, -2L, 0L, long.MaxValue, long.MinValue },
+            LongArrayPacked = new long[] { 100L, 200L, 300L },
+            LongArrayPackedZigZag = new long[] { -1L, -100L, 50L, 0L, 1000L, -5000L },
+            LongArrayPackedFixed = new long[] { 12345L, 67890L, -11111L, 0L, 99999L }
+        };
+
+        var data = SerializeWithProtobufNet(model);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializePrimitiveArraysTestModel(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.LongArray.Should().Equal(1L, -2L, 0L, long.MaxValue, long.MinValue);
+        deserialized.LongArrayPacked.Should().Equal(100L, 200L, 300L);
+        deserialized.LongArrayPackedZigZag.Should().Equal(-1L, -100L, 50L, 0L, 1000L, -5000L);
+        deserialized.LongArrayPackedFixed.Should().Equal(12345L, 67890L, -11111L, 0L, 99999L);
+    }
+
+    [Fact]
+    public void PrimitiveArrays_BoolArrays_PG()
+    {
+        var model = new PrimitiveArraysTestModel
+        {
+            BoolArray = new bool[] { true, false, true, true, false },
+            BoolArrayPacked = new bool[] { false, true, false, true }
+        };
+
+        var data = SerializeWithProtobufNet(model);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializePrimitiveArraysTestModel(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.BoolArray.Should().Equal(true, false, true, true, false);
+        deserialized.BoolArrayPacked.Should().Equal(false, true, false, true);
+    }
+
+    [Fact]
+    public void PrimitiveArrays_EmptyAndNullArrays_PG()
+    {
+        var model = new PrimitiveArraysTestModel
+        {
+            FloatArray = new float[0], // Empty array
+            DoubleArray = null, // Null array
+            LongArrayPacked = new long[0], // Empty packed array
+            BoolArrayPacked = null // Null packed array
+        };
+
+        var data = SerializeWithProtobufNet(model);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializePrimitiveArraysTestModel(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.FloatArray.Should().BeNullOrEmpty();
+        deserialized.DoubleArray.Should().BeNull();
+        deserialized.LongArrayPacked.Should().BeNullOrEmpty();
+        deserialized.BoolArrayPacked.Should().BeNull();
+    }
+
+    [Fact]
+    public void PrimitiveArrays_SpecialFloatingPointValues_PG()
+    {
+        var model = new PrimitiveArraysTestModel
+        {
+            FloatArray = new float[] { float.NaN, float.PositiveInfinity, float.NegativeInfinity, float.Epsilon },
+            DoubleArray = new double[] { double.NaN, double.PositiveInfinity, double.NegativeInfinity, double.Epsilon }
+        };
+
+        var data = SerializeWithProtobufNet(model);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializePrimitiveArraysTestModel(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.FloatArray.Length.Should().Be(4);
+        deserialized.FloatArray[0].Should().Be(float.NaN);
+        deserialized.FloatArray[1].Should().Be(float.PositiveInfinity);
+        deserialized.FloatArray[2].Should().Be(float.NegativeInfinity);
+        deserialized.FloatArray[3].Should().Be(float.Epsilon);
+        
+        deserialized.DoubleArray.Length.Should().Be(4);
+        deserialized.DoubleArray[0].Should().Be(double.NaN);
+        deserialized.DoubleArray[1].Should().Be(double.PositiveInfinity);
+        deserialized.DoubleArray[2].Should().Be(double.NegativeInfinity);
+        deserialized.DoubleArray[3].Should().Be(double.Epsilon);
+    }
+
+    [Fact]
+    public void PrimitiveArrays_ExtremeValues_PG()
+    {
+        var model = new PrimitiveArraysTestModel
+        {
+            LongArray = new long[] { long.MaxValue, long.MinValue, 0L, 1L, -1L },
+            LongArrayPackedZigZag = new long[] { long.MaxValue, long.MinValue } // ZigZag handles negatives efficiently
+        };
+
+        var data = SerializeWithProtobufNet(model);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializePrimitiveArraysTestModel(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.LongArray.Should().Equal(long.MaxValue, long.MinValue, 0L, 1L, -1L);
+        deserialized.LongArrayPackedZigZag.Should().Equal(long.MaxValue, long.MinValue);
+    }
+
+    [Fact]
+    public void PrimitiveArrays_SByteArrays_PG()
+    {
+        var model = new PrimitiveArraysTestModel
+        {
+            SByteArray = new sbyte[] { -128, -1, 0, 1, 127 },
+            SByteArrayPacked = new sbyte[] { -50, -25, 0, 25, 50 },
+            SByteArrayPackedZigZag = new sbyte[] { -100, -1, 0, 1, 100 }
+        };
+
+        var data = SerializeWithProtobufNet(model);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializePrimitiveArraysTestModel(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.SByteArray.Should().Equal(-128, -1, 0, 1, 127);
+        deserialized.SByteArrayPacked.Should().Equal(-50, -25, 0, 25, 50);
+        deserialized.SByteArrayPackedZigZag.Should().Equal(-100, -1, 0, 1, 100);
+    }
+
+    [Fact]
+    public void PrimitiveArrays_ShortArrays_PG()
+    {
+        var model = new PrimitiveArraysTestModel
+        {
+            ShortArray = new short[] { short.MinValue, -1000, 0, 1000, short.MaxValue },
+            ShortArrayPacked = new short[] { 100, 200, 300, 400 },
+            ShortArrayPackedZigZag = new short[] { -500, -100, 0, 100, 500 },
+            ShortArrayPackedFixed = new short[] { 1000, 2000, 3000, -1000 }
+        };
+
+        var data = SerializeWithProtobufNet(model);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializePrimitiveArraysTestModel(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.ShortArray.Should().Equal(short.MinValue, -1000, 0, 1000, short.MaxValue);
+        deserialized.ShortArrayPacked.Should().Equal(100, 200, 300, 400);
+        deserialized.ShortArrayPackedZigZag.Should().Equal(-500, -100, 0, 100, 500);
+        deserialized.ShortArrayPackedFixed.Should().Equal(1000, 2000, 3000, -1000);
+    }
+
+    [Fact]
+    public void PrimitiveArrays_UShortArrays_PG()
+    {
+        var model = new PrimitiveArraysTestModel
+        {
+            UShortArray = new ushort[] { 0, 1000, 30000, ushort.MaxValue },
+            UShortArrayPacked = new ushort[] { 100, 200, 300, 400, 500 },
+            UShortArrayPackedFixed = new ushort[] { 1000, 2000, 3000, 4000 }
+        };
+
+        var data = SerializeWithProtobufNet(model);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializePrimitiveArraysTestModel(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.UShortArray.Should().Equal(0, 1000, 30000, ushort.MaxValue);
+        deserialized.UShortArrayPacked.Should().Equal(100, 200, 300, 400, 500);
+        deserialized.UShortArrayPackedFixed.Should().Equal(1000, 2000, 3000, 4000);
+    }
+
+    [Fact]
+    public void PrimitiveArrays_UIntArrays_PG()
+    {
+        var model = new PrimitiveArraysTestModel
+        {
+            UIntArray = new uint[] { 0, 1000000, 2000000000, uint.MaxValue },
+            UIntArrayPacked = new uint[] { 100, 200, 300, 400, 500 },
+            UIntArrayPackedFixed = new uint[] { 1000000, 2000000, 3000000 }
+        };
+
+        var data = SerializeWithProtobufNet(model);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializePrimitiveArraysTestModel(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.UIntArray.Should().Equal(0, 1000000, 2000000000, uint.MaxValue);
+        deserialized.UIntArrayPacked.Should().Equal(100, 200, 300, 400, 500);
+        deserialized.UIntArrayPackedFixed.Should().Equal(1000000, 2000000, 3000000);
+    }
+
+    [Fact]
+    public void PrimitiveArrays_ULongArrays_PG()
+    {
+        var model = new PrimitiveArraysTestModel
+        {
+            ULongArray = new ulong[] { 0, 1000000000000UL, ulong.MaxValue },
+            ULongArrayPacked = new ulong[] { 100, 200, 300, 400, 500 },
+            ULongArrayPackedFixed = new ulong[] { 1000000000UL, 2000000000UL, 3000000000UL }
+        };
+
+        var data = SerializeWithProtobufNet(model);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializePrimitiveArraysTestModel(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.ULongArray.Should().Equal(0, 1000000000000UL, ulong.MaxValue);
+        deserialized.ULongArrayPacked.Should().Equal(100, 200, 300, 400, 500);
+        deserialized.ULongArrayPackedFixed.Should().Equal(1000000000UL, 2000000000UL, 3000000000UL);
+    }
+
+    [Fact]
+    public void PrimitiveArrays_NewTypesEmptyAndNullArrays_PG()
+    {
+        var model = new PrimitiveArraysTestModel
+        {
+            SByteArrayEmpty = new sbyte[0],
+            ShortArrayNull = null,
+            UShortArrayPackedEmpty = new ushort[0],
+            UIntArrayPackedNull = null
+        };
+
+        var data = SerializeWithProtobufNet(model);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializePrimitiveArraysTestModel(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.SByteArrayEmpty.Should().BeNullOrEmpty();
+        deserialized.ShortArrayNull.Should().BeNull();
+        deserialized.UShortArrayPackedEmpty.Should().BeNullOrEmpty();
+        deserialized.UIntArrayPackedNull.Should().BeNull();
+    }
+
+    [Fact]
+    public void PrimitiveArrays_NewTypesExtremeValues_PG()
+    {
+        var model = new PrimitiveArraysTestModel
+        {
+            SByteArrayExtremes = new sbyte[] { sbyte.MinValue, sbyte.MaxValue, 0, -1, 1 },
+            UShortArrayExtremes = new ushort[] { ushort.MinValue, ushort.MaxValue, 0, 1 },
+            UIntArrayExtremes = new uint[] { uint.MinValue, uint.MaxValue, 0, 1 },
+            ULongArrayExtremes = new ulong[] { ulong.MinValue, ulong.MaxValue, 0, 1 }
+        };
+
+        var data = SerializeWithProtobufNet(model);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializePrimitiveArraysTestModel(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.SByteArrayExtremes.Should().Equal(sbyte.MinValue, sbyte.MaxValue, 0, -1, 1);
+        deserialized.UShortArrayExtremes.Should().Equal(ushort.MinValue, ushort.MaxValue, 0, 1);
+        deserialized.UIntArrayExtremes.Should().Equal(uint.MinValue, uint.MaxValue, 0, 1);
+        deserialized.ULongArrayExtremes.Should().Equal(ulong.MinValue, ulong.MaxValue, 0, 1);
+    }
+
+    #endregion
+
+    #region Additional Bidirectional Compatibility Tests
+
+    [Fact]
+    public void ByteArray_CrossCompatibilityBidirectional_PG()
+    {
+        // Test that data can roundtrip: protobuf-net -> GProtobuf -> protobuf-net
+        var originalData = new byte[1000];
+        for (int i = 0; i < originalData.Length; i++)
+        {
+            originalData[i] = (byte)(i % 256);
+        }
+
+        var model = new ByteArrayTestModel
+        {
+            LargeByteArray = originalData
+        };
+
+        // protobuf-net serialize -> GProtobuf deserialize -> GProtobuf serialize -> protobuf-net deserialize
+        var protobufNetData = SerializeWithProtobufNet(model);
+        var gprotobufDeserialized = TestModel.Serialization.Deserializers.DeserializeByteArrayTestModel(protobufNetData);
+        var gprotobufData = SerializeWithGProtobuf(gprotobufDeserialized, TestModel.Serialization.Serializers.SerializeByteArrayTestModel);
+        var finalDeserialized = DeserializeWithProtobufNet<ByteArrayTestModel>(gprotobufData);
+
+        finalDeserialized.Should().NotBeNull();
+        finalDeserialized.LargeByteArray.Should().Equal(originalData);
+    }
+
+    [Fact]
+    public void ByteArray_PackedEncodingNotApplicable_PG()
+    {
+        // This test documents that byte[] does NOT support packed encoding
+        // Unlike int[] arrays, byte[] is always length-delimited (wire type 2)
+        // This is consistent across both protobuf-net and GProtobuf
+        
+        var model = new ByteArrayTestModel
+        {
+            BasicByteArray = new byte[] { 1, 2, 3, 4, 5 }
+        };
+
+        // Serialize with protobuf-net
+        var protobufNetData = SerializeWithProtobufNet(model);
+        
+        // Verify the wire format starts with field 1, wire type 2 (length-delimited)
+        // Field 1 with wire type 2 = (1 << 3) | 2 = 10 (0x0A)
+        protobufNetData[0].Should().Be(0x0A);
+        
+        // Deserialize with GProtobuf to ensure compatibility
+        var deserialized = TestModel.Serialization.Deserializers.DeserializeByteArrayTestModel(protobufNetData);
+        deserialized.BasicByteArray.Should().Equal(1, 2, 3, 4, 5);
+    }
+
+    [Fact]
+    public void PrimitiveArrays_CrossCompatibilityBidirectional_PG()
+    {
+        // Test bidirectional compatibility: protobuf-net -> GProtobuf -> protobuf-net
+        var model = new PrimitiveArraysTestModel
+        {
+            FloatArray = new float[] { 1.5f, -2.3f, 0.0f },
+            DoubleArrayPacked = new double[] { Math.PI, Math.E },
+            LongArrayPackedZigZag = new long[] { -1000L, 1000L, 0L },
+            BoolArrayPacked = new bool[] { true, false, true }
+        };
+
+        // protobuf-net serialize -> GProtobuf deserialize -> GProtobuf serialize -> protobuf-net deserialize
+        var protobufNetData = SerializeWithProtobufNet(model);
+        var gprotobufDeserialized = TestModel.Serialization.Deserializers.DeserializePrimitiveArraysTestModel(protobufNetData);
+        var gprotobufData = SerializeWithGProtobuf(gprotobufDeserialized, TestModel.Serialization.Serializers.SerializePrimitiveArraysTestModel);
+        var finalDeserialized = DeserializeWithProtobufNet<PrimitiveArraysTestModel>(gprotobufData);
+
+        finalDeserialized.Should().NotBeNull();
+        finalDeserialized.FloatArray.Should().Equal(1.5f, -2.3f, 0.0f);
+        finalDeserialized.DoubleArrayPacked.Should().Equal(Math.PI, Math.E);
+        finalDeserialized.LongArrayPackedZigZag.Should().Equal(-1000L, 1000L, 0L);
+        finalDeserialized.BoolArrayPacked.Should().Equal(true, false, true);
+    }
+
+    [Fact]
+    public void PrimitiveArrays_NewTypesCrossCompatibilityBidirectional_PG()
+    {
+        // Test bidirectional compatibility for new array types: protobuf-net -> GProtobuf -> protobuf-net
+        var model = new PrimitiveArraysTestModel
+        {
+            SByteArray = new sbyte[] { -128, 0, 127 },
+            ShortArrayPackedZigZag = new short[] { -1000, 0, 1000 },
+            UShortArrayPacked = new ushort[] { 100, 200, 300 },
+            UIntArrayPackedFixed = new uint[] { 1000000, 2000000 },
+            ULongArrayPacked = new ulong[] { 100UL, 200UL, 300UL }
+        };
+
+        // protobuf-net serialize -> GProtobuf deserialize -> GProtobuf serialize -> protobuf-net deserialize
+        var protobufNetData = SerializeWithProtobufNet(model);
+        var gprotobufDeserialized = TestModel.Serialization.Deserializers.DeserializePrimitiveArraysTestModel(protobufNetData);
+        var gprotobufData = SerializeWithGProtobuf(gprotobufDeserialized, TestModel.Serialization.Serializers.SerializePrimitiveArraysTestModel);
+        var finalDeserialized = DeserializeWithProtobufNet<PrimitiveArraysTestModel>(gprotobufData);
+
+        finalDeserialized.Should().NotBeNull();
+        finalDeserialized.SByteArray.Should().Equal(-128, 0, 127);
+        finalDeserialized.ShortArrayPackedZigZag.Should().Equal(-1000, 0, 1000);
+        finalDeserialized.UShortArrayPacked.Should().Equal(100, 200, 300);
+        finalDeserialized.UIntArrayPackedFixed.Should().Equal(1000000, 2000000);
+        finalDeserialized.ULongArrayPacked.Should().Equal(100UL, 200UL, 300UL);
+    }
+
+    #endregion
 }

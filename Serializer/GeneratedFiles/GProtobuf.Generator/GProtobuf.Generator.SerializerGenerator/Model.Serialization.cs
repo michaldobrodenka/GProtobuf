@@ -774,6 +774,7 @@ namespace Model.Serialization
                         var number = reader.ReadVarInt32();
                         var p = reader.Position;
                         resultList.Add(number);
+                        if (reader.IsEnd) break; // End of buffer, no more data
                         (wireType1, fieldId1) = reader.ReadWireTypeAndFieldId();
                         if (fieldId1 != fieldId)
                         {
@@ -797,6 +798,7 @@ namespace Model.Serialization
                         var number = reader.ReadFixedInt32();
                         var p = reader.Position;
                         resultList.Add(number);
+                        if (reader.IsEnd) break; // End of buffer, no more data
                         (wireType1, fieldId1) = reader.ReadWireTypeAndFieldId();
                         if (fieldId1 != fieldId)
                         {

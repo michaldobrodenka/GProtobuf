@@ -277,5 +277,230 @@ namespace GProtobuf.Core
                 Length += packedSize;
             }
         }
+
+        #region Long Array Methods
+
+        /// <summary>
+        /// Writes a packed varint long array (calculates size only).
+        /// </summary>
+        public void WritePackedVarintInt64Array(long[] array)
+        {
+            if (array != null && array.Length > 0)
+            {
+                var packedSize = Utils.GetVarintPackedCollectionSize(array);
+                WriteVarUInt32((uint)packedSize);
+                Length += packedSize;
+            }
+        }
+
+        /// <summary>
+        /// Writes a packed ZigZag long array (calculates size only).
+        /// </summary>
+        public void WritePackedZigZagInt64Array(long[] array)
+        {
+            if (array != null && array.Length > 0)
+            {
+                var packedSize = Utils.GetZigZagPackedCollectionSize(array);
+                WriteVarUInt32((uint)packedSize);
+                Length += packedSize;
+            }
+        }
+
+        /// <summary>
+        /// Writes a single fixed-size long (8 bytes) for size calculation.
+        /// </summary>
+        public void WriteFixedInt64(long value)
+        {
+            Length += 8;
+        }
+
+        /// <summary>
+        /// Writes a ZigZag encoded VarInt64 for size calculation.
+        /// </summary>
+        public void WriteZigZagVarInt64(long value)
+        {
+            ulong zigzagValue = (ulong)((value << 1) ^ (value >> 63));
+            WriteVarUInt64(zigzagValue);
+        }
+
+        /// <summary>
+        /// Writes a VarInt64 for size calculation.
+        /// </summary>
+        public void WriteVarInt64(long value)
+        {
+            WriteVarUInt64((ulong)value);
+        }
+
+        /// <summary>
+        /// Writes a VarUInt64 for size calculation.
+        /// </summary>
+        public void WriteVarUInt64(ulong value)
+        {
+            Length += Utils.GetVarUInt64Size(value);
+        }
+
+        #endregion
+
+        #region Bool Array Methods
+
+        /// <summary>
+        /// Writes a packed boolean array (calculates size only).
+        /// </summary>
+        public void WritePackedBoolArray(bool[] array)
+        {
+            if (array != null && array.Length > 0)
+            {
+                var packedSize = Utils.GetBoolPackedCollectionSize(array);
+                WriteVarUInt32((uint)packedSize);
+                Length += packedSize;
+            }
+        }
+
+        #endregion
+
+        #region SByte Array Methods
+
+        /// <summary>
+        /// Writes a packed signed byte array (calculates size only).
+        /// </summary>
+        public void WritePackedSByteArray(sbyte[] array)
+        {
+            if (array != null && array.Length > 0)
+            {
+                var packedSize = Utils.GetVarintPackedCollectionSizeSByte(array);
+                WriteVarUInt32((uint)packedSize);
+                Length += packedSize;
+            }
+        }
+
+        /// <summary>
+        /// Writes a packed ZigZag signed byte array (calculates size only).
+        /// </summary>
+        public void WritePackedZigZagSByteArray(sbyte[] array)
+        {
+            if (array != null && array.Length > 0)
+            {
+                var packedSize = Utils.GetZigZagPackedCollectionSizeSByte(array);
+                WriteVarUInt32((uint)packedSize);
+                Length += packedSize;
+            }
+        }
+
+        #endregion
+
+        #region Int16 Array Methods
+
+        /// <summary>
+        /// Writes a packed int16 array (calculates size only).
+        /// </summary>
+        public void WritePackedInt16Array(short[] array)
+        {
+            if (array != null && array.Length > 0)
+            {
+                var packedSize = Utils.GetVarintPackedCollectionSizeInt16(array);
+                WriteVarUInt32((uint)packedSize);
+                Length += packedSize;
+            }
+        }
+
+        /// <summary>
+        /// Writes a packed ZigZag int16 array (calculates size only).
+        /// </summary>
+        public void WritePackedZigZagInt16Array(short[] array)
+        {
+            if (array != null && array.Length > 0)
+            {
+                var packedSize = Utils.GetZigZagPackedCollectionSizeInt16(array);
+                WriteVarUInt32((uint)packedSize);
+                Length += packedSize;
+            }
+        }
+
+        /// <summary>
+        /// Writes a single fixed-size int16 as int32 (4 bytes) for size calculation.
+        /// Protocol Buffers uses fixed32 for 16-bit values.
+        /// </summary>
+        public void WriteFixedInt32(short value)
+        {
+            Length += 4;
+        }
+
+        #endregion
+
+        #region UInt16 Array Methods
+
+        /// <summary>
+        /// Writes a packed uint16 array (calculates size only).
+        /// </summary>
+        public void WritePackedUInt16Array(ushort[] array)
+        {
+            if (array != null && array.Length > 0)
+            {
+                var packedSize = Utils.GetVarintPackedCollectionSizeUInt16(array);
+                WriteVarUInt32((uint)packedSize);
+                Length += packedSize;
+            }
+        }
+
+        /// <summary>
+        /// Writes a single fixed-size uint16 as uint32 (4 bytes) for size calculation.
+        /// Protocol Buffers uses fixed32 for 16-bit values.
+        /// </summary>
+        public void WriteFixedUInt32(ushort value)
+        {
+            Length += 4;
+        }
+
+        #endregion
+
+        #region UInt32 Array Methods
+
+        /// <summary>
+        /// Writes a packed uint32 array (calculates size only).
+        /// </summary>
+        public void WritePackedUInt32Array(uint[] array)
+        {
+            if (array != null && array.Length > 0)
+            {
+                var packedSize = Utils.GetVarintPackedCollectionSizeUInt32(array);
+                WriteVarUInt32((uint)packedSize);
+                Length += packedSize;
+            }
+        }
+
+        /// <summary>
+        /// Writes a single fixed-size uint32 (4 bytes) for size calculation.
+        /// </summary>
+        public void WriteFixedUInt32(uint value)
+        {
+            Length += 4;
+        }
+
+        #endregion
+
+        #region UInt64 Array Methods
+
+        /// <summary>
+        /// Writes a packed uint64 array (calculates size only).
+        /// </summary>
+        public void WritePackedUInt64Array(ulong[] array)
+        {
+            if (array != null && array.Length > 0)
+            {
+                var packedSize = Utils.GetVarintPackedCollectionSizeUInt64(array);
+                WriteVarUInt32((uint)packedSize);
+                Length += packedSize;
+            }
+        }
+
+        /// <summary>
+        /// Writes a single fixed-size uint64 (8 bytes) for size calculation.
+        /// </summary>
+        public void WriteFixedUInt64(ulong value)
+        {
+            Length += 8;
+        }
+
+        #endregion
     }
 }

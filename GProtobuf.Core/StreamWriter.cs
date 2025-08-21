@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Buffers;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -207,5 +208,95 @@ namespace GProtobuf.Core
             value.TryWriteBytes(buffer);
             Stream.Write(buffer);
         }
+
+        #region Long/Int64 Methods
+
+        /// <summary>
+        /// Writes a VarInt64 value to the stream.
+        /// </summary>
+        public void WriteVarInt64(long value)
+        {
+            WriteVarUInt64((ulong)value);
+        }
+
+        /// <summary>
+        /// Writes a VarUInt64 value to the stream.
+        /// </summary>
+        public void WriteVarUInt64(ulong value)
+        {
+            while (value >= 0x80)
+            {
+                Stream.WriteByte((byte)(value | 0x80));
+                value >>= 7;
+            }
+            Stream.WriteByte((byte)value);
+        }
+
+        /// <summary>
+        /// Writes a ZigZag encoded VarInt64 value to the stream.
+        /// </summary>
+        public void WriteZigZagVarInt64(long value)
+        {
+            ulong zigzagValue = (ulong)((value << 1) ^ (value >> 63));
+            WriteVarUInt64(zigzagValue);
+        }
+
+        /// <summary>
+        /// Writes a fixed-size 64-bit signed integer (8 bytes, little-endian) to the stream.
+        /// </summary>
+        public void WriteFixedInt64(long value)
+        {
+            Span<byte> buffer = stackalloc byte[8];
+            BinaryPrimitives.WriteInt64LittleEndian(buffer, value);
+            Stream.Write(buffer);
+        }
+
+        #endregion
+
+        #region Fixed Size Methods for New Primitive Types
+
+        /// <summary>
+        /// Writes a fixed-size 16-bit signed integer as 32-bit (4 bytes, little-endian) to the stream.
+        /// Protocol Buffers uses fixed32 for 16-bit values.
+        /// </summary>
+        public void WriteFixedInt32(short value)
+        {
+            Span<byte> buffer = stackalloc byte[4];
+            BinaryPrimitives.WriteInt32LittleEndian(buffer, (int)value);
+            Stream.Write(buffer);
+        }
+
+        /// <summary>
+        /// Writes a fixed-size 16-bit unsigned integer as 32-bit (4 bytes, little-endian) to the stream.
+        /// Protocol Buffers uses fixed32 for 16-bit values.
+        /// </summary>
+        public void WriteFixedUInt32(ushort value)
+        {
+            Span<byte> buffer = stackalloc byte[4];
+            BinaryPrimitives.WriteUInt32LittleEndian(buffer, (uint)value);
+            Stream.Write(buffer);
+        }
+
+        /// <summary>
+        /// Writes a fixed-size 32-bit unsigned integer (4 bytes, little-endian) to the stream.
+        /// </summary>
+        public void WriteFixedUInt32(uint value)
+        {
+            Span<byte> buffer = stackalloc byte[4];
+            BinaryPrimitives.WriteUInt32LittleEndian(buffer, value);
+            Stream.Write(buffer);
+        }
+
+        /// <summary>
+        /// Writes a fixed-size 64-bit unsigned integer (8 bytes, little-endian) to the stream.
+        /// </summary>
+        public void WriteFixedUInt64(ulong value)
+        {
+            Span<byte> buffer = stackalloc byte[8];
+            BinaryPrimitives.WriteUInt64LittleEndian(buffer, value);
+            Stream.Write(buffer);
+        }
+
+        #endregion
     }
 }

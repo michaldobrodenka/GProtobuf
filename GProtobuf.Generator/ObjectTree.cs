@@ -1102,15 +1102,15 @@ class ObjectTree
                     switch (protoMember.DataFormat)
                     {
                         case DataFormat.FixedSize:
-                            int32Reader = String.Format($"reader.ReadFixedInt32();");
+                            int32Reader = String.Format($"reader.ReadFixedInt32()");
                             break;
 
                         case DataFormat.ZigZag:
-                            int32Reader = String.Format($"reader.ReadZigZagVarInt32();");
+                            int32Reader = String.Format($"reader.ReadZigZagVarInt32()");
                             break;
 
                         default:
-                            int32Reader = String.Format($"reader.ReadVarInt32();");
+                            int32Reader = String.Format($"reader.ReadVarInt32()");
                             break;
                     }
 
@@ -1120,7 +1120,7 @@ class ObjectTree
                     sb.AppendNewLine();
                     sb.AppendIndentedLine($"while (!reader.IsEnd)");
                     sb.StartNewBlock();
-                    sb.AppendIndentedLine($"var number = {int32Reader}");
+                    sb.AppendIndentedLine($"var number = {int32Reader};");
                     sb.AppendIndentedLine($"var p = reader.Position;");
                     sb.AppendIndentedLine($"resultList.Add(number);");
                     sb.AppendIndentedLine($"if (reader.IsEnd) break; // End of buffer, no more data");
@@ -1132,6 +1132,357 @@ class ObjectTree
                     sb.EndBlock();
                     sb.EndBlock();
                     sb.AppendNewLine();
+                    sb.AppendIndentedLine($"result.{protoMember.Name} = resultList.ToArray();");
+                }
+                break;
+
+            case "System.Single[]":
+            case "Single[]":
+            case "float[]":
+                if (protoMember.IsPacked)
+                {
+                    sb.AppendIndentedLine($"result.{protoMember.Name} = reader.ReadPackedFloatArray();");
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"List<float> resultList = new();");
+                    sb.AppendIndentedLine($"var wireType1 = wireType;");
+                    sb.AppendIndentedLine($"var fieldId1 = fieldId;");
+                    sb.AppendIndentedLine($"while (fieldId1 == fieldId && wireType1 == WireType.Fixed32b)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"resultList.Add(reader.ReadFloat(wireType1));");
+                    sb.AppendIndentedLine($"if (reader.EndOfData) break;");
+                    sb.AppendIndentedLine($"var p = reader.Position;");
+                    sb.AppendIndentedLine($"(wireType1, fieldId1) = reader.ReadKey();");
+                    sb.AppendIndentedLine($"if (fieldId1 != fieldId)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"reader.Position = p; // rewind");
+                    sb.AppendIndentedLine($"break;");
+                    sb.EndBlock();
+                    sb.EndBlock();
+                    sb.AppendIndentedLine($"result.{protoMember.Name} = resultList.ToArray();");
+                }
+                break;
+
+            case "System.Double[]":
+            case "Double[]":
+            case "double[]":
+                if (protoMember.IsPacked)
+                {
+                    sb.AppendIndentedLine($"result.{protoMember.Name} = reader.ReadPackedDoubleArray();");
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"List<double> resultList = new();");
+                    sb.AppendIndentedLine($"var wireType1 = wireType;");
+                    sb.AppendIndentedLine($"var fieldId1 = fieldId;");
+                    sb.AppendIndentedLine($"while (fieldId1 == fieldId && wireType1 == WireType.Fixed64b)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"resultList.Add(reader.ReadDouble(wireType1));");
+                    sb.AppendIndentedLine($"if (reader.EndOfData) break;");
+                    sb.AppendIndentedLine($"var p = reader.Position;");
+                    sb.AppendIndentedLine($"(wireType1, fieldId1) = reader.ReadKey();");
+                    sb.AppendIndentedLine($"if (fieldId1 != fieldId)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"reader.Position = p; // rewind");
+                    sb.AppendIndentedLine($"break;");
+                    sb.EndBlock();
+                    sb.EndBlock();
+                    sb.AppendIndentedLine($"result.{protoMember.Name} = resultList.ToArray();");
+                }
+                break;
+
+            case "System.Int64[]":
+            case "Int64[]":
+            case "long[]":
+                if (protoMember.IsPacked)
+                {
+                    switch (protoMember.DataFormat)
+                    {
+                        case DataFormat.FixedSize:
+                            sb.AppendIndentedLine($"result.{protoMember.Name} = reader.ReadPackedFixedSizeInt64Array();");
+                            break;
+
+                        case DataFormat.ZigZag:
+                            sb.AppendIndentedLine($"result.{protoMember.Name} = reader.ReadPackedVarIntInt64Array(true);");
+                            break;
+
+                        default:
+                            sb.AppendIndentedLine($"result.{protoMember.Name} = reader.ReadPackedVarIntInt64Array(false);");
+                            break;
+                    }
+                }
+                else
+                {
+                    string longReader = null;
+
+                    switch (protoMember.DataFormat)
+                    {
+                        case DataFormat.FixedSize:
+                            longReader = String.Format($"reader.ReadFixedInt64()");
+                            break;
+
+                        case DataFormat.ZigZag:
+                            longReader = String.Format($"reader.ReadZigZagVarInt64()");
+                            break;
+
+                        default:
+                            longReader = String.Format($"reader.ReadVarInt64()");
+                            break;
+                    }
+
+                    sb.AppendIndentedLine($"List<long> resultList = new();");
+                    sb.AppendIndentedLine($"var wireType1 = wireType;");
+                    sb.AppendIndentedLine($"var fieldId1 = fieldId;");
+                    sb.AppendIndentedLine($"while (fieldId1 == fieldId)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"resultList.Add({longReader});");
+                    sb.AppendIndentedLine($"if (reader.EndOfData) break;");
+                    sb.AppendIndentedLine($"var p = reader.Position;");
+                    sb.AppendIndentedLine($"(wireType1, fieldId1) = reader.ReadKey();");
+                    sb.AppendIndentedLine($"if (fieldId1 != fieldId)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"reader.Position = p; // rewind");
+                    sb.AppendIndentedLine($"break;");
+                    sb.EndBlock();
+                    sb.EndBlock();
+                    sb.AppendIndentedLine($"result.{protoMember.Name} = resultList.ToArray();");
+                }
+                break;
+
+            case "System.Boolean[]":
+            case "Boolean[]":
+            case "bool[]":
+                if (protoMember.IsPacked)
+                {
+                    sb.AppendIndentedLine($"result.{protoMember.Name} = reader.ReadPackedBoolArray();");
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"List<bool> resultList = new();");
+                    sb.AppendIndentedLine($"var wireType1 = wireType;");
+                    sb.AppendIndentedLine($"var fieldId1 = fieldId;");
+                    sb.AppendIndentedLine($"while (fieldId1 == fieldId && wireType1 == WireType.VarInt)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"resultList.Add(reader.ReadBool());");
+                    sb.AppendIndentedLine($"if (reader.EndOfData) break;");
+                    sb.AppendIndentedLine($"var p = reader.Position;");
+                    sb.AppendIndentedLine($"(wireType1, fieldId1) = reader.ReadKey();");
+                    sb.AppendIndentedLine($"if (fieldId1 != fieldId)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"reader.Position = p; // rewind");
+                    sb.AppendIndentedLine($"break;");
+                    sb.EndBlock();
+                    sb.EndBlock();
+                    sb.AppendIndentedLine($"result.{protoMember.Name} = resultList.ToArray();");
+                }
+                break;
+
+            case "System.SByte[]":
+            case "SByte[]":
+            case "sbyte[]":
+                if (protoMember.IsPacked)
+                {
+                    bool zigZagFormat = protoMember.DataFormat == DataFormat.ZigZag;
+                    sb.AppendIndentedLine($"result.{protoMember.Name} = reader.ReadPackedSByteArray({zigZagFormat.ToString().ToLower()});");
+                }
+                else
+                {
+                    string sbyteReader = protoMember.DataFormat switch
+                    {
+                        DataFormat.ZigZag => "reader.ReadSByte(wireType1, true)",
+                        _ => "reader.ReadSByte(wireType1)"
+                    };
+                    
+                    sb.AppendIndentedLine($"List<sbyte> resultList = new();");
+                    sb.AppendIndentedLine($"var wireType1 = wireType;");
+                    sb.AppendIndentedLine($"var fieldId1 = fieldId;");
+                    sb.AppendIndentedLine($"while (fieldId1 == fieldId && wireType1 == WireType.VarInt)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"resultList.Add({sbyteReader});");
+                    sb.AppendIndentedLine($"if (reader.EndOfData) break;");
+                    sb.AppendIndentedLine($"var p = reader.Position;");
+                    sb.AppendIndentedLine($"(wireType1, fieldId1) = reader.ReadKey();");
+                    sb.AppendIndentedLine($"if (fieldId1 != fieldId)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"reader.Position = p; // rewind");
+                    sb.AppendIndentedLine($"break;");
+                    sb.EndBlock();
+                    sb.EndBlock();
+                    sb.AppendIndentedLine($"result.{protoMember.Name} = resultList.ToArray();");
+                }
+                break;
+
+            case "System.Int16[]":
+            case "Int16[]":
+            case "short[]":
+                if (protoMember.IsPacked)
+                {
+                    if (protoMember.DataFormat == DataFormat.FixedSize)
+                    {
+                        sb.AppendIndentedLine($"result.{protoMember.Name} = reader.ReadPackedFixedSizeInt32ArrayAsInt16();");
+                    }
+                    else
+                    {
+                        bool zigZagFormat = protoMember.DataFormat == DataFormat.ZigZag;
+                        sb.AppendIndentedLine($"result.{protoMember.Name} = reader.ReadPackedInt16Array({zigZagFormat.ToString().ToLower()});");
+                    }
+                }
+                else
+                {
+                    string shortReader = protoMember.DataFormat switch
+                    {
+                        DataFormat.ZigZag => "reader.ReadInt16(wireType1, true)",
+                        DataFormat.FixedSize => "reader.ReadFixedInt32()", // Fixed size uses 32-bit encoding
+                        _ => "reader.ReadInt16(wireType1)"
+                    };
+
+                    string expectedWireType = protoMember.DataFormat == DataFormat.FixedSize ? "Fixed32b" : "VarInt";
+                    
+                    sb.AppendIndentedLine($"List<short> resultList = new();");
+                    sb.AppendIndentedLine($"var wireType1 = wireType;");
+                    sb.AppendIndentedLine($"var fieldId1 = fieldId;");
+                    sb.AppendIndentedLine($"while (fieldId1 == fieldId && wireType1 == WireType.{expectedWireType})");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"resultList.Add({shortReader});");
+                    sb.AppendIndentedLine($"if (reader.EndOfData) break;");
+                    sb.AppendIndentedLine($"var p = reader.Position;");
+                    sb.AppendIndentedLine($"(wireType1, fieldId1) = reader.ReadKey();");
+                    sb.AppendIndentedLine($"if (fieldId1 != fieldId)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"reader.Position = p; // rewind");
+                    sb.AppendIndentedLine($"break;");
+                    sb.EndBlock();
+                    sb.EndBlock();
+                    sb.AppendIndentedLine($"result.{protoMember.Name} = resultList.ToArray();");
+                }
+                break;
+
+            case "System.UInt16[]":
+            case "UInt16[]":
+            case "ushort[]":
+                if (protoMember.IsPacked)
+                {
+                    if (protoMember.DataFormat == DataFormat.FixedSize)
+                    {
+                        sb.AppendIndentedLine($"result.{protoMember.Name} = reader.ReadPackedFixedSizeUInt32ArrayAsUInt16();");
+                    }
+                    else
+                    {
+                        sb.AppendIndentedLine($"result.{protoMember.Name} = reader.ReadPackedUInt16Array();");
+                    }
+                }
+                else
+                {
+                    string ushortReader = protoMember.DataFormat switch
+                    {
+                        DataFormat.FixedSize => "reader.ReadFixedUInt32()", // Fixed size uses 32-bit encoding
+                        _ => "reader.ReadUInt16(wireType1)"
+                    };
+
+                    string expectedWireType = protoMember.DataFormat == DataFormat.FixedSize ? "Fixed32b" : "VarInt";
+                    
+                    sb.AppendIndentedLine($"List<ushort> resultList = new();");
+                    sb.AppendIndentedLine($"var wireType1 = wireType;");
+                    sb.AppendIndentedLine($"var fieldId1 = fieldId;");
+                    sb.AppendIndentedLine($"while (fieldId1 == fieldId && wireType1 == WireType.{expectedWireType})");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"resultList.Add({ushortReader});");
+                    sb.AppendIndentedLine($"if (reader.EndOfData) break;");
+                    sb.AppendIndentedLine($"var p = reader.Position;");
+                    sb.AppendIndentedLine($"(wireType1, fieldId1) = reader.ReadKey();");
+                    sb.AppendIndentedLine($"if (fieldId1 != fieldId)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"reader.Position = p; // rewind");
+                    sb.AppendIndentedLine($"break;");
+                    sb.EndBlock();
+                    sb.EndBlock();
+                    sb.AppendIndentedLine($"result.{protoMember.Name} = resultList.ToArray();");
+                }
+                break;
+
+            case "System.UInt32[]":
+            case "UInt32[]":
+            case "uint[]":
+                if (protoMember.IsPacked)
+                {
+                    if (protoMember.DataFormat == DataFormat.FixedSize)
+                    {
+                        sb.AppendIndentedLine($"result.{protoMember.Name} = reader.ReadPackedFixedSizeUInt32Array();");
+                    }
+                    else
+                    {
+                        sb.AppendIndentedLine($"result.{protoMember.Name} = reader.ReadPackedUInt32Array();");
+                    }
+                }
+                else
+                {
+                    string uintReader = protoMember.DataFormat switch
+                    {
+                        DataFormat.FixedSize => "reader.ReadFixedUInt32()", // Fixed size uses different wire type
+                        _ => "reader.ReadUInt32(wireType1)"
+                    };
+
+                    string expectedWireType = protoMember.DataFormat == DataFormat.FixedSize ? "Fixed32b" : "VarInt";
+                    
+                    sb.AppendIndentedLine($"List<uint> resultList = new();");
+                    sb.AppendIndentedLine($"var wireType1 = wireType;");
+                    sb.AppendIndentedLine($"var fieldId1 = fieldId;");
+                    sb.AppendIndentedLine($"while (fieldId1 == fieldId && wireType1 == WireType.{expectedWireType})");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"resultList.Add({uintReader});");
+                    sb.AppendIndentedLine($"if (reader.EndOfData) break;");
+                    sb.AppendIndentedLine($"var p = reader.Position;");
+                    sb.AppendIndentedLine($"(wireType1, fieldId1) = reader.ReadKey();");
+                    sb.AppendIndentedLine($"if (fieldId1 != fieldId)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"reader.Position = p; // rewind");
+                    sb.AppendIndentedLine($"break;");
+                    sb.EndBlock();
+                    sb.EndBlock();
+                    sb.AppendIndentedLine($"result.{protoMember.Name} = resultList.ToArray();");
+                }
+                break;
+
+            case "System.UInt64[]":
+            case "UInt64[]":
+            case "ulong[]":
+                if (protoMember.IsPacked)
+                {
+                    if (protoMember.DataFormat == DataFormat.FixedSize)
+                    {
+                        sb.AppendIndentedLine($"result.{protoMember.Name} = reader.ReadPackedFixedSizeUInt64Array();");
+                    }
+                    else
+                    {
+                        sb.AppendIndentedLine($"result.{protoMember.Name} = reader.ReadPackedUInt64Array();");
+                    }
+                }
+                else
+                {
+                    string ulongReader = protoMember.DataFormat switch
+                    {
+                        DataFormat.FixedSize => "reader.ReadFixedUInt64()", // Fixed size uses different wire type
+                        _ => "reader.ReadUInt64(wireType1)"
+                    };
+
+                    string expectedWireType = protoMember.DataFormat == DataFormat.FixedSize ? "Fixed64b" : "VarInt";
+                    
+                    sb.AppendIndentedLine($"List<ulong> resultList = new();");
+                    sb.AppendIndentedLine($"var wireType1 = wireType;");
+                    sb.AppendIndentedLine($"var fieldId1 = fieldId;");
+                    sb.AppendIndentedLine($"while (fieldId1 == fieldId && wireType1 == WireType.{expectedWireType})");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"resultList.Add({ulongReader});");
+                    sb.AppendIndentedLine($"if (reader.EndOfData) break;");
+                    sb.AppendIndentedLine($"var p = reader.Position;");
+                    sb.AppendIndentedLine($"(wireType1, fieldId1) = reader.ReadKey();");
+                    sb.AppendIndentedLine($"if (fieldId1 != fieldId)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"reader.Position = p; // rewind");
+                    sb.AppendIndentedLine($"break;");
+                    sb.EndBlock();
+                    sb.EndBlock();
                     sb.AppendIndentedLine($"result.{protoMember.Name} = resultList.ToArray();");
                 }
                 break;
@@ -1569,6 +1920,303 @@ class ObjectTree
                 sb.EndBlock();
                 break;
 
+            case "System.Single[]":
+            case "Single[]":
+            case "float[]":
+                sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != null)");
+                sb.StartNewBlock();
+                if (protoMember.IsPacked)
+                {
+                    sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Len);");
+                    sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)({objectName}.{protoMember.Name}.Length * 4));");
+                    sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteFloat(v); }}");
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.Fixed32b);");
+                    sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteVarint32(tagAndWire); writer.WriteFloat(v); }}");
+                }
+                sb.EndBlock();
+                break;
+
+            case "System.Double[]":
+            case "Double[]":
+            case "double[]":
+                sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != null)");
+                sb.StartNewBlock();
+                if (protoMember.IsPacked)
+                {
+                    sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Len);");
+                    sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)({objectName}.{protoMember.Name}.Length * 8));");
+                    sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteDouble(v); }}");
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.Fixed64b);");
+                    sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteVarint32(tagAndWire); writer.WriteDouble(v); }}");
+                }
+                sb.EndBlock();
+                break;
+
+            case "System.Int64[]":
+            case "Int64[]":
+            case "long[]":
+                sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != null)");
+                sb.StartNewBlock();
+                if (protoMember.IsPacked)
+                {
+                    switch (protoMember.DataFormat)
+                    {
+                        case DataFormat.FixedSize:
+                            sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Len);");
+                            sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)({objectName}.{protoMember.Name}.Length * 8));");
+                            sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteFixedInt64(v); }}");
+                            break;
+                        case DataFormat.ZigZag:
+                            sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Len);");
+                            sb.AppendIndentedLine($"var packedSize = Utils.GetZigZagPackedCollectionSize({objectName}.{protoMember.Name});");
+                            sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)packedSize);");
+                            sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteZigZagVarInt64(v); }}");
+                            break;
+                        default:
+                            sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Len);");
+                            sb.AppendIndentedLine($"var packedSize = Utils.GetVarintPackedCollectionSize({objectName}.{protoMember.Name});");
+                            sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)packedSize);");
+                            sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteVarInt64(v); }}");
+                            break;
+                    }
+                }
+                else
+                {
+                    switch (protoMember.DataFormat)
+                    {
+                        case DataFormat.FixedSize:
+                            sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.Fixed64b);");
+                            sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteVarint32(tagAndWire); writer.WriteFixedInt64(v); }}");
+                            break;
+                        case DataFormat.ZigZag:
+                            sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.VarInt);");
+                            sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteVarint32(tagAndWire); writer.WriteZigZagVarInt64(v); }}");
+                            break;
+                        default:
+                            sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.VarInt);");
+                            sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteVarint32(tagAndWire); writer.WriteVarInt64(v); }}");
+                            break;
+                    }
+                }
+                sb.EndBlock();
+                break;
+
+            case "System.Boolean[]":
+            case "Boolean[]":
+            case "bool[]":
+                sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != null)");
+                sb.StartNewBlock();
+                if (protoMember.IsPacked)
+                {
+                    sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Len);");
+                    sb.AppendIndentedLine($"var packedSize = Utils.GetBoolPackedCollectionSize({objectName}.{protoMember.Name});");
+                    sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)packedSize);");
+                    sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteBool(v); }}");
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.VarInt);");
+                    sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteVarint32(tagAndWire); writer.WriteBool(v); }}");
+                }
+                sb.EndBlock();
+                break;
+
+            case "System.SByte[]":
+            case "SByte[]":
+            case "sbyte[]":
+                sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != null)");
+                sb.StartNewBlock();
+                if (protoMember.IsPacked)
+                {
+                    sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Len);");
+                    
+                    if (protoMember.DataFormat == DataFormat.ZigZag)
+                    {
+                        sb.AppendIndentedLine($"var packedSize = Utils.GetZigZagPackedCollectionSizeSByte({objectName}.{protoMember.Name});");
+                        sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)packedSize);");
+                        sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteSByte(v, true); }}");
+                    }
+                    else
+                    {
+                        sb.AppendIndentedLine($"var packedSize = Utils.GetVarintPackedCollectionSizeSByte({objectName}.{protoMember.Name});");
+                        sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)packedSize);");
+                        sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteSByte(v); }}");
+                    }
+                }
+                else
+                {
+                    string writeMethod = protoMember.DataFormat == DataFormat.ZigZag ? "writer.WriteSByte(v, true)" : "writer.WriteSByte(v)";
+                    sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.VarInt);");
+                    sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteVarint32(tagAndWire); {writeMethod}; }}");
+                }
+                sb.EndBlock();
+                break;
+
+            case "System.Int16[]":
+            case "Int16[]":
+            case "short[]":
+                sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != null)");
+                sb.StartNewBlock();
+                if (protoMember.IsPacked)
+                {
+                    sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Len);");
+                    
+                    switch (protoMember.DataFormat)
+                    {
+                        case DataFormat.FixedSize:
+                            sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)({objectName}.{protoMember.Name}.Length * 4)); // 4 bytes per short (fixed32)");
+                            sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteFixedInt32(v); }}");
+                            break;
+                        case DataFormat.ZigZag:
+                            sb.AppendIndentedLine($"var packedSize = Utils.GetZigZagPackedCollectionSizeInt16({objectName}.{protoMember.Name});");
+                            sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)packedSize);");
+                            sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteInt16(v, true); }}");
+                            break;
+                        default:
+                            sb.AppendIndentedLine($"var packedSize = Utils.GetVarintPackedCollectionSizeInt16({objectName}.{protoMember.Name});");
+                            sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)packedSize);");
+                            sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteInt16(v); }}");
+                            break;
+                    }
+                }
+                else
+                {
+                    switch (protoMember.DataFormat)
+                    {
+                        case DataFormat.FixedSize:
+                            sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.Fixed32b);");
+                            sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteVarint32(tagAndWire); writer.WriteFixedInt32(v); }}");
+                            break;
+                        case DataFormat.ZigZag:
+                            sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.VarInt);");
+                            sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteVarint32(tagAndWire); writer.WriteInt16(v, true); }}");
+                            break;
+                        default:
+                            sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.VarInt);");
+                            sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteVarint32(tagAndWire); writer.WriteInt16(v); }}");
+                            break;
+                    }
+                }
+                sb.EndBlock();
+                break;
+
+            case "System.UInt16[]":
+            case "UInt16[]":
+            case "ushort[]":
+                sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != null)");
+                sb.StartNewBlock();
+                if (protoMember.IsPacked)
+                {
+                    sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Len);");
+                    
+                    if (protoMember.DataFormat == DataFormat.FixedSize)
+                    {
+                        sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)({objectName}.{protoMember.Name}.Length * 4)); // 4 bytes per ushort (fixed32)");
+                        sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteFixedUInt32(v); }}");
+                    }
+                    else
+                    {
+                        sb.AppendIndentedLine($"var packedSize = Utils.GetVarintPackedCollectionSizeUInt16({objectName}.{protoMember.Name});");
+                        sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)packedSize);");
+                        sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteUInt16(v); }}");
+                    }
+                }
+                else
+                {
+                    if (protoMember.DataFormat == DataFormat.FixedSize)
+                    {
+                        sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.Fixed32b);");
+                        sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteVarint32(tagAndWire); writer.WriteFixedUInt32(v); }}");
+                    }
+                    else
+                    {
+                        sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.VarInt);");
+                        sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteVarint32(tagAndWire); writer.WriteUInt16(v); }}");
+                    }
+                }
+                sb.EndBlock();
+                break;
+
+            case "System.UInt32[]":
+            case "UInt32[]":
+            case "uint[]":
+                sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != null)");
+                sb.StartNewBlock();
+                if (protoMember.IsPacked)
+                {
+                    sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Len);");
+                    
+                    if (protoMember.DataFormat == DataFormat.FixedSize)
+                    {
+                        sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)({objectName}.{protoMember.Name}.Length * 4)); // 4 bytes per uint");
+                        sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteFixedUInt32(v); }}");
+                    }
+                    else
+                    {
+                        sb.AppendIndentedLine($"var packedSize = Utils.GetVarintPackedCollectionSizeUInt32({objectName}.{protoMember.Name});");
+                        sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)packedSize);");
+                        sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteUInt32(v); }}");
+                    }
+                }
+                else
+                {
+                    if (protoMember.DataFormat == DataFormat.FixedSize)
+                    {
+                        sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.Fixed32b);");
+                        sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteVarint32(tagAndWire); writer.WriteFixedUInt32(v); }}");
+                    }
+                    else
+                    {
+                        sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.VarInt);");
+                        sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteVarint32(tagAndWire); writer.WriteUInt32(v); }}");
+                    }
+                }
+                sb.EndBlock();
+                break;
+
+            case "System.UInt64[]":
+            case "UInt64[]":
+            case "ulong[]":
+                sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != null)");
+                sb.StartNewBlock();
+                if (protoMember.IsPacked)
+                {
+                    sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Len);");
+                    
+                    if (protoMember.DataFormat == DataFormat.FixedSize)
+                    {
+                        sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)({objectName}.{protoMember.Name}.Length * 8)); // 8 bytes per ulong");
+                        sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteFixedUInt64(v); }}");
+                    }
+                    else
+                    {
+                        sb.AppendIndentedLine($"var packedSize = Utils.GetVarintPackedCollectionSizeUInt64({objectName}.{protoMember.Name});");
+                        sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)packedSize);");
+                        sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteUInt64(v); }}");
+                    }
+                }
+                else
+                {
+                    if (protoMember.DataFormat == DataFormat.FixedSize)
+                    {
+                        sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.Fixed64b);");
+                        sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteVarint32(tagAndWire); writer.WriteFixedUInt64(v); }}");
+                    }
+                    else
+                    {
+                        sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.VarInt);");
+                        sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteVarint32(tagAndWire); writer.WriteUInt64(v); }}");
+                    }
+                }
+                sb.EndBlock();
+                break;
+
             default:
                 sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != null)");
                 sb.StartNewBlock();
@@ -1973,6 +2621,276 @@ class ObjectTree
                             sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.VarInt);");
                             sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteVarint32(tagAndWire); calculator.WriteVarint32(v); }}");
                             break;
+                    }
+                }
+                sb.EndBlock();
+                break;
+
+            case "System.Single[]":
+            case "Single[]":
+            case "float[]":
+                sb.AppendIndentedLine($"if (obj.{protoMember.Name} != null)");
+                sb.StartNewBlock();
+                if (protoMember.IsPacked)
+                {
+                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+                    sb.AppendIndentedLine($"calculator.WriteVarUInt32((uint)(obj.{protoMember.Name}.Length * 4));");
+                    sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteFloat(v); }}");
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.Fixed32b);");
+                    sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteVarint32(tagAndWire); calculator.WriteFloat(v); }}");
+                }
+                sb.EndBlock();
+                break;
+
+            case "System.Double[]":
+            case "Double[]":
+            case "double[]":
+                sb.AppendIndentedLine($"if (obj.{protoMember.Name} != null)");
+                sb.StartNewBlock();
+                if (protoMember.IsPacked)
+                {
+                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+                    sb.AppendIndentedLine($"calculator.WriteVarUInt32((uint)(obj.{protoMember.Name}.Length * 8));");
+                    sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteDouble(v); }}");
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.Fixed64b);");
+                    sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteVarint32(tagAndWire); calculator.WriteDouble(v); }}");
+                }
+                sb.EndBlock();
+                break;
+
+            case "System.Int64[]":
+            case "Int64[]":
+            case "long[]":
+                sb.AppendIndentedLine($"if (obj.{protoMember.Name} != null)");
+                sb.StartNewBlock();
+                if (protoMember.IsPacked)
+                {
+                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+                    switch (protoMember.DataFormat)
+                    {
+                        case DataFormat.FixedSize:
+                            sb.AppendIndentedLine($"calculator.WriteVarUInt32((uint)(obj.{protoMember.Name}.Length * 8));");
+                            sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteFixedInt64(v); }}");
+                            break;
+                        case DataFormat.ZigZag:
+                            sb.AppendIndentedLine($"calculator.WritePackedZigZagInt64Array(obj.{protoMember.Name});");
+                            break;
+                        default:
+                            sb.AppendIndentedLine($"calculator.WritePackedVarintInt64Array(obj.{protoMember.Name});");
+                            break;
+                    }
+                }
+                else
+                {
+                    switch (protoMember.DataFormat)
+                    {
+                        case DataFormat.FixedSize:
+                            sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.Fixed64b);");
+                            sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteVarint32(tagAndWire); calculator.WriteFixedInt64(v); }}");
+                            break;
+                        case DataFormat.ZigZag:
+                            sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.VarInt);");
+                            sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteVarint32(tagAndWire); calculator.WriteZigZagVarInt64(v); }}");
+                            break;
+                        default:
+                            sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.VarInt);");
+                            sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteVarint32(tagAndWire); calculator.WriteVarInt64(v); }}");
+                            break;
+                    }
+                }
+                sb.EndBlock();
+                break;
+
+            case "System.Boolean[]":
+            case "Boolean[]":
+            case "bool[]":
+                sb.AppendIndentedLine($"if (obj.{protoMember.Name} != null)");
+                sb.StartNewBlock();
+                if (protoMember.IsPacked)
+                {
+                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+                    sb.AppendIndentedLine($"calculator.WritePackedBoolArray(obj.{protoMember.Name});");
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.VarInt);");
+                    sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteVarint32(tagAndWire); calculator.WriteBool(v); }}");
+                }
+                sb.EndBlock();
+                break;
+
+            case "System.SByte[]":
+            case "SByte[]":
+            case "sbyte[]":
+                sb.AppendIndentedLine($"if (obj.{protoMember.Name} != null)");
+                sb.StartNewBlock();
+                if (protoMember.IsPacked)
+                {
+                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+                    if (protoMember.DataFormat == DataFormat.ZigZag)
+                    {
+                        sb.AppendIndentedLine($"calculator.WritePackedZigZagSByteArray(obj.{protoMember.Name});");
+                    }
+                    else
+                    {
+                        sb.AppendIndentedLine($"calculator.WritePackedSByteArray(obj.{protoMember.Name});");
+                    }
+                }
+                else
+                {
+                    string writeMethod = protoMember.DataFormat == DataFormat.ZigZag ? "calculator.WriteZigZagSByte(v)" : "calculator.WriteSByte(v)";
+                    sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.VarInt);");
+                    sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteVarint32(tagAndWire); {writeMethod}; }}");
+                }
+                sb.EndBlock();
+                break;
+
+            case "System.Int16[]":
+            case "Int16[]":
+            case "short[]":
+                sb.AppendIndentedLine($"if (obj.{protoMember.Name} != null)");
+                sb.StartNewBlock();
+                if (protoMember.IsPacked)
+                {
+                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+                    switch (protoMember.DataFormat)
+                    {
+                        case DataFormat.FixedSize:
+                            sb.AppendIndentedLine($"calculator.WriteVarUInt32((uint)(obj.{protoMember.Name}.Length * 4)); // 4 bytes per short (fixed32)");
+                            sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteFixedInt32(v); }}");
+                            break;
+                        case DataFormat.ZigZag:
+                            sb.AppendIndentedLine($"calculator.WritePackedZigZagInt16Array(obj.{protoMember.Name});");
+                            break;
+                        default:
+                            sb.AppendIndentedLine($"calculator.WritePackedInt16Array(obj.{protoMember.Name});");
+                            break;
+                    }
+                }
+                else
+                {
+                    switch (protoMember.DataFormat)
+                    {
+                        case DataFormat.FixedSize:
+                            sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.Fixed32b);");
+                            sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteVarint32(tagAndWire); calculator.WriteFixedInt32(v); }}");
+                            break;
+                        case DataFormat.ZigZag:
+                            sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.VarInt);");
+                            sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteVarint32(tagAndWire); calculator.WriteZigZagInt16(v); }}");
+                            break;
+                        default:
+                            sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.VarInt);");
+                            sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteVarint32(tagAndWire); calculator.WriteInt16(v); }}");
+                            break;
+                    }
+                }
+                sb.EndBlock();
+                break;
+
+            case "System.UInt16[]":
+            case "UInt16[]":
+            case "ushort[]":
+                sb.AppendIndentedLine($"if (obj.{protoMember.Name} != null)");
+                sb.StartNewBlock();
+                if (protoMember.IsPacked)
+                {
+                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+                    if (protoMember.DataFormat == DataFormat.FixedSize)
+                    {
+                        sb.AppendIndentedLine($"calculator.WriteVarUInt32((uint)(obj.{protoMember.Name}.Length * 4)); // 4 bytes per ushort (fixed32)");
+                        sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteFixedUInt32(v); }}");
+                    }
+                    else
+                    {
+                        sb.AppendIndentedLine($"calculator.WritePackedUInt16Array(obj.{protoMember.Name});");
+                    }
+                }
+                else
+                {
+                    if (protoMember.DataFormat == DataFormat.FixedSize)
+                    {
+                        sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.Fixed32b);");
+                        sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteVarint32(tagAndWire); calculator.WriteFixedUInt16(v); }}");
+                    }
+                    else
+                    {
+                        sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.VarInt);");
+                        sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteVarint32(tagAndWire); calculator.WriteUInt16(v); }}");
+                    }
+                }
+                sb.EndBlock();
+                break;
+
+            case "System.UInt32[]":
+            case "UInt32[]":
+            case "uint[]":
+                sb.AppendIndentedLine($"if (obj.{protoMember.Name} != null)");
+                sb.StartNewBlock();
+                if (protoMember.IsPacked)
+                {
+                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+                    if (protoMember.DataFormat == DataFormat.FixedSize)
+                    {
+                        sb.AppendIndentedLine($"calculator.WriteVarUInt32((uint)(obj.{protoMember.Name}.Length * 4)); // 4 bytes per uint");
+                        sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteFixedUInt32(v); }}");
+                    }
+                    else
+                    {
+                        sb.AppendIndentedLine($"calculator.WritePackedUInt32Array(obj.{protoMember.Name});");
+                    }
+                }
+                else
+                {
+                    if (protoMember.DataFormat == DataFormat.FixedSize)
+                    {
+                        sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.Fixed32b);");
+                        sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteVarint32(tagAndWire); calculator.WriteFixedUInt32((uint)v); }}");
+                    }
+                    else
+                    {
+                        sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.VarInt);");
+                        sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteVarint32(tagAndWire); calculator.WriteUInt32(v); }}");
+                    }
+                }
+                sb.EndBlock();
+                break;
+
+            case "System.UInt64[]":
+            case "UInt64[]":
+            case "ulong[]":
+                sb.AppendIndentedLine($"if (obj.{protoMember.Name} != null)");
+                sb.StartNewBlock();
+                if (protoMember.IsPacked)
+                {
+                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+                    if (protoMember.DataFormat == DataFormat.FixedSize)
+                    {
+                        sb.AppendIndentedLine($"calculator.WriteVarUInt32((uint)(obj.{protoMember.Name}.Length * 8)); // 8 bytes per ulong");
+                        sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteFixedUInt64(v); }}");
+                    }
+                    else
+                    {
+                        sb.AppendIndentedLine($"calculator.WritePackedUInt64Array(obj.{protoMember.Name});");
+                    }
+                }
+                else
+                {
+                    if (protoMember.DataFormat == DataFormat.FixedSize)
+                    {
+                        sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.Fixed64b);");
+                        sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteVarint32(tagAndWire); calculator.WriteFixedUInt64(v); }}");
+                    }
+                    else
+                    {
+                        sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.VarInt);");
+                        sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteVarint32(tagAndWire); calculator.WriteUInt64(v); }}");
                     }
                 }
                 sb.EndBlock();
