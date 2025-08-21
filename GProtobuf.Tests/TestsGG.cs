@@ -4,6 +4,7 @@ using GProtobuf.Tests.TestModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using ProtoBuf;
+using System;
 using System.Reflection;
 using System.Text;
 using Xunit.Abstractions;
@@ -807,6 +808,163 @@ public sealed class GProtobufToGProtobufTests : BaseSerializationTest
         deserialized.IntArrayPacked.Should().Equal(int.MinValue, int.MaxValue, 0, -1, 1);
         deserialized.IntArrayPackedZigZag.Should().Equal(int.MinValue, int.MaxValue, 0, -1, 1);
         deserialized.IntArrayPackedFixed.Should().Equal(int.MinValue, int.MaxValue, 0, -1, 1);
+    }
+
+    #endregion
+
+    #region ByteArray Tests (GProtobuf to GProtobuf)
+
+    [Fact]
+    public void ByteArray_BasicValues_GG()
+    {
+        var model = new ByteArrayTestModel
+        {
+            BasicByteArray = new byte[] { 0, 1, 2, 127, 128, 254, 255 }
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeByteArrayTestModel);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializeByteArrayTestModel(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.BasicByteArray.Should().Equal(0, 1, 2, 127, 128, 254, 255);
+    }
+
+    [Fact]
+    public void ByteArray_EmptyArray_GG()
+    {
+        var model = new ByteArrayTestModel
+        {
+            EmptyByteArray = new byte[0]
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeByteArrayTestModel);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializeByteArrayTestModel(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.EmptyByteArray.Should().NotBeNull();
+        deserialized.EmptyByteArray.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void ByteArray_NullArray_GG()
+    {
+        var model = new ByteArrayTestModel
+        {
+            NullByteArray = null
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeByteArrayTestModel);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializeByteArrayTestModel(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.NullByteArray.Should().BeNull();
+    }
+
+    [Fact]
+    public void ByteArray_LargeArray_GG()
+    {
+        // Create a large byte array with pattern
+        var largeArray = new byte[5000];
+        for (int i = 0; i < largeArray.Length; i++)
+        {
+            largeArray[i] = (byte)(i % 256);
+        }
+
+        var model = new ByteArrayTestModel
+        {
+            LargeByteArray = largeArray
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeByteArrayTestModel);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializeByteArrayTestModel(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.LargeByteArray.Should().Equal(largeArray);
+        deserialized.LargeByteArray.Length.Should().Be(5000);
+    }
+
+    [Fact]
+    public void ByteArray_AllPossibleByteValues_GG()
+    {
+        // Test all possible byte values (0-255)
+        var allBytes = new byte[256];
+        for (int i = 0; i < 256; i++)
+        {
+            allBytes[i] = (byte)i;
+        }
+
+        var model = new ByteArrayTestModel
+        {
+            AllPossibleBytes = allBytes
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeByteArrayTestModel);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializeByteArrayTestModel(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.AllPossibleBytes.Should().Equal(allBytes);
+        deserialized.AllPossibleBytes.Length.Should().Be(256);
+        
+        // Verify specific values are preserved
+        deserialized.AllPossibleBytes[0].Should().Be(0);
+        deserialized.AllPossibleBytes[127].Should().Be(127);
+        deserialized.AllPossibleBytes[128].Should().Be(128);
+        deserialized.AllPossibleBytes[255].Should().Be(255);
+    }
+
+    [Fact]
+    public void ByteArray_BinaryDataSimulation_GG()
+    {
+        // Simulate typical binary data patterns
+        var binaryData = new byte[]
+        {
+            // Binary file header simulation
+            0x50, 0x4B, 0x03, 0x04, // ZIP file signature
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // PNG signature
+            // Random binary data
+            0xDE, 0xAD, 0xBE, 0xEF,
+            0xCA, 0xFE, 0xBA, 0xBE,
+            // Edge cases
+            0x00, 0xFF, 0x7F, 0x80
+        };
+
+        var model = new ByteArrayTestModel
+        {
+            BinaryData = binaryData
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeByteArrayTestModel);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializeByteArrayTestModel(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.BinaryData.Should().Equal(binaryData);
+    }
+
+    [Fact]
+    public void ByteArray_MultipleFieldsWithDifferentSizes_GG()
+    {
+        var model = new ByteArrayTestModel
+        {
+            BasicByteArray = new byte[] { 1, 2, 3 },
+            EmptyByteArray = new byte[0],
+            LargeByteArray = new byte[500], // Smaller for GG tests
+            AllPossibleBytes = new byte[] { 0, 127, 128, 255 }
+        };
+
+        // Fill large array with pattern
+        for (int i = 0; i < model.LargeByteArray.Length; i++)
+        {
+            model.LargeByteArray[i] = (byte)(i % 100);
+        }
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeByteArrayTestModel);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializeByteArrayTestModel(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.BasicByteArray.Should().Equal(1, 2, 3);
+        deserialized.EmptyByteArray.Should().BeEmpty();
+        deserialized.LargeByteArray.Should().Equal(model.LargeByteArray);
+        deserialized.AllPossibleBytes.Should().Equal(0, 127, 128, 255);
     }
 
     #endregion

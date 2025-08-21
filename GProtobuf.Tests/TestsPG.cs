@@ -4,6 +4,7 @@ using GProtobuf.Tests.TestModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using ProtoBuf;
+using System;
 using System.Reflection;
 using System.Text;
 using Xunit.Abstractions;
@@ -828,4 +829,128 @@ public sealed class ProtobufNetToGProtobufTests : BaseSerializationTest
         deserialized.IntArrayPacked.Should().Equal(int.MinValue, int.MaxValue, 0, -1, 1);
         deserialized.IntArrayNonPacked.Should().Equal(int.MinValue, int.MaxValue, 0, -1, 1);
     }
+
+    #region ByteArray Tests (Protobuf-net to GProtobuf)
+
+    [Fact]
+    public void ByteArray_CrossCompatibility_ProtobufNetToGProtobuf_PG()
+    {
+        var model = new ByteArrayTestModel
+        {
+            BasicByteArray = new byte[] { 13, 37, 42, 128, 255, 0 }
+        };
+
+        var protobufNetData = SerializeWithProtobufNet(model);
+        var gprotobufDeserialized = TestModel.Serialization.Deserializers.DeserializeByteArrayTestModel(protobufNetData);
+
+        gprotobufDeserialized.Should().NotBeNull();
+        gprotobufDeserialized.BasicByteArray.Should().Equal(13, 37, 42, 128, 255, 0);
+    }
+
+    [Fact]
+    public void ByteArray_EmptyAndNull_ProtobufNetToGProtobuf_PG()
+    {
+        var model = new ByteArrayTestModel
+        {
+            EmptyByteArray = new byte[0],
+            NullByteArray = null
+        };
+
+        var protobufNetData = SerializeWithProtobufNet(model);
+        var gprotobufDeserialized = TestModel.Serialization.Deserializers.DeserializeByteArrayTestModel(protobufNetData);
+
+        gprotobufDeserialized.Should().NotBeNull();
+        gprotobufDeserialized.EmptyByteArray.Should().BeEmpty();
+        gprotobufDeserialized.NullByteArray.Should().BeNull();
+    }
+
+    [Fact]
+    public void ByteArray_LargeData_ProtobufNetToGProtobuf_PG()
+    {
+        var largeData = new byte[3000];
+        var random = new Random(123); // Seed for deterministic test
+        random.NextBytes(largeData);
+
+        var model = new ByteArrayTestModel
+        {
+            LargeByteArray = largeData
+        };
+
+        var protobufNetData = SerializeWithProtobufNet(model);
+        var gprotobufDeserialized = TestModel.Serialization.Deserializers.DeserializeByteArrayTestModel(protobufNetData);
+
+        gprotobufDeserialized.Should().NotBeNull();
+        gprotobufDeserialized.LargeByteArray.Should().Equal(largeData);
+    }
+
+    [Fact]
+    public void ByteArray_AllPossibleValues_ProtobufNetToGProtobuf_PG()
+    {
+        var allBytes = new byte[256];
+        for (int i = 0; i < 256; i++)
+        {
+            allBytes[i] = (byte)i;
+        }
+
+        var model = new ByteArrayTestModel
+        {
+            AllPossibleBytes = allBytes
+        };
+
+        var protobufNetData = SerializeWithProtobufNet(model);
+        var gprotobufDeserialized = TestModel.Serialization.Deserializers.DeserializeByteArrayTestModel(protobufNetData);
+
+        gprotobufDeserialized.Should().NotBeNull();
+        gprotobufDeserialized.AllPossibleBytes.Should().Equal(allBytes);
+        gprotobufDeserialized.AllPossibleBytes[0].Should().Be(0);
+        gprotobufDeserialized.AllPossibleBytes[255].Should().Be(255);
+    }
+
+    [Fact]
+    public void ByteArray_BinaryDataHeaders_ProtobufNetToGProtobuf_PG()
+    {
+        var binaryData = new byte[]
+        {
+            // JPEG header
+            0xFF, 0xD8, 0xFF, 0xE0,
+            // PDF header
+            0x25, 0x50, 0x44, 0x46,
+            // ZIP header
+            0x50, 0x4B, 0x03, 0x04,
+            // Edge values
+            0x00, 0x7F, 0x80, 0xFF
+        };
+
+        var model = new ByteArrayTestModel
+        {
+            BinaryData = binaryData
+        };
+
+        var protobufNetData = SerializeWithProtobufNet(model);
+        var gprotobufDeserialized = TestModel.Serialization.Deserializers.DeserializeByteArrayTestModel(protobufNetData);
+
+        gprotobufDeserialized.Should().NotBeNull();
+        gprotobufDeserialized.BinaryData.Should().Equal(binaryData);
+    }
+
+    [Fact]
+    public void ByteArray_MultipleFields_ProtobufNetToGProtobuf_PG()
+    {
+        var model = new ByteArrayTestModel
+        {
+            BasicByteArray = new byte[] { 1, 2, 3, 4, 5 },
+            EmptyByteArray = new byte[0],
+            EdgeCaseBytes = new byte[] { byte.MinValue, byte.MaxValue, 127, 128 }
+        };
+
+        var protobufNetData = SerializeWithProtobufNet(model);
+        var gprotobufDeserialized = TestModel.Serialization.Deserializers.DeserializeByteArrayTestModel(protobufNetData);
+
+        gprotobufDeserialized.Should().NotBeNull();
+        gprotobufDeserialized.BasicByteArray.Should().Equal(1, 2, 3, 4, 5);
+        gprotobufDeserialized.EmptyByteArray.Should().BeEmpty();
+        gprotobufDeserialized.EdgeCaseBytes.Should().Equal(byte.MinValue, byte.MaxValue, 127, 128);
+    }
+
+    #endregion
 }
