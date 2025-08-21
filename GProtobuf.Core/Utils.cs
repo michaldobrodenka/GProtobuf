@@ -106,5 +106,59 @@ namespace GProtobuf.Core
             }
             return totalSize;
         }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int GetZigZagPackedCollectionSize(int[] array)
+        {
+            if (array == null)
+            {
+                return 0;
+            }
+
+            int totalSize = 0;
+            for (int i = 0; i < array.Length; i++)
+            {
+                // ZigZag encode the value first, then calculate varint size
+                uint zigzagValue = (uint)((array[i] << 1) ^ (array[i] >> 31));
+                totalSize += GetVarintSize(zigzagValue);
+            }
+            return totalSize;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int GetZigZagPackedCollectionSize(List<int> list)
+        {
+            if (list == null)
+            {
+                return 0;
+            }
+
+            int totalSize = 0;
+            for (int i = 0; i < list.Count; i++)
+            {
+                // ZigZag encode the value first, then calculate varint size
+                uint zigzagValue = (uint)((list[i] << 1) ^ (list[i] >> 31));
+                totalSize += GetVarintSize(zigzagValue);
+            }
+            return totalSize;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int GetZigZagPackedCollectionSize(IEnumerable<int> collection)
+        {
+            if (collection == null)
+            {
+                return 0;
+            }
+
+            int totalSize = 0;
+            foreach (var item in collection)
+            {
+                // ZigZag encode the value first, then calculate varint size
+                uint zigzagValue = (uint)((item << 1) ^ (item >> 31));
+                totalSize += GetVarintSize(zigzagValue);
+            }
+            return totalSize;
+        }
     }
 }

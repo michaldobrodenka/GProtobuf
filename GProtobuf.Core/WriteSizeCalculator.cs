@@ -262,7 +262,7 @@ namespace GProtobuf.Core
         {
             if (array != null)
             {
-                var packedSize = Utils.GetVarintPackedCollectionSize(array); // approximation
+                var packedSize = Utils.GetZigZagPackedCollectionSize(array);
                 WriteVarUInt32((uint)packedSize); // Use optimized version for size/length
                 Length += packedSize;
             }
@@ -272,7 +272,7 @@ namespace GProtobuf.Core
         {
             if (list != null)
             {
-                var packedSize = Utils.GetVarintPackedCollectionSize(list); // approximation
+                var packedSize = Utils.GetZigZagPackedCollectionSize(list);
                 WriteVarUInt32((uint)packedSize); // Use optimized version for size/length
                 Length += packedSize;
             }

@@ -1123,6 +1123,7 @@ class ObjectTree
                     sb.AppendIndentedLine($"var number = {int32Reader}");
                     sb.AppendIndentedLine($"var p = reader.Position;");
                     sb.AppendIndentedLine($"resultList.Add(number);");
+                    sb.AppendIndentedLine($"if (reader.IsEnd) break; // End of buffer, no more data");
                     sb.AppendIndentedLine($"(wireType1, fieldId1) = reader.ReadWireTypeAndFieldId();");
                     sb.AppendIndentedLine($"if (fieldId1 != fieldId)");
                     sb.StartNewBlock();
@@ -1535,7 +1536,7 @@ class ObjectTree
                             break;
                         case DataFormat.ZigZag:
                             sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Len);");
-                            sb.AppendIndentedLine($"var packedSize = Utils.GetVarintPackedCollectionSize({objectName}.{protoMember.Name});");
+                            sb.AppendIndentedLine($"var packedSize = Utils.GetZigZagPackedCollectionSize({objectName}.{protoMember.Name});");
                             sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)packedSize);");
                             sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) writer.WriteZigZag32(v);");
                             break;

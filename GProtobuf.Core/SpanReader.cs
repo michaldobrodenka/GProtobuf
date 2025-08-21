@@ -234,13 +234,19 @@ namespace GProtobuf.Core
             long result = 0;
             int shift = 0;
             byte b;
+            bool hasReadBytes = false;
             do
             {
                 int readByte = GetByte();
 
                 if (readByte < 0)
+                {
+                    if (!hasReadBytes)
+                        throw new InvalidOperationException("Unexpected end of buffer while reading VarInt32");
                     break;
+                }
 
+                hasReadBytes = true;
                 b = (byte)readByte;
 
                 result |= (long)(b & 0x7F) << shift;
@@ -259,13 +265,19 @@ namespace GProtobuf.Core
             uint result = 0;
             int shift = 0;
             byte b;
+            bool hasReadBytes = false;
             do
             {
                 int readByte = GetByte();
 
                 if (readByte < 0)
+                {
+                    if (!hasReadBytes)
+                        throw new InvalidOperationException("Unexpected end of buffer while reading VarUInt32");
                     break;
+                }
 
+                hasReadBytes = true;
                 b = (byte)readByte;
 
                 result |= (uint)(b & 0x7F) << shift;
@@ -299,13 +311,19 @@ namespace GProtobuf.Core
             long result = 0;
             int shift = 0;
             byte b;
+            bool hasReadBytes = false;
             do
             {
                 int readByte = GetByte();
 
                 if (readByte < 0)
+                {
+                    if (!hasReadBytes)
+                        throw new InvalidOperationException("Unexpected end of buffer while reading VarInt64");
                     break;
+                }
 
+                hasReadBytes = true;
                 b = (byte)readByte;
 
                 result |= (long)(b & 0x7F) << shift;
@@ -329,13 +347,19 @@ namespace GProtobuf.Core
             ulong result = 0;
             int shift = 0;
             byte b;
+            bool hasReadBytes = false;
             do
             {
                 int readByte = GetByte();
 
                 if (readByte < 0)
+                {
+                    if (!hasReadBytes)
+                        throw new InvalidOperationException("Unexpected end of buffer while reading VarUInt64");
                     break;
+                }
 
+                hasReadBytes = true;
                 b = (byte)readByte;
 
                 result |= (ulong)(b & 0x7F) << shift;
