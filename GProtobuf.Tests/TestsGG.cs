@@ -5,6 +5,8 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using ProtoBuf;
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using System.Text;
 using Xunit.Abstractions;
@@ -1567,6 +1569,214 @@ public sealed class GProtobufToGProtobufTests : BaseSerializationTest
         deserialized.IntArrayPacked.Should().Equal(1, 2, 3, 100, 1000);
         deserialized.IntArrayNonPacked.Should().Equal(-1, -2, 0, 50);
         deserialized.ByteArray.Should().Equal(0, 1, 255, 128, 42);
+    }
+
+    [Fact]  
+    public void ByteArray_CrossCompatibilityBidirectional_GG()
+    {
+        // Test that data can roundtrip: GProtobuf -> GProtobuf -> GProtobuf
+        var originalData = new byte[1000];
+        for (int i = 0; i < originalData.Length; i++)
+        {
+            originalData[i] = (byte)(i % 256);
+        }
+
+        var model = new ByteArrayTestModel
+        {
+            LargeByteArray = originalData
+        };
+
+        // GProtobuf serialize -> GProtobuf deserialize -> GProtobuf serialize -> GProtobuf deserialize
+        var gprotobufData = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeByteArrayTestModel);
+        var gprotobufDeserialized = DeserializeWithGProtobuf(gprotobufData, bytes => TestModel.Serialization.Deserializers.DeserializeByteArrayTestModel(bytes));
+        var gprotobufData2 = SerializeWithGProtobuf(gprotobufDeserialized, TestModel.Serialization.Serializers.SerializeByteArrayTestModel);
+        var finalDeserialized = DeserializeWithGProtobuf(gprotobufData2, bytes => TestModel.Serialization.Deserializers.DeserializeByteArrayTestModel(bytes));
+
+        finalDeserialized.Should().NotBeNull();
+        finalDeserialized.LargeByteArray.Should().NotBeNull();
+        finalDeserialized.LargeByteArray.Should().Equal(originalData);
+    }
+
+    [Fact]
+    public void ByteArray_PackedEncodingNotApplicable_GG()
+    {
+        // Byte arrays should not use packed encoding - they are length-delimited
+        var model = new ByteArrayTestModel
+        {
+            BasicByteArray = new byte[] { 1, 2, 3, 4, 5 },
+            EdgeCaseBytes = new byte[] { 10, 20, 30 }
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeByteArrayTestModel);
+        var deserialized = DeserializeWithGProtobuf(data, bytes => TestModel.Serialization.Deserializers.DeserializeByteArrayTestModel(bytes));
+
+        deserialized.Should().NotBeNull();
+        deserialized.BasicByteArray.Should().Equal(1, 2, 3, 4, 5);
+        deserialized.EdgeCaseBytes.Should().Equal(10, 20, 30);
+    }
+
+    [Fact]
+    public void PrimitiveArrays_CrossCompatibilityBidirectional_GG()
+    {
+        var model = new PrimitiveArraysTestModel
+        {
+            SByteArray = new sbyte[] { -128, 0, 127 },
+            ShortArrayPackedZigZag = new short[] { -1000, 0, 1000 },
+            UShortArrayPacked = new ushort[] { 100, 200, 300 },
+            UIntArrayPackedFixed = new uint[] { 1000000, 2000000 },
+            ULongArrayPacked = new ulong[] { 100UL, 200UL, 300UL }
+        };
+
+        // GProtobuf serialize -> GProtobuf deserialize -> GProtobuf serialize -> GProtobuf deserialize
+        var gprotobufData = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializePrimitiveArraysTestModel);
+        var gprotobufDeserialized = DeserializeWithGProtobuf(gprotobufData, bytes => TestModel.Serialization.Deserializers.DeserializePrimitiveArraysTestModel(bytes));
+        var gprotobufData2 = SerializeWithGProtobuf(gprotobufDeserialized, TestModel.Serialization.Serializers.SerializePrimitiveArraysTestModel);
+        var finalDeserialized = DeserializeWithGProtobuf(gprotobufData2, bytes => TestModel.Serialization.Deserializers.DeserializePrimitiveArraysTestModel(bytes));
+
+        finalDeserialized.Should().NotBeNull();
+        finalDeserialized.SByteArray.Should().Equal(-128, 0, 127);
+        finalDeserialized.ShortArrayPackedZigZag.Should().Equal(-1000, 0, 1000);
+        finalDeserialized.UShortArrayPacked.Should().Equal(100, 200, 300);
+        finalDeserialized.UIntArrayPackedFixed.Should().Equal(1000000, 2000000);
+        finalDeserialized.ULongArrayPacked.Should().Equal(100UL, 200UL, 300UL);
+    }
+
+    [Fact]
+    public void PrimitiveArrays_NewTypesCrossCompatibilityBidirectional_GG()
+    {
+        var model = new PrimitiveArraysTestModel
+        {
+            SByteArray = new sbyte[] { -50, 0, 50 },
+            ShortArrayPackedZigZag = new short[] { -500, 0, 500 },
+            UShortArrayPacked = new ushort[] { 10, 20, 30 },
+            UIntArrayPackedFixed = new uint[] { 100000, 200000 },
+            ULongArrayPacked = new ulong[] { 10UL, 20UL, 30UL }
+        };
+
+        // GProtobuf bidirectional consistency test
+        var gprotobufData = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializePrimitiveArraysTestModel);
+        var gprotobufDeserialized = DeserializeWithGProtobuf(gprotobufData, bytes => TestModel.Serialization.Deserializers.DeserializePrimitiveArraysTestModel(bytes));
+        var gprotobufData2 = SerializeWithGProtobuf(gprotobufDeserialized, TestModel.Serialization.Serializers.SerializePrimitiveArraysTestModel);
+        var finalDeserialized = DeserializeWithGProtobuf(gprotobufData2, bytes => TestModel.Serialization.Deserializers.DeserializePrimitiveArraysTestModel(bytes));
+
+        finalDeserialized.Should().NotBeNull();
+        finalDeserialized.SByteArray.Should().Equal(-50, 0, 50);
+        finalDeserialized.ShortArrayPackedZigZag.Should().Equal(-500, 0, 500);
+        finalDeserialized.UShortArrayPacked.Should().Equal(10, 20, 30);
+        finalDeserialized.UIntArrayPackedFixed.Should().Equal(100000, 200000);
+        finalDeserialized.ULongArrayPacked.Should().Equal(10UL, 20UL, 30UL);
+    }
+
+    [Fact]
+    public void StringArrays_SpecialCharactersAndUnicode_GG()
+    {
+        var model = new StringArraysTestModel
+        {
+            SpecialCharStringArray = new string[] { "hello\nworld", "tab\there", "quote\"test" },
+            UnicodeStringArray = new string[] { "Ľubomír", "Žitný", "Košice", "Bratislava", "ťŠčÝáé" }
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeStringArraysTestModel);
+        var deserialized = DeserializeWithGProtobuf(data, bytes => TestModel.Serialization.Deserializers.DeserializeStringArraysTestModel(bytes));
+
+        deserialized.Should().NotBeNull();
+        deserialized.SpecialCharStringArray.Should().Equal("hello\nworld", "tab\there", "quote\"test");
+        deserialized.UnicodeStringArray.Should().Equal("Ľubomír", "Žitný", "Košice", "Bratislava", "ťŠčÝáé");
+    }
+
+    [Fact]
+    public void ListMessageTypes_SelfCompatibility_GG()
+    {
+        var model = new CollectionTypesTestModel
+        {
+            MessageList = new List<SimpleMessage>
+            {
+                new SimpleMessage { Name = "First", Value = 1 },
+                new SimpleMessage { Name = "Second", Value = 2 }
+            },
+            MessageICollection = new List<SimpleMessage>
+            {
+                new SimpleMessage { Name = "ICol1", Value = 10 },
+                new SimpleMessage { Name = "ICol2", Value = 20 }
+            },
+            MessageIList = new List<SimpleMessage>
+            {
+                new SimpleMessage { Name = "IList1", Value = 100 }
+            },
+            MessageIEnumerable = new List<SimpleMessage>
+            {
+                new SimpleMessage { Name = "IEnum1", Value = 1000 },
+                new SimpleMessage { Name = "IEnum2", Value = 2000 }
+            },
+            StringList = new List<string> { "Hello", "World", "Test" },
+            NestedICollection = new List<NestedMessage>
+            {
+                new NestedMessage 
+                { 
+                    Title = "NestedIC", 
+                    Inner = new SimpleMessage { Name = "InnerIC", Value = 99 },
+                    Score = 2.71 
+                }
+            },
+            NestedMessageList = new List<NestedMessage>
+            {
+                new NestedMessage 
+                { 
+                    Title = "Nested1", 
+                    Inner = new SimpleMessage { Name = "Inner1", Value = 42 },
+                    Score = 3.14 
+                }
+            }
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeCollectionTypesTestModel);
+        var deserialized = DeserializeWithGProtobuf(data, bytes => TestModel.Serialization.Deserializers.DeserializeCollectionTypesTestModel(bytes));
+
+        // Test List<SimpleMessage>
+        deserialized.MessageList.Should().HaveCount(2);
+        deserialized.MessageList[0].Name.Should().Be("First");
+        deserialized.MessageList[0].Value.Should().Be(1);
+        deserialized.MessageList[1].Name.Should().Be("Second");
+        deserialized.MessageList[1].Value.Should().Be(2);
+
+        // Test ICollection<SimpleMessage>
+        deserialized.MessageICollection.Should().HaveCount(2);
+        var iColList = deserialized.MessageICollection.ToList();
+        iColList[0].Name.Should().Be("ICol1");
+        iColList[0].Value.Should().Be(10);
+        iColList[1].Name.Should().Be("ICol2");
+        iColList[1].Value.Should().Be(20);
+
+        // Test IList<SimpleMessage>
+        deserialized.MessageIList.Should().HaveCount(1);
+        deserialized.MessageIList.First().Name.Should().Be("IList1");
+        deserialized.MessageIList.First().Value.Should().Be(100);
+
+        // Test IEnumerable<SimpleMessage>
+        deserialized.MessageIEnumerable.Should().HaveCount(2);
+        var enumList = deserialized.MessageIEnumerable.ToList();
+        enumList[0].Name.Should().Be("IEnum1");
+        enumList[0].Value.Should().Be(1000);
+        enumList[1].Name.Should().Be("IEnum2");
+        enumList[1].Value.Should().Be(2000);
+
+        // Test List<string>
+        deserialized.StringList.Should().Equal("Hello", "World", "Test");
+
+        // Test ICollection<NestedMessage>
+        deserialized.NestedICollection.Should().HaveCount(1);
+        var nestedICol = deserialized.NestedICollection.First();
+        nestedICol.Title.Should().Be("NestedIC");
+        nestedICol.Inner.Name.Should().Be("InnerIC");
+        nestedICol.Inner.Value.Should().Be(99);
+        nestedICol.Score.Should().Be(2.71);
+
+        // Test List<NestedMessage>
+        deserialized.NestedMessageList.Should().HaveCount(1);
+        deserialized.NestedMessageList[0].Title.Should().Be("Nested1");
+        deserialized.NestedMessageList[0].Inner.Name.Should().Be("Inner1");
+        deserialized.NestedMessageList[0].Inner.Value.Should().Be(42);
+        deserialized.NestedMessageList[0].Score.Should().Be(3.14);
     }
 
     #endregion

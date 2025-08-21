@@ -938,10 +938,10 @@ class ObjectTree
         
         var typeName = GetClassNameFromFullName(protoMember.Type);
         
-        // Check if this is an array type (string[], Message[], etc.)
-        if (IsArrayType(typeName))
+        // Check if this is a collection type (string[], Message[], List<T>, ICollection<T>, etc.)
+        if (IsArrayType(protoMember))
         {
-            WriteArrayProtoMember(sb, protoMember, typeName);
+            WriteArrayProtoMember(sb, protoMember);
             return;
         }
         
@@ -1520,10 +1520,10 @@ class ObjectTree
         bool isNullable = protoMember.IsNullable;
         var typeName = GetClassNameFromFullName(protoMember.Type);
 
-        // Check if this is an array type (string[], Message[], etc.)
-        if (IsArrayType(typeName))
+        // Check if this is a collection type (string[], Message[], List<T>, ICollection<T>, etc.)
+        if (IsArrayType(protoMember))
         {
-            WriteArrayProtoMemberSerializer(sb, protoMember, typeName, objectName);
+            WriteArrayProtoMemberSerializer(sb, protoMember, objectName);
             return;
         }
 
@@ -2255,10 +2255,10 @@ class ObjectTree
         bool isNullable = protoMember.IsNullable;
         var typeName = GetClassNameFromFullName(protoMember.Type);
 
-        // Check if this is an array type (string[], Message[], etc.)
-        if (IsArrayType(typeName))
+        // Check if this is a collection type (string[], Message[], List<T>, ICollection<T>, etc.)
+        if (IsArrayType(protoMember))
         {
-            WriteArrayProtoMemberSizeCalculator(sb, protoMember, typeName);
+            WriteArrayProtoMemberSizeCalculator(sb, protoMember);
             return;
         }
 
@@ -2978,8 +2978,27 @@ class ObjectTree
     #region Array Support Helper Methods
     
     /// <summary>
-    /// Checks if the given type name represents an array type (e.g., "string[]", "Person[]")
-    /// BUT excludes primitive arrays which have their own specialized implementation
+    /// Checks if the given ProtoMember represents a collection type that should use generic collection logic
+    /// BUT excludes primitive collections which have their own specialized implementation
+    /// </summary>
+    private static bool IsArrayType(ProtoMemberAttribute protoMember)
+    {
+        if (!protoMember.IsCollection)
+            return false;
+            
+        // Get element type name for primitive check
+        var elementTypeName = GetClassNameFromFullName(protoMember.CollectionElementType);
+        
+        // Exclude primitive arrays - they have their own specialized implementation with packed/zigzag/fixed options
+        if (IsPrimitiveArrayType(elementTypeName))
+            return false;
+            
+        // Only non-primitive collections (string[], Message[], List<Message>, ICollection<string>) use generic collection logic
+        return true;
+    }
+
+    /// <summary>
+    /// Legacy method - kept for backwards compatibility with string-based type checking
     /// </summary>
     private static bool IsArrayType(string typeName)
     {
@@ -3055,9 +3074,9 @@ class ObjectTree
     /// <summary>
     /// Writes the deserialization logic for array types (string[], Message[], etc.)
     /// </summary>
-    private static void WriteArrayProtoMember(StringBuilderWithIndent sb, ProtoMemberAttribute protoMember, string arrayTypeName)
+    private static void WriteArrayProtoMember(StringBuilderWithIndent sb, ProtoMemberAttribute protoMember)
     {
-        var elementType = GetArrayElementType(arrayTypeName);
+        var elementType = protoMember.CollectionElementType;
         var elementTypeName = GetClassNameFromFullName(elementType);
         
         // For arrays, we always expect repeated fields (non-packed for length-delimited types)
@@ -3099,8 +3118,35 @@ class ObjectTree
         sb.EndBlock();
         sb.EndBlock();
         
-        // Convert to array and assign
-        sb.AppendIndentedLine($"result.{protoMember.Name} = resultList.ToArray();");
+        // Assign based on collection kind
+        switch (protoMember.CollectionKind)
+        {
+            case CollectionKind.Array:
+                sb.AppendIndentedLine($"result.{protoMember.Name} = resultList.ToArray();");
+                break;
+            case CollectionKind.InterfaceCollection:
+                // ICollection<T>, IList<T>, IEnumerable<T> → assign List<T>
+                sb.AppendIndentedLine($"result.{protoMember.Name} = resultList;");
+                break;
+            case CollectionKind.ConcreteCollection:
+                // For concrete types like List<T> or custom collections
+                var concreteType = protoMember.Type;
+                if (concreteType.StartsWith("List<") || concreteType == "System.Collections.Generic.List`1")
+                {
+                    // List<T> → assign directly
+                    sb.AppendIndentedLine($"result.{protoMember.Name} = resultList;");
+                }
+                else
+                {
+                    // Custom collection type → create instance and add items via ICollection<T>
+                    sb.AppendIndentedLine($"var customCollection = new {concreteType}();");
+                    sb.AppendIndentedLine($"var iCollection = (global::System.Collections.Generic.ICollection<{elementType}>)customCollection;");
+                    sb.AppendIndentedLine($"foreach (var item in resultList) iCollection.Add(item);");
+                    sb.AppendIndentedLine($"result.{protoMember.Name} = customCollection;");
+                }
+                break;
+        }
+        
         sb.AppendIndentedLine($"continue;");
         sb.EndBlock();
         sb.AppendNewLine();
@@ -3109,9 +3155,9 @@ class ObjectTree
     /// <summary>
     /// Writes the serialization logic for array types (string[], Message[], etc.)
     /// </summary>
-    private static void WriteArrayProtoMemberSerializer(StringBuilderWithIndent sb, ProtoMemberAttribute protoMember, string arrayTypeName, string objectName)
+    private static void WriteArrayProtoMemberSerializer(StringBuilderWithIndent sb, ProtoMemberAttribute protoMember, string objectName)
     {
-        var elementType = GetArrayElementType(arrayTypeName);
+        var elementType = protoMember.CollectionElementType;
         var elementTypeName = GetClassNameFromFullName(elementType);
         
         // Check if array is not null
@@ -3166,9 +3212,9 @@ class ObjectTree
     /// <summary>
     /// Writes the size calculation logic for array types (string[], Message[], etc.)
     /// </summary>
-    private static void WriteArrayProtoMemberSizeCalculator(StringBuilderWithIndent sb, ProtoMemberAttribute protoMember, string arrayTypeName)
+    private static void WriteArrayProtoMemberSizeCalculator(StringBuilderWithIndent sb, ProtoMemberAttribute protoMember)
     {
-        var elementType = GetArrayElementType(arrayTypeName);
+        var elementType = protoMember.CollectionElementType;
         var elementTypeName = GetClassNameFromFullName(elementType);
         
         // Check if array is not null

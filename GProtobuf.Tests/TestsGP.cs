@@ -4,6 +4,8 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using ProtoBuf;
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using System.Text;
 using Xunit.Abstractions;
@@ -1585,6 +1587,141 @@ public sealed class GProtobufToProtobufNetTests : BaseSerializationTest
         deserialized.ComplexMessageArray[0].Title.Should().Be("Complex 1");
         deserialized.ComplexMessageArray[0].Inner.Should().BeEquivalentTo(new SimpleMessage { Name = "Inner 1", Value = 111 });
         deserialized.ComplexMessageArray[2].Inner.Should().BeNull();
+    }
+
+    [Fact]
+    public void ListMessageTypes_Compatibility_GP()
+    {
+        var model = new CollectionTypesTestModel
+        {
+            MessageList = new List<SimpleMessage>
+            {
+                new SimpleMessage { Name = "First", Value = 1 },
+                new SimpleMessage { Name = "Second", Value = 2 }
+            },
+            MessageICollection = new List<SimpleMessage>
+            {
+                new SimpleMessage { Name = "ICol1", Value = 10 },
+                new SimpleMessage { Name = "ICol2", Value = 20 }
+            },
+            MessageIList = new List<SimpleMessage>
+            {
+                new SimpleMessage { Name = "IList1", Value = 100 }
+            },
+            MessageIEnumerable = new List<SimpleMessage>
+            {
+                new SimpleMessage { Name = "IEnum1", Value = 1000 },
+                new SimpleMessage { Name = "IEnum2", Value = 2000 }
+            },
+            StringList = new List<string> { "Hello", "World", "Test" },
+            NestedICollection = new List<NestedMessage>
+            {
+                new NestedMessage 
+                { 
+                    Title = "NestedIC", 
+                    Inner = new SimpleMessage { Name = "InnerIC", Value = 99 },
+                    Score = 2.71 
+                }
+            },
+            NestedMessageList = new List<NestedMessage>
+            {
+                new NestedMessage 
+                { 
+                    Title = "Nested1", 
+                    Inner = new SimpleMessage { Name = "Inner1", Value = 42 },
+                    Score = 3.14 
+                }
+            }
+        };
+
+        // GProtobuf serialize -> protobuf-net deserialize
+        var gprotobufData = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeCollectionTypesTestModel);
+        var deserialized = DeserializeWithProtobufNet<CollectionTypesTestModel>(gprotobufData);
+
+        // Test List<SimpleMessage>
+        deserialized.MessageList.Should().HaveCount(2);
+        deserialized.MessageList[0].Name.Should().Be("First");
+        deserialized.MessageList[0].Value.Should().Be(1);
+        deserialized.MessageList[1].Name.Should().Be("Second");
+        deserialized.MessageList[1].Value.Should().Be(2);
+
+        // Test ICollection<SimpleMessage>
+        deserialized.MessageICollection.Should().HaveCount(2);
+        var iColList = deserialized.MessageICollection.ToList();
+        iColList[0].Name.Should().Be("ICol1");
+        iColList[0].Value.Should().Be(10);
+        iColList[1].Name.Should().Be("ICol2");
+        iColList[1].Value.Should().Be(20);
+
+        // Test IList<SimpleMessage>
+        deserialized.MessageIList.Should().HaveCount(1);
+        deserialized.MessageIList.First().Name.Should().Be("IList1");
+        deserialized.MessageIList.First().Value.Should().Be(100);
+
+        // Test IEnumerable<SimpleMessage>
+        deserialized.MessageIEnumerable.Should().HaveCount(2);
+        var enumList = deserialized.MessageIEnumerable.ToList();
+        enumList[0].Name.Should().Be("IEnum1");
+        enumList[0].Value.Should().Be(1000);
+        enumList[1].Name.Should().Be("IEnum2");
+        enumList[1].Value.Should().Be(2000);
+
+        // Test List<string>
+        deserialized.StringList.Should().Equal("Hello", "World", "Test");
+
+        // Test ICollection<NestedMessage>
+        deserialized.NestedICollection.Should().HaveCount(1);
+        var nestedICol = deserialized.NestedICollection.First();
+        nestedICol.Title.Should().Be("NestedIC");
+        nestedICol.Inner.Name.Should().Be("InnerIC");
+        nestedICol.Inner.Value.Should().Be(99);
+        nestedICol.Score.Should().Be(2.71);
+
+        // Test List<NestedMessage>
+        deserialized.NestedMessageList.Should().HaveCount(1);
+        deserialized.NestedMessageList[0].Title.Should().Be("Nested1");
+        deserialized.NestedMessageList[0].Inner.Name.Should().Be("Inner1");
+        deserialized.NestedMessageList[0].Inner.Value.Should().Be(42);
+        deserialized.NestedMessageList[0].Score.Should().Be(3.14);
+    }
+
+    [Fact]
+    public void StringArrays_WithNullStrings_GP()
+    {
+        var model = new StringArraysTestModel
+        {
+            StringArrayWithNulls = new string[] { "First", null, "Third", null, "Fifth" }
+        };
+
+        var act = () => SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeStringArraysTestModel);
+        act.Should().Throw<Exception>()
+           .WithMessage("*element*null*");
+    }
+
+    [Fact]
+    public void MessageArrays_CrossCompatibilityBidirectional_GP()
+    {
+        var model = new MessageArraysTestModel
+        {
+            SimpleMessages = new SimpleMessage[]
+            {
+                new SimpleMessage { Name = "Test1", Value = 100 },
+                new SimpleMessage { Name = "Test2", Value = 200 }
+            }
+        };
+
+        // GProtobuf serialize -> protobuf-net deserialize -> protobuf-net serialize -> GProtobuf deserialize
+        var gprotobufData = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeMessageArraysTestModel);
+        var protobufNetDeserialized = DeserializeWithProtobufNet<MessageArraysTestModel>(gprotobufData);
+        var protobufNetData = SerializeWithProtobufNet(protobufNetDeserialized);
+        var finalDeserialized = DeserializeWithGProtobuf(protobufNetData, bytes => TestModel.Serialization.Deserializers.DeserializeMessageArraysTestModel(bytes));
+
+        finalDeserialized.Should().NotBeNull();
+        finalDeserialized.SimpleMessages.Should().HaveCount(2);
+        finalDeserialized.SimpleMessages[0].Name.Should().Be("Test1");
+        finalDeserialized.SimpleMessages[0].Value.Should().Be(100);
+        finalDeserialized.SimpleMessages[1].Name.Should().Be("Test2");
+        finalDeserialized.SimpleMessages[1].Value.Should().Be(200);
     }
 
     #endregion

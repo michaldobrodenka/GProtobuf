@@ -53,6 +53,32 @@ namespace GProtobuf.Core
         WellKnown,
     }
 
+    /// <summary>
+    /// Represents the kind of collection type for serialization
+    /// </summary>
+    public enum CollectionKind
+    {
+        /// <summary>
+        /// Not a collection type
+        /// </summary>
+        None,
+        
+        /// <summary>
+        /// Array type (T[]) - deserialize to List&lt;T&gt; then convert to array
+        /// </summary>
+        Array,
+        
+        /// <summary>
+        /// Interface collection type (ICollection&lt;T&gt;, IList&lt;T&gt;, IEnumerable&lt;T&gt;) - deserialize to List&lt;T&gt;
+        /// </summary>
+        InterfaceCollection,
+        
+        /// <summary>
+        /// Concrete collection type (List&lt;T&gt;, MyCollection&lt;T&gt;) - deserialize to actual type
+        /// </summary>
+        ConcreteCollection
+    }
+
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct | AttributeTargets.Enum | AttributeTargets.Interface, AllowMultiple = false, Inherited = false)]
     public sealed class ProtoContractAttribute : Attribute
     {
@@ -100,6 +126,21 @@ namespace GProtobuf.Core
         public List<string> Interfaces { get; set; }
         
         /// Is nullable non reference type
-        public bool IsNullable { get; set; } 
+        public bool IsNullable { get; set; }
+        
+        /// <summary>
+        /// Indicates if this member is a collection type
+        /// </summary>
+        public bool IsCollection { get; set; }
+        
+        /// <summary>
+        /// The element type of the collection (e.g., "int" for List&lt;int&gt;)
+        /// </summary>
+        public string CollectionElementType { get; set; }
+        
+        /// <summary>
+        /// The kind of collection type
+        /// </summary>
+        public CollectionKind CollectionKind { get; set; } 
     }
 }

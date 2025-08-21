@@ -82,6 +82,9 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                     // Detect if this is a nullable value type (Nullable<T>)
                     bool isNullable = property.Type.OriginalDefinition?.SpecialType == SpecialType.System_Nullable_T;
 
+                    // Analyze collection information
+                    var collectionInfo = AnalyzeCollectionType(property.Type);
+
                     // Vytvoríme inštanciu s FieldId
                     var protoMember = new Core.ProtoMemberAttribute(fieldId)
                     {
@@ -90,6 +93,9 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                         Namespace = nmspace,
                         Interfaces = property.Type.AllInterfaces.Select(i => i.ToDisplayString()).ToList(),
                         IsNullable = isNullable,
+                        IsCollection = collectionInfo.IsCollection,
+                        CollectionElementType = collectionInfo.ElementType,
+                        CollectionKind = collectionInfo.Kind,
                     };
 
                     // Spracujeme voliteľné NamedArguments
@@ -160,5 +166,61 @@ public sealed class SerializerGenerator : IIncrementalGenerator
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Analyzes a type symbol to determine if it's a collection and extract collection metadata
+    /// </summary>
+    private static (bool IsCollection, string ElementType, Core.CollectionKind Kind) AnalyzeCollectionType(ITypeSymbol typeSymbol)
+    {
+        // Check if it's an array type
+        if (typeSymbol.TypeKind == TypeKind.Array)
+        {
+            var arrayType = (IArrayTypeSymbol)typeSymbol;
+            return (true, arrayType.ElementType.ToDisplayString(), Core.CollectionKind.Array);
+        }
+
+        // Check if it's a generic type
+        if (typeSymbol is INamedTypeSymbol namedType && namedType.IsGenericType && namedType.TypeArguments.Length == 1)
+        {
+            var elementType = namedType.TypeArguments[0].ToDisplayString();
+            var typeDisplayString = namedType.ToDisplayString();
+
+            // Check for specific collection types
+            if (IsInterfaceCollectionType(namedType))
+            {
+                return (true, elementType, Core.CollectionKind.InterfaceCollection);
+            }
+            
+            if (IsConcreteCollectionType(namedType))
+            {
+                return (true, elementType, Core.CollectionKind.ConcreteCollection);
+            }
+        }
+
+        return (false, null, Core.CollectionKind.None);
+    }
+
+    /// <summary>
+    /// Checks if the type is an interface collection type (ICollection&lt;T&gt;, IList&lt;T&gt;, IEnumerable&lt;T&gt;)
+    /// </summary>
+    private static bool IsInterfaceCollectionType(INamedTypeSymbol namedType)
+    {
+        var typeDisplayString = namedType.OriginalDefinition.ToDisplayString();
+        
+        return typeDisplayString == "System.Collections.Generic.ICollection<T>" ||
+               typeDisplayString == "System.Collections.Generic.IList<T>" ||
+               typeDisplayString == "System.Collections.Generic.IEnumerable<T>";
+    }
+
+    /// <summary>
+    /// Checks if the type is a concrete collection type that implements ICollection&lt;T&gt;
+    /// </summary>
+    private static bool IsConcreteCollectionType(INamedTypeSymbol namedType)
+    {
+        // Check if it implements ICollection<T>
+        return namedType.AllInterfaces.Any(i => 
+            i.IsGenericType && 
+            i.OriginalDefinition.ToDisplayString() == "System.Collections.Generic.ICollection<T>");
     }
 }
