@@ -13,10 +13,14 @@ namespace GProtobuf.Core
     public ref struct StreamWriter
     {
         public Stream Stream { get; private set; }
+        private byte[] buffer;
+        private int bufferPosition;
 
         public StreamWriter(Stream stream)
         {
             Stream = stream;
+            buffer = ArrayPool<byte>.Shared.Rent(1024);
+            bufferPosition = 0;
         }
 
         public void WriteTag(int fieldId, WireType wireType)
@@ -33,54 +37,32 @@ namespace GProtobuf.Core
         // Optimized version for unsigned/positive values only (lengths, byte, ushort, uint)
         public void WriteVarUInt32(uint value)
         {
-            Span<byte> buffer = stackalloc byte[5];
-            int position = 0;
             while (value > 0x7F)
             {
-                buffer[position++] = (byte)((value & 0x7F) | 0x80);
+                WriteSingleByte((byte)((value & 0x7F) | 0x80));
                 value >>= 7;
             }
-            buffer[position++] = (byte)value;
-            Stream.Write(buffer.Slice(0, position));
+            WriteSingleByte((byte)value);
         }
 
         public void WriteFixedSizeInt32(int intValue)
         {
-            Stream.Write(MemoryMarshal.Cast<int, byte>(MemoryMarshal.CreateReadOnlySpan(ref intValue, 1)));
+            WriteToBuffer(MemoryMarshal.Cast<int, byte>(MemoryMarshal.CreateReadOnlySpan(ref intValue, 1)));
         }
 
         public void WriteFixed64(ulong ulongValue)
         {
-            Stream.Write(MemoryMarshal.Cast<ulong, byte>(MemoryMarshal.CreateReadOnlySpan(ref ulongValue, 1)));
+            WriteToBuffer(MemoryMarshal.Cast<ulong, byte>(MemoryMarshal.CreateReadOnlySpan(ref ulongValue, 1)));
         }
 
         public void WriteVarint32(int intValue)
         {
-            var value = (uint)intValue; // Prekonvertujeme int na uint pre spravne Varint kodovanie pre int32 v Protobuf
-
-            Span<byte> buffer = stackalloc byte[5];
-            int position = 0;
-            while (value > 0x7F)
-            {
-                buffer[position++] = (byte)((value & 0x7F) | 0x80);
-                value >>= 7;
-            }
-            buffer[position++] = (byte)value;
-            Stream.Write(buffer.Slice(0, position));
+            WriteVarUInt32((uint)intValue);
         }
 
         public void WriteVarint64(long value)
         {
-            ulong uValue = (ulong)value; // Convert to unsigned for proper bit operations
-            Span<byte> buffer = stackalloc byte[10];
-            int position = 0;
-            while (uValue > 0x7F)
-            {
-                buffer[position++] = (byte)((uValue & 0x7F) | 0x80);
-                uValue >>= 7;
-            }
-            buffer[position++] = (byte)uValue;
-            Stream.Write(buffer.Slice(0, position));
+            WriteVarintUInt64((ulong)value);
         }
 
         public void WriteZigZag32(int value)
@@ -144,69 +126,58 @@ namespace GProtobuf.Core
 
         public void WriteVarintUInt64(ulong value)
         {
-            Span<byte> buffer = stackalloc byte[10];
-            int position = 0;
             while (value > 0x7F)
             {
-                buffer[position++] = (byte)((value & 0x7F) | 0x80);
+                WriteSingleByte((byte)((value & 0x7F) | 0x80));
                 value >>= 7;
             }
-            buffer[position++] = (byte)value;
-            Stream.Write(buffer.Slice(0, position));
+            WriteSingleByte((byte)value);
         }
 
         public void WriteDouble(double value)
         {
-            Stream.Write(MemoryMarshal.Cast<double, byte>(MemoryMarshal.CreateReadOnlySpan(ref value, 1)));
+            WriteToBuffer(MemoryMarshal.Cast<double, byte>(MemoryMarshal.CreateReadOnlySpan(ref value, 1)));
         }
 
         public void WriteFloat(float value)
         {
-            Stream.Write(MemoryMarshal.Cast<float, byte>(MemoryMarshal.CreateReadOnlySpan(ref value, 1)));
+            WriteToBuffer(MemoryMarshal.Cast<float, byte>(MemoryMarshal.CreateReadOnlySpan(ref value, 1)));
         }
 
         public void WritePackedFixedSizeIntArray(int[] array)
         {
-            Stream.Write(MemoryMarshal.Cast<int, byte>(array.AsSpan()));
+            WriteToBuffer(MemoryMarshal.Cast<int, byte>(array.AsSpan()));
         }
 
         public void WritePackedFixedSizeIntList(List<int> list)
         {
-            Stream.Write(MemoryMarshal.Cast<int, byte>(CollectionsMarshal.AsSpan(list)));
+            WriteToBuffer(MemoryMarshal.Cast<int, byte>(CollectionsMarshal.AsSpan(list)));
         }
 
 
         // Write non null string value, for shorter strings we use stackalloc for performance
         public void WriteString(string value)
         {
-            if (value.Length <= 256)
+            var rentedBuffer = ArrayPool<byte>.Shared.Rent(Encoding.UTF8.GetMaxByteCount(value.Length));
+            try
             {
-                Span<byte> buffer = stackalloc byte[Encoding.UTF8.GetMaxByteCount(value.Length)];
-                int bytesWritten = Encoding.UTF8.GetBytes(value, buffer);
-                Stream.Write(buffer.Slice(0, bytesWritten));
+                var tempBuffer = rentedBuffer.AsSpan();
+                int bytesWritten = Encoding.UTF8.GetBytes(value, tempBuffer);
+                WriteToBuffer(tempBuffer.Slice(0, bytesWritten));
             }
-            else
+            finally
             {
-                var rentedBuffer = ArrayPool<byte>.Shared.Rent(Encoding.UTF8.GetMaxByteCount(value.Length));
-                try
-                {
-                    var buffer = rentedBuffer.AsSpan();
-                    int bytesWritten = Encoding.UTF8.GetBytes(value, buffer);
-                    Stream.Write(buffer.Slice(0, bytesWritten));
-                }
-                finally
-                {
-                    ArrayPool<byte>.Shared.Return(rentedBuffer);
-                }
+                ArrayPool<byte>.Shared.Return(rentedBuffer);
             }
         }
 
         public void WriteGuid(Guid value)
         {
             // Write Guid as 16-byte array (same as protobuf-net)
-            Span<byte> buffer = stackalloc byte[16];
-            value.TryWriteBytes(buffer);
-            Stream.Write(buffer);
+            EnsureBufferSpace(16);
+            if (!value.TryWriteBytes(buffer.AsSpan(bufferPosition, 16)))
+                throw new InvalidOperationException("Failed to write Guid to buffer");
+            bufferPosition += 16;
         }
 
         /// <summary>
@@ -216,7 +187,7 @@ namespace GProtobuf.Core
         {
             if (bytes != null)
             {
-                Stream.Write(bytes);
+                WriteToBuffer(bytes);
             }
         }
 
@@ -225,7 +196,7 @@ namespace GProtobuf.Core
         /// </summary>
         public void WriteBytes(ReadOnlySpan<byte> bytes)
         {
-            Stream.Write(bytes);
+            WriteToBuffer(bytes);
         }
 
         #region Long/Int64 Methods
@@ -245,10 +216,10 @@ namespace GProtobuf.Core
         {
             while (value >= 0x80)
             {
-                Stream.WriteByte((byte)(value | 0x80));
+                WriteSingleByte((byte)(value | 0x80));
                 value >>= 7;
             }
-            Stream.WriteByte((byte)value);
+            WriteSingleByte((byte)value);
         }
 
         /// <summary>
@@ -265,9 +236,9 @@ namespace GProtobuf.Core
         /// </summary>
         public void WriteFixedInt64(long value)
         {
-            Span<byte> buffer = stackalloc byte[8];
-            BinaryPrimitives.WriteInt64LittleEndian(buffer, value);
-            Stream.Write(buffer);
+            EnsureBufferSpace(8);
+            BinaryPrimitives.WriteInt64LittleEndian(buffer.AsSpan(bufferPosition, 8), value);
+            bufferPosition += 8;
         }
 
         #endregion
@@ -280,9 +251,9 @@ namespace GProtobuf.Core
         /// </summary>
         public void WriteFixedInt32(short value)
         {
-            Span<byte> buffer = stackalloc byte[4];
-            BinaryPrimitives.WriteInt32LittleEndian(buffer, (int)value);
-            Stream.Write(buffer);
+            EnsureBufferSpace(4);
+            BinaryPrimitives.WriteInt32LittleEndian(buffer.AsSpan(bufferPosition, 4), (int)value);
+            bufferPosition += 4;
         }
 
         /// <summary>
@@ -291,9 +262,9 @@ namespace GProtobuf.Core
         /// </summary>
         public void WriteFixedUInt32(ushort value)
         {
-            Span<byte> buffer = stackalloc byte[4];
-            BinaryPrimitives.WriteUInt32LittleEndian(buffer, (uint)value);
-            Stream.Write(buffer);
+            EnsureBufferSpace(4);
+            BinaryPrimitives.WriteUInt32LittleEndian(buffer.AsSpan(bufferPosition, 4), (uint)value);
+            bufferPosition += 4;
         }
 
         /// <summary>
@@ -301,9 +272,9 @@ namespace GProtobuf.Core
         /// </summary>
         public void WriteFixedUInt32(uint value)
         {
-            Span<byte> buffer = stackalloc byte[4];
-            BinaryPrimitives.WriteUInt32LittleEndian(buffer, value);
-            Stream.Write(buffer);
+            EnsureBufferSpace(4);
+            BinaryPrimitives.WriteUInt32LittleEndian(buffer.AsSpan(bufferPosition, 4), value);
+            bufferPosition += 4;
         }
 
         /// <summary>
@@ -311,11 +282,56 @@ namespace GProtobuf.Core
         /// </summary>
         public void WriteFixedUInt64(ulong value)
         {
-            Span<byte> buffer = stackalloc byte[8];
-            BinaryPrimitives.WriteUInt64LittleEndian(buffer, value);
-            Stream.Write(buffer);
+            EnsureBufferSpace(8);
+            BinaryPrimitives.WriteUInt64LittleEndian(buffer.AsSpan(bufferPosition, 8), value);
+            bufferPosition += 8;
         }
 
         #endregion
+
+        private void EnsureBufferSpace(int neededBytes)
+        {
+            if (bufferPosition + neededBytes > buffer.Length)
+            {
+                Flush();
+            }
+        }
+
+        private void WriteToBuffer(ReadOnlySpan<byte> data)
+        {
+            if (data.Length == 0) return;
+
+            if (bufferPosition + data.Length > buffer.Length)
+            {
+                Flush();
+                if (data.Length > buffer.Length)
+                {
+                    Stream.Write(data);
+                    return;
+                }
+            }
+
+            data.CopyTo(buffer.AsSpan(bufferPosition));
+            bufferPosition += data.Length;
+        }
+
+        private void WriteSingleByte(byte value)
+        {
+            if (bufferPosition >= buffer.Length)
+            {
+                Flush();
+            }
+            buffer[bufferPosition++] = value;
+        }
+
+        public void Flush()
+        {
+            if (bufferPosition > 0)
+            {
+                Stream.Write(buffer.AsSpan(0, bufferPosition));
+                bufferPosition = 0;
+            }
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
     }
 }

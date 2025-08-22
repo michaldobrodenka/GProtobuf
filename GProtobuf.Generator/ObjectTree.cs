@@ -279,7 +279,8 @@ class ObjectTree
             sb.AppendIndentedLine($"public static void Serialize{GetClassNameFromFullName(obj.FullName)}(Stream stream, global::{obj.FullName} obj)");
             sb.StartNewBlock();
             sb.AppendIndentedLine("var writer = new global::GProtobuf.Core.StreamWriter(stream);");
-            sb.AppendIndentedLine($"StreamWriters.Write{GetClassNameFromFullName(obj.FullName)}(writer, obj);");
+            sb.AppendIndentedLine($"StreamWriters.Write{GetClassNameFromFullName(obj.FullName)}(ref writer, obj);");
+            sb.AppendIndentedLine("writer.Flush();");
             sb.EndBlock();
             sb.AppendNewLine();
         }
@@ -453,7 +454,7 @@ class ObjectTree
 
         foreach (var obj in objects)
         {
-            sb.AppendIndentedLine($"public static void Write{GetClassNameFromFullName(obj.FullName)}(global::GProtobuf.Core.StreamWriter writer, global::{obj.FullName} instance)");
+            sb.AppendIndentedLine($"public static void Write{GetClassNameFromFullName(obj.FullName)}(ref global::GProtobuf.Core.StreamWriter writer, global::{obj.FullName} instance)");
             sb.StartNewBlock();
 
             // Check if this type is derived (has a base class)
@@ -2261,7 +2262,7 @@ class ObjectTree
                 sb.AppendIndentedLine($"SizeCalculators.Calculate{GetClassNameFromFullName(protoMember.Type)}Size(ref calculator{protoMember.FieldId}, {objectName}.{protoMember.Name});");
                 sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Len);");
                 sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)calculator{protoMember.FieldId}.Length);");
-                sb.AppendIndentedLine($"StreamWriters.Write{GetClassNameFromFullName(protoMember.Type)}(writer, {objectName}.{protoMember.Name});");
+                sb.AppendIndentedLine($"StreamWriters.Write{GetClassNameFromFullName(protoMember.Type)}(ref writer, {objectName}.{protoMember.Name});");
                 sb.EndBlock();
                 break;
         }
@@ -3249,7 +3250,7 @@ class ObjectTree
             sb.AppendIndentedLine($"SizeCalculators.Calculate{GetClassNameFromFullName(elementType)}Size(ref calculator, item);");
             sb.AppendIndentedLine($"writer.WriteTag({protoMember.FieldId}, WireType.Len);");
             sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)calculator.Length);");
-            sb.AppendIndentedLine($"StreamWriters.Write{GetClassNameFromFullName(elementType)}(writer, item);");
+            sb.AppendIndentedLine($"StreamWriters.Write{GetClassNameFromFullName(elementType)}(ref writer, item);");
             sb.EndBlock();
             sb.AppendIndentedLine($"else");
             sb.StartNewBlock();
