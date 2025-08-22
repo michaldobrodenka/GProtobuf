@@ -29,6 +29,11 @@ namespace GProtobuf.Benchmark.Model
         public List<float> FloatArrayValue { get; set; }
 
         [ProtoMember(8)]
+        //public float[] FloatArrayValue { get; set; }
+        public List<float> DoubleArrayValue { get; set; }
+
+
+        [ProtoMember(9)]
         public List<NestedModel> NestedModels { get; set; }
     }
 

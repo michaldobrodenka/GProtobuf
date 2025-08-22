@@ -3563,7 +3563,7 @@ class ObjectTree
             // Non-packed serialization - write individual elements
             var elementWriteMethod = GetPrimitiveElementWriteMethod(elementTypeName, protoMember.DataFormat);
             
-            // Optimize for float arrays with batched writing
+            // Optimize for float and double arrays with batched writing
             if (elementTypeName == "float" || elementTypeName == "System.Single")
             {
                 // Float uses WireType.Fixed32b which is 5
@@ -3626,6 +3626,78 @@ class ObjectTree
                     sb.AppendIndentedLine($"byte* dst = pBatch + used;");
                     sb.AppendIndentedLine($"tag{protoMember.FieldId}.CopyTo(new System.Span<byte>(dst, {tagLength}));");
                     sb.AppendIndentedLine($"*(uint*)(dst + {tagLength}) = *(uint*)&value;");
+                    sb.AppendIndentedLine($"used += {itemSize};");
+                    sb.EndBlock();
+                    sb.EndBlock();
+                }
+                sb.AppendIndentedLine($"if (used > 0)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"writer.WriteBytes(batch.Slice(0, used));");
+                sb.EndBlock();
+                sb.EndBlock();
+            }
+            else if (elementTypeName == "double" || elementTypeName == "System.Double")
+            {
+                // Double uses WireType.Fixed64b which is 1
+                uint tag = (uint)((protoMember.FieldId << 3) | 1); // Fixed64b = 1
+                
+                // Precompute VarUInt32 bytes for tag during code generation
+                var tagBytes = new List<byte>();
+                uint tagValue = tag;
+                while (tagValue > 0x7F)
+                {
+                    tagBytes.Add((byte)((tagValue & 0x7F) | 0x80));
+                    tagValue >>= 7;
+                }
+                tagBytes.Add((byte)tagValue);
+                
+                string tagBytesString = string.Join(", ", tagBytes.Select(b => $"0x{b:X2}"));
+                int tagLength = tagBytes.Count;
+                int itemSize = tagLength + 8; // tag + 8 bytes for double
+                
+                sb.AppendIndentedLine($"// Batched double serialization");
+                sb.AppendIndentedLine($"unsafe");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"System.Span<byte> tag{protoMember.FieldId} = stackalloc byte[] {{ {tagBytesString} }};");
+                sb.AppendIndentedLine($"System.Span<byte> batch = stackalloc byte[256];");
+                sb.AppendIndentedLine($"int used = 0;");
+                
+                // Use CollectionsMarshal.AsSpan for List<T> for better performance
+                if (protoMember.CollectionKind == Core.CollectionKind.ConcreteCollection && 
+                    (protoMember.Type.StartsWith("List<") || protoMember.Type.StartsWith("System.Collections.Generic.List<")))
+                {
+                    sb.AppendIndentedLine($"var span = System.Runtime.InteropServices.CollectionsMarshal.AsSpan({objectName}.{protoMember.Name});");
+                    sb.AppendIndentedLine($"fixed (byte* pBatch = batch)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"for (int i = 0; i < span.Length; i++)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"if (256 - used < {itemSize})");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"writer.WriteBytes(batch.Slice(0, used));");
+                    sb.AppendIndentedLine($"used = 0;");
+                    sb.EndBlock();
+                    sb.AppendIndentedLine($"var value = span[i];");
+                    sb.AppendIndentedLine($"byte* dst = pBatch + used;");
+                    sb.AppendIndentedLine($"tag{protoMember.FieldId}.CopyTo(new System.Span<byte>(dst, {tagLength}));");
+                    sb.AppendIndentedLine($"*(ulong*)(dst + {tagLength}) = *(ulong*)&value;");
+                    sb.AppendIndentedLine($"used += {itemSize};");
+                    sb.EndBlock();
+                    sb.EndBlock();
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"fixed (byte* pBatch = batch)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"foreach (var value in {objectName}.{protoMember.Name})");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"if (256 - used < {itemSize})");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"writer.WriteBytes(batch.Slice(0, used));");
+                    sb.AppendIndentedLine($"used = 0;");
+                    sb.EndBlock();
+                    sb.AppendIndentedLine($"byte* dst = pBatch + used;");
+                    sb.AppendIndentedLine($"tag{protoMember.FieldId}.CopyTo(new System.Span<byte>(dst, {tagLength}));");
+                    sb.AppendIndentedLine($"*(ulong*)(dst + {tagLength}) = *(ulong*)&value;");
                     sb.AppendIndentedLine($"used += {itemSize};");
                     sb.EndBlock();
                     sb.EndBlock();
