@@ -6,7 +6,7 @@ namespace GProtobuf.Tests.TestModel
     public class PrimitiveArraysTestModel
     {
         // Float arrays
-        [ProtoMember(1)]
+        [ProtoMember(1125124)]
         public float[] FloatArray { get; set; }
         
         [ProtoMember(2, IsPacked = true)]

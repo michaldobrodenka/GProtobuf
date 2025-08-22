@@ -3587,7 +3587,17 @@ class ObjectTree
                 sb.AppendIndentedLine($"// Batched float serialization");
                 sb.AppendIndentedLine($"unsafe");
                 sb.StartNewBlock();
-                sb.AppendIndentedLine($"System.Span<byte> tag{protoMember.FieldId} = stackalloc byte[] {{ {tagBytesString} }};");
+                
+                // For single-byte tags, use a simple byte variable instead of Span
+                if (tagLength == 1)
+                {
+                    sb.AppendIndentedLine($"byte tag{protoMember.FieldId} = {tagBytesString}; // Single byte tag");
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"System.Span<byte> tag{protoMember.FieldId} = stackalloc byte[] {{ {tagBytesString} }};");
+                }
+                
                 sb.AppendIndentedLine($"System.Span<byte> batch = stackalloc byte[256];");
                 sb.AppendIndentedLine($"int used = 0;");
                 
@@ -3607,7 +3617,17 @@ class ObjectTree
                     sb.EndBlock();
                     sb.AppendIndentedLine($"var value = span[i];");
                     sb.AppendIndentedLine($"byte* dst = pBatch + used;");
-                    sb.AppendIndentedLine($"tag{protoMember.FieldId}.CopyTo(new System.Span<byte>(dst, {tagLength}));");
+                    
+                    // Optimize for single-byte tags
+                    if (tagLength == 1)
+                    {
+                        sb.AppendIndentedLine($"*dst = tag{protoMember.FieldId}; // Direct byte assignment");
+                    }
+                    else
+                    {
+                        sb.AppendIndentedLine($"tag{protoMember.FieldId}.CopyTo(new System.Span<byte>(dst, {tagLength}));");
+                    }
+                    
                     sb.AppendIndentedLine($"*(uint*)(dst + {tagLength}) = *(uint*)&value;");
                     sb.AppendIndentedLine($"used += {itemSize};");
                     sb.EndBlock();
@@ -3625,7 +3645,17 @@ class ObjectTree
                     sb.AppendIndentedLine($"used = 0;");
                     sb.EndBlock();
                     sb.AppendIndentedLine($"byte* dst = pBatch + used;");
-                    sb.AppendIndentedLine($"tag{protoMember.FieldId}.CopyTo(new System.Span<byte>(dst, {tagLength}));");
+                    
+                    // Optimize for single-byte tags
+                    if (tagLength == 1)
+                    {
+                        sb.AppendIndentedLine($"*dst = tag{protoMember.FieldId}; // Direct byte assignment");
+                    }
+                    else
+                    {
+                        sb.AppendIndentedLine($"tag{protoMember.FieldId}.CopyTo(new System.Span<byte>(dst, {tagLength}));");
+                    }
+                    
                     sb.AppendIndentedLine($"*(uint*)(dst + {tagLength}) = *(uint*)&value;");
                     sb.AppendIndentedLine($"used += {itemSize};");
                     sb.EndBlock();
@@ -3659,7 +3689,17 @@ class ObjectTree
                 sb.AppendIndentedLine($"// Batched double serialization");
                 sb.AppendIndentedLine($"unsafe");
                 sb.StartNewBlock();
-                sb.AppendIndentedLine($"System.Span<byte> tag{protoMember.FieldId} = stackalloc byte[] {{ {tagBytesString} }};");
+                
+                // For single-byte tags, use a simple byte variable instead of Span
+                if (tagLength == 1)
+                {
+                    sb.AppendIndentedLine($"byte tag{protoMember.FieldId} = {tagBytesString}; // Single byte tag");
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"System.Span<byte> tag{protoMember.FieldId} = stackalloc byte[] {{ {tagBytesString} }};");
+                }
+                
                 sb.AppendIndentedLine($"System.Span<byte> batch = stackalloc byte[256];");
                 sb.AppendIndentedLine($"int used = 0;");
                 
@@ -3679,7 +3719,17 @@ class ObjectTree
                     sb.EndBlock();
                     sb.AppendIndentedLine($"var value = span[i];");
                     sb.AppendIndentedLine($"byte* dst = pBatch + used;");
-                    sb.AppendIndentedLine($"tag{protoMember.FieldId}.CopyTo(new System.Span<byte>(dst, {tagLength}));");
+                    
+                    // Optimize for single-byte tags
+                    if (tagLength == 1)
+                    {
+                        sb.AppendIndentedLine($"*dst = tag{protoMember.FieldId}; // Direct byte assignment");
+                    }
+                    else
+                    {
+                        sb.AppendIndentedLine($"tag{protoMember.FieldId}.CopyTo(new System.Span<byte>(dst, {tagLength}));");
+                    }
+                    
                     sb.AppendIndentedLine($"*(ulong*)(dst + {tagLength}) = *(ulong*)&value;");
                     sb.AppendIndentedLine($"used += {itemSize};");
                     sb.EndBlock();
@@ -3697,7 +3747,17 @@ class ObjectTree
                     sb.AppendIndentedLine($"used = 0;");
                     sb.EndBlock();
                     sb.AppendIndentedLine($"byte* dst = pBatch + used;");
-                    sb.AppendIndentedLine($"tag{protoMember.FieldId}.CopyTo(new System.Span<byte>(dst, {tagLength}));");
+                    
+                    // Optimize for single-byte tags
+                    if (tagLength == 1)
+                    {
+                        sb.AppendIndentedLine($"*dst = tag{protoMember.FieldId}; // Direct byte assignment");
+                    }
+                    else
+                    {
+                        sb.AppendIndentedLine($"tag{protoMember.FieldId}.CopyTo(new System.Span<byte>(dst, {tagLength}));");
+                    }
+                    
                     sb.AppendIndentedLine($"*(ulong*)(dst + {tagLength}) = *(ulong*)&value;");
                     sb.AppendIndentedLine($"used += {itemSize};");
                     sb.EndBlock();

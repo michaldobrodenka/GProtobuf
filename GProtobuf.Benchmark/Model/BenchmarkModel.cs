@@ -23,7 +23,7 @@ namespace GProtobuf.Benchmark.Model
 
         [ProtoMember(6)]
         public byte[] ByteArrayValue { get; set; }
-
+         
         [ProtoMember(7)]
         //public float[] FloatArrayValue { get; set; }
         public List<float> FloatArrayValue { get; set; }

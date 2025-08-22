@@ -82,67 +82,78 @@ namespace Model.Serialization
         public static void SerializeSimpleTypes(Stream stream, global::Model.SimpleTypes obj)
         {
             var writer = new global::GProtobuf.Core.StreamWriter(stream);
-            StreamWriters.WriteSimpleTypes(writer, obj);
+            StreamWriters.WriteSimpleTypes(ref writer, obj);
+            writer.Flush();
         }
 
         public static void SerializeA(Stream stream, global::Model.A obj)
         {
             var writer = new global::GProtobuf.Core.StreamWriter(stream);
-            StreamWriters.WriteA(writer, obj);
+            StreamWriters.WriteA(ref writer, obj);
+            writer.Flush();
         }
 
         public static void SerializeB(Stream stream, global::Model.B obj)
         {
             var writer = new global::GProtobuf.Core.StreamWriter(stream);
-            StreamWriters.WriteB(writer, obj);
+            StreamWriters.WriteB(ref writer, obj);
+            writer.Flush();
         }
 
         public static void SerializeC(Stream stream, global::Model.C obj)
         {
             var writer = new global::GProtobuf.Core.StreamWriter(stream);
-            StreamWriters.WriteC(writer, obj);
+            StreamWriters.WriteC(ref writer, obj);
+            writer.Flush();
         }
 
         public static void SerializeA1(Stream stream, global::Model.A1 obj)
         {
             var writer = new global::GProtobuf.Core.StreamWriter(stream);
-            StreamWriters.WriteA1(writer, obj);
+            StreamWriters.WriteA1(ref writer, obj);
+            writer.Flush();
         }
 
         public static void SerializeB1(Stream stream, global::Model.B1 obj)
         {
             var writer = new global::GProtobuf.Core.StreamWriter(stream);
-            StreamWriters.WriteB1(writer, obj);
+            StreamWriters.WriteB1(ref writer, obj);
+            writer.Flush();
         }
 
         public static void SerializeC1(Stream stream, global::Model.C1 obj)
         {
             var writer = new global::GProtobuf.Core.StreamWriter(stream);
-            StreamWriters.WriteC1(writer, obj);
+            StreamWriters.WriteC1(ref writer, obj);
+            writer.Flush();
         }
 
         public static void SerializeModelClassBase(Stream stream, global::Model.ModelClassBase obj)
         {
             var writer = new global::GProtobuf.Core.StreamWriter(stream);
-            StreamWriters.WriteModelClassBase(writer, obj);
+            StreamWriters.WriteModelClassBase(ref writer, obj);
+            writer.Flush();
         }
 
         public static void SerializeModelClass(Stream stream, global::Model.ModelClass obj)
         {
             var writer = new global::GProtobuf.Core.StreamWriter(stream);
-            StreamWriters.WriteModelClass(writer, obj);
+            StreamWriters.WriteModelClass(ref writer, obj);
+            writer.Flush();
         }
 
         public static void SerializeSecondModelClass(Stream stream, global::Model.SecondModelClass obj)
         {
             var writer = new global::GProtobuf.Core.StreamWriter(stream);
-            StreamWriters.WriteSecondModelClass(writer, obj);
+            StreamWriters.WriteSecondModelClass(ref writer, obj);
+            writer.Flush();
         }
 
         public static void SerializeClassWithCollections(Stream stream, global::Model.ClassWithCollections obj)
         {
             var writer = new global::GProtobuf.Core.StreamWriter(stream);
-            StreamWriters.WriteClassWithCollections(writer, obj);
+            StreamWriters.WriteClassWithCollections(ref writer, obj);
+            writer.Flush();
         }
 
     }
@@ -818,7 +829,7 @@ namespace Model.Serialization
 
     public static class StreamWriters
     {
-        public static void WriteSimpleTypes(global::GProtobuf.Core.StreamWriter writer, global::Model.SimpleTypes instance)
+        public static void WriteSimpleTypes(ref global::GProtobuf.Core.StreamWriter writer, global::Model.SimpleTypes instance)
         {
             if (instance.GuidValue != Guid.Empty)
             {
@@ -838,7 +849,7 @@ namespace Model.Serialization
 
         }
 
-        public static void WriteA(global::GProtobuf.Core.StreamWriter writer, global::Model.A instance)
+        public static void WriteA(ref global::GProtobuf.Core.StreamWriter writer, global::Model.A instance)
         {
 
             switch (instance)
@@ -891,7 +902,7 @@ namespace Model.Serialization
 
         }
 
-        public static void WriteB(global::GProtobuf.Core.StreamWriter writer, global::Model.B instance)
+        public static void WriteB(ref global::GProtobuf.Core.StreamWriter writer, global::Model.B instance)
         {
 
             writer.WriteTag(5, WireType.Len);
@@ -914,7 +925,7 @@ namespace Model.Serialization
 
         }
 
-        public static void WriteC(global::GProtobuf.Core.StreamWriter writer, global::Model.C instance)
+        public static void WriteC(ref global::GProtobuf.Core.StreamWriter writer, global::Model.C instance)
         {
 
             writer.WriteTag(5, WireType.Len);
@@ -953,7 +964,7 @@ namespace Model.Serialization
 
         }
 
-        public static void WriteA1(global::GProtobuf.Core.StreamWriter writer, global::Model.A1 instance)
+        public static void WriteA1(ref global::GProtobuf.Core.StreamWriter writer, global::Model.A1 instance)
         {
             if (instance.B1 != null)
             {
@@ -961,7 +972,7 @@ namespace Model.Serialization
                 SizeCalculators.CalculateB1Size(ref calculator5, instance.B1);
                 writer.WriteTag(5, WireType.Len);
                 writer.WriteVarUInt32((uint)calculator5.Length);
-                StreamWriters.WriteB1(writer, instance.B1);
+                StreamWriters.WriteB1(ref writer, instance.B1);
             }
 
             if (instance.StringA != null)
@@ -973,7 +984,7 @@ namespace Model.Serialization
 
         }
 
-        public static void WriteB1(global::GProtobuf.Core.StreamWriter writer, global::Model.B1 instance)
+        public static void WriteB1(ref global::GProtobuf.Core.StreamWriter writer, global::Model.B1 instance)
         {
             if (instance.C1 != null)
             {
@@ -981,7 +992,7 @@ namespace Model.Serialization
                 SizeCalculators.CalculateC1Size(ref calculator10, instance.C1);
                 writer.WriteTag(10, WireType.Len);
                 writer.WriteVarUInt32((uint)calculator10.Length);
-                StreamWriters.WriteC1(writer, instance.C1);
+                StreamWriters.WriteC1(ref writer, instance.C1);
             }
 
             if (instance.StringB != null)
@@ -993,7 +1004,7 @@ namespace Model.Serialization
 
         }
 
-        public static void WriteC1(global::GProtobuf.Core.StreamWriter writer, global::Model.C1 instance)
+        public static void WriteC1(ref global::GProtobuf.Core.StreamWriter writer, global::Model.C1 instance)
         {
             if (instance.StringC != null)
             {
@@ -1004,7 +1015,7 @@ namespace Model.Serialization
 
         }
 
-        public static void WriteModelClassBase(global::GProtobuf.Core.StreamWriter writer, global::Model.ModelClassBase instance)
+        public static void WriteModelClassBase(ref global::GProtobuf.Core.StreamWriter writer, global::Model.ModelClassBase instance)
         {
 
             switch (instance)
@@ -1030,7 +1041,7 @@ namespace Model.Serialization
                         SizeCalculators.CalculateClassWithCollectionsSize(ref calculator2, obj1.Model2);
                         writer.WriteTag(2, WireType.Len);
                         writer.WriteVarUInt32((uint)calculator2.Length);
-                        StreamWriters.WriteClassWithCollections(writer, obj1.Model2);
+                        StreamWriters.WriteClassWithCollections(ref writer, obj1.Model2);
                     }
 
                     break;
@@ -1063,7 +1074,7 @@ namespace Model.Serialization
 
         }
 
-        public static void WriteModelClass(global::GProtobuf.Core.StreamWriter writer, global::Model.ModelClass instance)
+        public static void WriteModelClass(ref global::GProtobuf.Core.StreamWriter writer, global::Model.ModelClass instance)
         {
 
             writer.WriteTag(1, WireType.Len);
@@ -1082,7 +1093,7 @@ namespace Model.Serialization
                 SizeCalculators.CalculateClassWithCollectionsSize(ref calculator2, instance.Model2);
                 writer.WriteTag(2, WireType.Len);
                 writer.WriteVarUInt32((uint)calculator2.Length);
-                StreamWriters.WriteClassWithCollections(writer, instance.Model2);
+                StreamWriters.WriteClassWithCollections(ref writer, instance.Model2);
             }
 
             writer.WriteTag(3122, WireType.Fixed64b);
@@ -1103,7 +1114,7 @@ namespace Model.Serialization
 
         }
 
-        public static void WriteSecondModelClass(global::GProtobuf.Core.StreamWriter writer, global::Model.SecondModelClass instance)
+        public static void WriteSecondModelClass(ref global::GProtobuf.Core.StreamWriter writer, global::Model.SecondModelClass instance)
         {
 
             writer.WriteTag(2, WireType.Len);
@@ -1126,7 +1137,7 @@ namespace Model.Serialization
 
         }
 
-        public static void WriteClassWithCollections(global::GProtobuf.Core.StreamWriter writer, global::Model.ClassWithCollections instance)
+        public static void WriteClassWithCollections(ref global::GProtobuf.Core.StreamWriter writer, global::Model.ClassWithCollections instance)
         {
             if (instance.SomeInt != 0)
             {

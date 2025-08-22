@@ -10,7 +10,7 @@ namespace GProtobuf.Tests.TestModel
         [ProtoMember(1)]
         public List<int> IntList { get; set; }
 
-        [ProtoMember(2)]
+        [ProtoMember(21243125)]
         public List<float> FloatList { get; set; }
 
         [ProtoMember(3)]
