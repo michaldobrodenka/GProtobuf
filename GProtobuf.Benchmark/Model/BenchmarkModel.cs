@@ -1,4 +1,5 @@
 using ProtoBuf;
+using System.Collections.Generic;
 
 namespace GProtobuf.Benchmark.Model
 {
@@ -24,7 +25,8 @@ namespace GProtobuf.Benchmark.Model
         public byte[] ByteArrayValue { get; set; }
 
         [ProtoMember(7)]
-        public float[] FloatArrayValue { get; set; }
+        //public float[] FloatArrayValue { get; set; }
+        public List<float> FloatArrayValue { get; set; }
 
         [ProtoMember(8)]
         public List<NestedModel> NestedModels { get; set; }
