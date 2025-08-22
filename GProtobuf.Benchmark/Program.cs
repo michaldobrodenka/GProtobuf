@@ -1,126 +1,68 @@
 ﻿using BenchmarkDotNet.Running;
-using ProtoBuf;
-using ProtoBuf.Serializers;
-using Model;
 using BenchmarkDotNet.Attributes;
-using System.Runtime.InteropServices;
-using System.Buffers.Binary;
-using System.Reflection;
+using GProtobuf.Benchmark.Model;
 
 namespace GProtobuf.Benchmark
 {
     [MemoryDiagnoser]
-    //[SimpleJob(launchCount: 1, warmupCount: 1, iterationCount: 8, invocationCount: 8)]
-    public unsafe class GProtbufBench
+    public class GProtobufBench
     {
-        public byte[] SerializedData;
-        public MemoryStream ms;
+        public byte[] GProtobufSerializedData;
+        public byte[] ProtobufNetSerializedData;
+        public BenchmarkModel TestModel;
 
-        ClassWithCollections Model2;
-
-        public GProtbufBench()
+        [GlobalSetup]
+        public void Setup()
         {
-            Model2 = new ClassWithCollections
+            var nestedModels = new List<NestedModel>();
+            nestedModels.Add(new NestedModel() { Name = "Name1", Description = "Description1" });
+            nestedModels.Add(new NestedModel() { Name = "Name2", Description = "Description2" });
+
+            TestModel = new BenchmarkModel
             {
-                //SomeInt = 4567,
-                //Bytes = new byte[] { 1, 2, 3, 4 },
-                //PackedInts = new[] { 1, 2, 55 },
-                PackedFixedSizeInts = new[] { -2, 17 },
-                //NonPackedFixedSizeInts = new[] { -2, 17 },
-                //NonPackedInts = new[] { -2, 17 },
+                IntValue = 12345,
+                LongValue = 987654321L,
+                DoubleValue = 3.14159,
+                BoolValue = true,
+                StringValue = "Test benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some contentTest benchmark string with some content",
+                //ByteArrayValue = new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 },
+                FloatArrayValue = new float[] { 1.1f, 2.2f, 3.3f, 4.4f, 5.5f },
+                //NestedModels = nestedModels
             };
 
-            ModelClass model = new ModelClass()
-            {
-                //A = 3.4,//new byte[] { 1, 2, 3, 4 },//"long.MaxValue",
-                //B = -3,
-                //Str = "toto je string",
-                //D = 12345
-                A = 3.4,//new byte[] { 1, 2, 3, 4 },//"long.MaxValue",
-                B = -3,
-                Str = "toto je string",
-                D = 12345,
-                Model2 = new ClassWithCollections
-                {
-                    SomeInt = 4567,
-                    Bytes = new byte[] { 1, 2, 3, 4 },
-                    PackedInts = new[] { 1, 2, 55 },
-                    PackedFixedSizeInts = new[] { -2, 17 },
-                    NonPackedFixedSizeInts = new[] { -2, 17 },
-                    NonPackedInts = new[] { -2, 17 },
-                }
-            };
-
-            ms = new MemoryStream();
-            global::ProtoBuf.Serializer.Serialize(ms, Model2);
-
-            SerializedData = ms.ToArray();
-
-
-            using var ms1 = new MemoryStream(SerializedData);
-            global::ProtoBuf.Serializer.Deserialize<ClassWithCollections> (ms1);
+            // Pre-serialize data for deserialization benchmarks
+            global::ProtoBuf.Serializer.Serialize(ms, TestModel);
+            ProtobufNetSerializedData = ms.ToArray();
         }
 
-        [Benchmark]
-        public void DeserializeP()
+        MemoryStream ms = new MemoryStream();
+
+        [Benchmark(Baseline = true)]
+        public void SerializeProtobufNet()
         {
             ms.Position = 0;
-
-            var result = global::ProtoBuf.Serializer.Deserialize<ClassWithCollections>(ms);
+            global::ProtoBuf.Serializer.Serialize(ms, TestModel);
         }
 
         [Benchmark]
-        public void DeserializeG()
+        public void SerializeGProtobuf()
         {
-            var result = Model.Serialization.Deserializers.DeserializeClassWithCollections(this.SerializedData);
+            ms.Position = 0;
+            Model.Serialization.Serializers.SerializeBenchmarkModel(ms, TestModel);
         }
 
-        //[Benchmark]
-        //public void SerializeP()
-        //{
-        //    ms.Position = 0;
+        [Benchmark]
+        public BenchmarkModel DeserializeProtobufNet()
+        {
+            ms.Position = 0;
+            return global::ProtoBuf.Serializer.Deserialize<BenchmarkModel>(ms);
+        }
 
-        //    global::ProtoBuf.Serializer.Serialize(ms, this.Model2);
-        //}
-
-        //[Benchmark]
-        //public void SerializeG()
-        //{
-        //    ms.Position = 0;
-
-        //    Model.Serialization.Serializers.SerializeClassWithCollections(ms, this.Model2);
-        //}
-
-
-        //[Benchmark]
-        //public void MemoryMarshalWrite()
-        //{
-        //    int x = 12345;
-        //    ms.Position = 0;
-
-        //    ms.Write(MemoryMarshal.Cast<int, byte>(MemoryMarshal.CreateReadOnlySpan(ref x, 1)));
-        //}
-
-        //[Benchmark]
-        //public unsafe void UnsafeWrite()
-        //{
-        //    int x = 12345;
-        //    ms.Position = 0;
-
-        //    ms.Write(new Span<byte>(&x, 4));
-        //}
-
-        //[Benchmark]
-        //public void MemoryStackAlloc()
-        //{
-        //    ms.Position = 0;
-        //    int x = 12345;
-        //    Span<byte> buffer = stackalloc byte[4];
-
-        //    BinaryPrimitives.WriteInt32BigEndian(buffer, x);
-
-        //    ms.Write(buffer);
-        //}
+        [Benchmark]
+        public BenchmarkModel DeserializeGProtobuf()
+        {
+            return Model.Serialization.Deserializers.DeserializeBenchmarkModel(ProtobufNetSerializedData);
+        }
     }
 
 
@@ -128,6 +70,10 @@ namespace GProtobuf.Benchmark
     {
         static void Main(string[] args)
         {
+            //var benchmark = new GProtobufBench();
+            //benchmark.Setup();
+            //benchmark.DeserializeGProtobuf();
+
             var summary = BenchmarkRunner.Run(typeof(Program).Assembly);
         }
     }

@@ -4,7 +4,7 @@
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
+    <Nullable>disable</Nullable>
 	  <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
   </PropertyGroup>
 
@@ -17,8 +17,12 @@
 	</ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Model\Model.csproj" />
-    <ProjectReference Include="..\Serializer\Serializer.csproj" />
+    <ProjectReference Include="..\GProtobuf.Core\GProtobuf.Core.csproj" />
+    <ProjectReference Include="..\GProtobuf.Definitions\GProtobuf.Definitions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Analyzer Include="..\GProtobuf.Generator\bin\Debug\netstandard2.0\GProtobuf.Generator.dll" />
   </ItemGroup>
 
 </Project>
