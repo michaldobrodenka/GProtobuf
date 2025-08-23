@@ -180,21 +180,11 @@ namespace GProtobuf.Core
             bufferPosition += 16;
         }
 
-        /// <summary>
-        /// Writes a byte array directly to stream (for protobuf bytes fields)
-        /// </summary>
-        public void WriteBytes(byte[] bytes)
-        {
-            if (bytes != null)
-            {
-                WriteToBuffer(bytes);
-            }
-        }
 
         /// <summary>
         /// Writes a span of bytes directly to stream (for protobuf bytes fields)
         /// </summary>
-        public void WriteBytes(ReadOnlySpan<byte> bytes)
+        public void WriteBytes(scoped ReadOnlySpan<byte> bytes)
         {
             WriteToBuffer(bytes);
         }
@@ -297,7 +287,7 @@ namespace GProtobuf.Core
             }
         }
 
-        private void WriteToBuffer(ReadOnlySpan<byte> data)
+        private void WriteToBuffer(scoped ReadOnlySpan<byte> data)
         {
             if (data.Length == 0) return;
 
@@ -315,7 +305,7 @@ namespace GProtobuf.Core
             bufferPosition += data.Length;
         }
 
-        private void WriteSingleByte(byte value)
+        public void WriteSingleByte(byte value)
         {
             if (bufferPosition >= buffer.Length)
             {

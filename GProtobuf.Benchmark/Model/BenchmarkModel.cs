@@ -15,7 +15,7 @@ namespace GProtobuf.Benchmark.Model
         [ProtoMember(3)]
         public double DoubleValue { get; set; }
 
-        [ProtoMember(4)]
+        [ProtoMember(41243)]
         public bool BoolValue { get; set; }
 
         [ProtoMember(5)]

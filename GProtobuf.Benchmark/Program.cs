@@ -11,6 +11,7 @@ using BenchmarkDotNet.Reports;
 using BenchmarkDotNet.Running;
 using GProtobuf.Benchmark.Model;
 using Microsoft.IO;
+using System;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
