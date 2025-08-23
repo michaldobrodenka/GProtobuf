@@ -331,7 +331,7 @@ class ObjectTree
         {
             sb.AppendIndentedLine($"public static void Serialize{GetClassNameFromFullName(obj.FullName)}(Stream stream, global::{obj.FullName} obj)");
             sb.StartNewBlock();
-            sb.AppendIndentedLine("var writer = new global::GProtobuf.Core.StreamWriter(stream);");
+            sb.AppendIndentedLine("var writer = new global::GProtobuf.Core.StreamWriter(stream, stackalloc byte[256]);");
             sb.AppendIndentedLine($"StreamWriters.Write{GetClassNameFromFullName(obj.FullName)}(ref writer, obj);");
             sb.AppendIndentedLine("writer.Flush();");
             sb.EndBlock();

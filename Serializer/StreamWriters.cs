@@ -21,7 +21,7 @@ namespace Model.MySerialization
 
         public static void SerializeClassWithCollections(Stream stream, global::Model.ClassWithCollections obj)
         {
-            var writer = new global::GProtobuf.Core.StreamWriter(stream);
+            var writer = new global::GProtobuf.Core.StreamWriter(stream, stackalloc byte[256]);
             StreamWriters.WriteClassWithCollections(writer, obj);
         }
     }

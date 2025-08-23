@@ -2,25 +2,42 @@
 using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
 
 namespace GProtobuf.Core
 {
+    [SkipLocalsInit]
     public ref struct StreamWriter
     {
         public Stream Stream { get; private set; }
-        private byte[] buffer;
+        //private byte[] buffer;
         private int bufferPosition;
 
-        public StreamWriter(Stream stream)
+        private Span<byte> buffer;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private ref byte FirstRef() => ref MemoryMarshal.GetReference(buffer);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private ref byte RefAt(int pos) => ref Unsafe.Add(ref FirstRef(), pos);
+
+        public StreamWriter(Stream stream, scoped Span<byte> buffer)
         {
             Stream = stream;
-            buffer = ArrayPool<byte>.Shared.Rent(1024);
+            //buffer = ArrayPool<byte>.Shared.Rent(1024);
             bufferPosition = 0;
+            unsafe
+            {
+#pragma warning disable CS9080 // Use of variable in this context may expose referenced variables outside of their declaration scope
+                this.buffer = buffer;
+#pragma warning restore CS9080 // Use of variable in this context may expose referenced variables outside of their declaration scope
+            }
         }
 
         public void WriteTag(int fieldId, WireType wireType)
@@ -29,20 +46,50 @@ namespace GProtobuf.Core
             WriteVarint32(tag);
         }
 
-        public void WriteVarint32(uint value)
-        {
-            WriteVarUInt32(value); // Delegate to optimized version
-        }
+        //// Optimized version for unsigned/positive values only (lengths, byte, ushort, uint)
+        //public void WriteVarUInt32(uint value)
+        //{
+        //    while (value > 0x7F)
+        //    {
+        //        WriteSingleByte((byte)((value & 0x7F) | 0x80));
+        //        value >>= 7;
+        //    }
+        //    WriteSingleByte((byte)value);
+        //}
 
-        // Optimized version for unsigned/positive values only (lengths, byte, ushort, uint)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void WriteVarUInt32(uint value)
         {
-            while (value > 0x7F)
+            int pos = bufferPosition;
+            int space = buffer.Length - pos;
+
+            if (space >= 5)
             {
-                WriteSingleByte((byte)((value & 0x7F) | 0x80));
-                value >>= 7;
+                ref byte p = ref RefAt(pos);
+
+                while (value > 0x7Fu)
+                {
+                    Unsafe.WriteUnaligned(ref p, (byte)((value & 0x7Fu) | 0x80u));
+                    p = ref Unsafe.Add(ref p, 1);
+                    pos++;
+                    value >>= 7;
+                }
+
+                Unsafe.WriteUnaligned(ref p, (byte)value);
+                pos++;
+
+                bufferPosition = pos;
             }
-            WriteSingleByte((byte)value);
+            else
+            {
+                // fallback
+                while (value > 0x7Fu)
+                {
+                    WriteSingleByte((byte)((value & 0x7Fu) | 0x80u));
+                    value >>= 7;
+                }
+                WriteSingleByte((byte)value);
+            }
         }
 
         public void WriteFixedSizeInt32(int intValue)
@@ -77,7 +124,7 @@ namespace GProtobuf.Core
 
         public void WriteBool(bool value)
         {
-            WriteVarint32(value ? 1u : 0u);
+            WriteVarUInt32(value ? 1u : 0u);
         }
 
         public void WriteByte(byte value)
@@ -158,7 +205,8 @@ namespace GProtobuf.Core
         // Write non null string value, for shorter strings we use stackalloc for performance
         public void WriteString(string value)
         {
-            var rentedBuffer = ArrayPool<byte>.Shared.Rent(Encoding.UTF8.GetMaxByteCount(value.Length));
+            //var rentedBuffer = ArrayPool<byte>.Shared.Rent(Encoding.UTF8.GetMaxByteCount(value.Length));
+            var rentedBuffer = ArrayPool<byte>.Shared.Rent(value.Length*4);
             try
             {
                 var tempBuffer = rentedBuffer.AsSpan();
@@ -171,11 +219,47 @@ namespace GProtobuf.Core
             }
         }
 
+        //public void WriteString(string value)
+        //{
+        //    // FAST PATH: ak sa zmestí aj v "worst-case" (UTF-8 max 4 B/char),
+        //    // urob jedno GetBytes bez dočasných alokácií.
+        //    int available = buffer.Length - bufferPosition;
+        //    int worstCase = Encoding.UTF8.GetMaxByteCount(value.Length);
+        //    if (available >= worstCase)
+        //    {
+        //        int written = Encoding.UTF8.GetBytes(value.AsSpan(), buffer.Slice(bufferPosition));
+        //        bufferPosition += written;
+        //        return;
+        //    }
+
+        //    // STREAM PATH: kóduj po častiach priamo do bufferu, bez ArrayPoolu.
+        //    Encoder enc = Encoding.UTF8.GetEncoder();
+        //    ReadOnlySpan<char> chars = value.AsSpan();
+
+        //    while (true)
+        //    {
+        //        if (bufferPosition == buffer.Length)
+        //            Flush(); // po návrate nech je k dispozícii aspoň pár bajtov
+
+        //        Span<byte> dest = buffer.Slice(bufferPosition);
+        //        // 'flush' nastavíme na true v momente, keď máme šancu dobehnúť koniec
+        //        bool flushNow = chars.Length <= dest.Length;
+
+        //        enc.Convert(chars, dest, flushNow,
+        //                    out int charsUsed, out int bytesUsed, out bool completed);
+
+        //        bufferPosition += bytesUsed;
+        //        chars = chars.Slice(charsUsed);
+
+        //        if (completed) break; // všetko zakódované + stav encoderu vyprázdnený
+        //    }
+        //}
+
         public void WriteGuid(Guid value)
         {
             // Write Guid as 16-byte array (same as protobuf-net)
             EnsureBufferSpace(16);
-            if (!value.TryWriteBytes(buffer.AsSpan(bufferPosition, 16)))
+            if (!value.TryWriteBytes(buffer.Slice(bufferPosition, 16)))
                 throw new InvalidOperationException("Failed to write Guid to buffer");
             bufferPosition += 16;
         }
@@ -227,7 +311,7 @@ namespace GProtobuf.Core
         public void WriteFixedInt64(long value)
         {
             EnsureBufferSpace(8);
-            BinaryPrimitives.WriteInt64LittleEndian(buffer.AsSpan(bufferPosition, 8), value);
+            BinaryPrimitives.WriteInt64LittleEndian(buffer.Slice(bufferPosition, 8), value);
             bufferPosition += 8;
         }
 
@@ -242,7 +326,7 @@ namespace GProtobuf.Core
         public void WriteFixedInt32(short value)
         {
             EnsureBufferSpace(4);
-            BinaryPrimitives.WriteInt32LittleEndian(buffer.AsSpan(bufferPosition, 4), (int)value);
+            BinaryPrimitives.WriteInt32LittleEndian(buffer.Slice(bufferPosition, 4), (int)value);
             bufferPosition += 4;
         }
 
@@ -253,7 +337,7 @@ namespace GProtobuf.Core
         public void WriteFixedUInt32(ushort value)
         {
             EnsureBufferSpace(4);
-            BinaryPrimitives.WriteUInt32LittleEndian(buffer.AsSpan(bufferPosition, 4), (uint)value);
+            BinaryPrimitives.WriteUInt32LittleEndian(buffer.Slice(bufferPosition, 4), (uint)value);
             bufferPosition += 4;
         }
 
@@ -263,7 +347,7 @@ namespace GProtobuf.Core
         public void WriteFixedUInt32(uint value)
         {
             EnsureBufferSpace(4);
-            BinaryPrimitives.WriteUInt32LittleEndian(buffer.AsSpan(bufferPosition, 4), value);
+            BinaryPrimitives.WriteUInt32LittleEndian(buffer.Slice(bufferPosition, 4), value);
             bufferPosition += 4;
         }
 
@@ -273,7 +357,7 @@ namespace GProtobuf.Core
         public void WriteFixedUInt64(ulong value)
         {
             EnsureBufferSpace(8);
-            BinaryPrimitives.WriteUInt64LittleEndian(buffer.AsSpan(bufferPosition, 8), value);
+            BinaryPrimitives.WriteUInt64LittleEndian(buffer.Slice(bufferPosition, 8), value);
             bufferPosition += 8;
         }
 
@@ -301,27 +385,28 @@ namespace GProtobuf.Core
                 }
             }
 
-            data.CopyTo(buffer.AsSpan(bufferPosition));
+            data.CopyTo(buffer.Slice(bufferPosition));
             bufferPosition += data.Length;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void WriteSingleByte(byte value)
         {
-            if (bufferPosition >= buffer.Length)
-            {
+            if ((uint)bufferPosition >= (uint)buffer.Length)
                 Flush();
-            }
-            buffer[bufferPosition++] = value;
+
+            Unsafe.WriteUnaligned(ref RefAt(bufferPosition), value);
+            bufferPosition++;
         }
 
         public void Flush()
         {
             if (bufferPosition > 0)
             {
-                Stream.Write(buffer.AsSpan(0, bufferPosition));
+                Stream.Write(buffer.Slice(0, bufferPosition));
                 bufferPosition = 0;
             }
-            ArrayPool<byte>.Shared.Return(buffer);
+            //ArrayPool<byte>.Shared.Return(buffer);
         }
     }
 }
