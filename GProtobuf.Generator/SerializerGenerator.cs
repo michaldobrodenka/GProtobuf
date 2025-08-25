@@ -84,6 +84,9 @@ public sealed class SerializerGenerator : IIncrementalGenerator
 
                     // Analyze collection information
                     var collectionInfo = AnalyzeCollectionType(property.Type);
+                    
+                    // Analyze map/dictionary information
+                    var (isMap, keyType, valueType) = AnalyzeMapType(property.Type);
 
                     // Vytvoríme inštanciu s FieldId
                     var protoMember = new Core.ProtoMemberAttribute(fieldId)
@@ -96,6 +99,9 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                         IsCollection = collectionInfo.IsCollection,
                         CollectionElementType = collectionInfo.ElementType,
                         CollectionKind = collectionInfo.Kind,
+                        IsMap = isMap,
+                        MapKeyType = keyType,
+                        MapValueType = valueType,
                     };
 
                     // Spracujeme voliteľné NamedArguments
@@ -222,5 +228,47 @@ public sealed class SerializerGenerator : IIncrementalGenerator
         return namedType.AllInterfaces.Any(i => 
             i.IsGenericType && 
             i.OriginalDefinition.ToDisplayString() == "System.Collections.Generic.ICollection<T>");
+    }
+    
+    /// <summary>
+    /// Analyzes if the type is a dictionary/map type and extracts key/value types
+    /// </summary>
+    private static (bool isMap, string keyType, string valueType) AnalyzeMapType(ITypeSymbol typeSymbol)
+    {
+        if (typeSymbol is not INamedTypeSymbol namedType)
+            return (false, null, null);
+        
+        // Check for Dictionary<TKey, TValue>
+        if (namedType.OriginalDefinition?.ToDisplayString() == "System.Collections.Generic.Dictionary<TKey, TValue>" ||
+            namedType.OriginalDefinition?.ToDisplayString() == "System.Collections.Generic.SortedDictionary<TKey, TValue>")
+        {
+            if (namedType.TypeArguments.Length == 2)
+            {
+                return (true, namedType.TypeArguments[0].ToDisplayString(), namedType.TypeArguments[1].ToDisplayString());
+            }
+        }
+        
+        // Check for IDictionary<TKey, TValue> interface
+        var dictionaryInterface = namedType.AllInterfaces.FirstOrDefault(i =>
+            i.OriginalDefinition?.ToDisplayString() == "System.Collections.Generic.IDictionary<TKey, TValue>");
+        
+        if (dictionaryInterface != null && dictionaryInterface.TypeArguments.Length == 2)
+        {
+            return (true, dictionaryInterface.TypeArguments[0].ToDisplayString(), dictionaryInterface.TypeArguments[1].ToDisplayString());
+        }
+        
+        // Check for ICollection<KeyValuePair<TKey, TValue>>
+        var collectionInterface = namedType.AllInterfaces.FirstOrDefault(i =>
+            i.OriginalDefinition?.ToDisplayString() == "System.Collections.Generic.ICollection<T>" &&
+            i.TypeArguments.Length == 1 &&
+            i.TypeArguments[0] is INamedTypeSymbol elementType &&
+            elementType.OriginalDefinition?.ToDisplayString() == "System.Collections.Generic.KeyValuePair<TKey, TValue>");
+        
+        if (collectionInterface?.TypeArguments[0] is INamedTypeSymbol kvpType && kvpType.TypeArguments.Length == 2)
+        {
+            return (true, kvpType.TypeArguments[0].ToDisplayString(), kvpType.TypeArguments[1].ToDisplayString());
+        }
+        
+        return (false, null, null);
     }
 }

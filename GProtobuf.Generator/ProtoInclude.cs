@@ -141,6 +141,21 @@ namespace GProtobuf.Core
         /// <summary>
         /// The kind of collection type
         /// </summary>
-        public CollectionKind CollectionKind { get; set; } 
+        public CollectionKind CollectionKind { get; set; }
+        
+        /// <summary>
+        /// Indicates if this member is a map/dictionary type (ICollection<KeyValuePair<K,V>>, Dictionary<K,V>, etc.)
+        /// </summary>
+        public bool IsMap { get; set; }
+        
+        /// <summary>
+        /// The key type for map/dictionary types (e.g., "string" for Dictionary<string, int>)
+        /// </summary>
+        public string MapKeyType { get; set; }
+        
+        /// <summary>
+        /// The value type for map/dictionary types (e.g., "int" for Dictionary<string, int>)
+        /// </summary>
+        public string MapValueType { get; set; }
     }
 }

@@ -993,7 +993,12 @@ class ObjectTree
         var typeName = GetClassNameFromFullName(protoMember.Type);
         
         // Check collection types in priority order
-        if (IsByteCollectionType(protoMember))
+        if (protoMember.IsMap)
+        {
+            WriteMapProtoMember(sb, protoMember);
+            return;
+        }
+        else if (IsByteCollectionType(protoMember))
         {
             WriteByteCollectionProtoMember(sb, protoMember);
             return;
@@ -1584,8 +1589,14 @@ class ObjectTree
         bool isNullable = protoMember.IsNullable;
         var typeName = GetClassNameFromFullName(protoMember.Type);
 
+        // Check if it's a map type first
+        if (protoMember.IsMap)
+        {
+            WriteMapProtoMemberSerializer(sb, protoMember, objectName);
+            return;
+        }
         // Check collection types in priority order
-        if (IsByteCollectionType(protoMember))
+        else if (IsByteCollectionType(protoMember))
         {
             WriteByteCollectionProtoMemberSerializer(sb, protoMember, objectName);
             return;
@@ -2330,7 +2341,12 @@ class ObjectTree
         var typeName = GetClassNameFromFullName(protoMember.Type);
 
         // Check collection types in priority order
-        if (IsByteCollectionType(protoMember))
+        if (protoMember.IsMap)
+        {
+            WriteMapProtoMemberSizeCalculator(sb, protoMember);
+            return;
+        }
+        else if (IsByteCollectionType(protoMember))
         {
             WriteByteCollectionProtoMemberSizeCalculator(sb, protoMember);
             return;
@@ -3259,6 +3275,136 @@ class ObjectTree
     }
     
     /// <summary>
+    /// Writes the deserialization logic for map/dictionary types
+    /// </summary>
+    private static void WriteMapProtoMember(StringBuilderWithIndent sb, ProtoMemberAttribute protoMember)
+    {
+        var keyType = protoMember.MapKeyType;
+        var valueType = protoMember.MapValueType;
+        var mapType = protoMember.Type;
+        
+        // Create dictionary to collect map entries
+        // Use the actual type if it's a concrete dictionary type, otherwise use Dictionary<K,V>
+        var dictType = GetDictionaryCreationType(mapType, keyType, valueType);
+        sb.AppendIndentedLine($"var mapDict = new {dictType}();");
+        sb.AppendIndentedLine($"var wireType1 = wireType;");
+        sb.AppendIndentedLine($"var fieldId1 = fieldId;");
+        
+        // Loop through all map entries (wire type is always Len for map entries)
+        sb.AppendIndentedLine($"while (fieldId1 == fieldId && wireType1 == WireType.Len)");
+        sb.StartNewBlock();
+        
+        // Read the map entry message
+        sb.AppendIndentedLine($"var length = reader.ReadVarInt32();");
+        sb.AppendIndentedLine($"var entryReader = new SpanReader(reader.GetSlice(length));");
+        
+        // Initialize key/value variables
+        sb.AppendIndentedLine($"{keyType} key = default({keyType});");
+        sb.AppendIndentedLine($"{valueType} value = default({valueType});");
+        
+        // Read the map entry content (field 1 = key, field 2 = value)
+        sb.AppendIndentedLine($"while (!entryReader.IsEnd)");
+        sb.StartNewBlock();
+        sb.AppendIndentedLine($"var (entryWireType, entryFieldId) = entryReader.ReadWireTypeAndFieldId();");
+        
+        // Read key (field 1)
+        sb.AppendIndentedLine($"if (entryFieldId == 1)");
+        sb.StartNewBlock();
+        WriteMapFieldReader(sb, "key", keyType);
+        sb.AppendIndentedLine($"continue;");
+        sb.EndBlock();
+        
+        // Read value (field 2)
+        sb.AppendIndentedLine($"if (entryFieldId == 2)");
+        sb.StartNewBlock();
+        WriteMapFieldReader(sb, "value", valueType);
+        sb.AppendIndentedLine($"continue;");
+        sb.EndBlock();
+        
+        // Skip unknown fields
+        sb.AppendIndentedLine($"entryReader.SkipField(entryWireType);");
+        sb.EndBlock();
+        
+        // Add to dictionary
+        sb.AppendIndentedLine($"mapDict[key] = value;");
+        
+        // Standard map reading loop continuation logic
+        sb.AppendIndentedLine($"if (reader.EndOfData) break;");
+        sb.AppendIndentedLine($"var p = reader.Position;");
+        sb.AppendIndentedLine($"(wireType1, fieldId1) = reader.ReadKey();");
+        sb.AppendIndentedLine($"if (fieldId1 != fieldId)");
+        sb.StartNewBlock();
+        sb.AppendIndentedLine($"reader.Position = p; // rewind");
+        sb.AppendIndentedLine($"break;");
+        sb.EndBlock();
+        sb.EndBlock();
+        
+        // Assign the dictionary to the property based on type
+        if (mapType.Contains("KeyValuePair<"))
+        {
+            // For List<KeyValuePair<K,V>> or ICollection<KeyValuePair<K,V>>, convert dictionary to list
+            sb.AppendIndentedLine($"result.{protoMember.Name} = mapDict.ToList();");
+        }
+        else
+        {
+            // For all dictionary types (Dictionary<K,V>, IDictionary<K,V>, DerivedDictionary, etc.)
+            // mapDict is already created with the correct type, so direct assignment works
+            sb.AppendIndentedLine($"result.{protoMember.Name} = mapDict;");
+        }
+        
+        sb.AppendIndentedLine($"continue;");
+        sb.EndBlock();
+        sb.AppendNewLine();
+    }
+    
+    /// <summary>
+    /// Writes the reader logic for map key/value fields
+    /// </summary>
+    private static void WriteMapFieldReader(StringBuilderWithIndent sb, string varName, string fieldType)
+    {
+        var typeName = GetClassNameFromFullName(fieldType);
+        
+        switch (typeName)
+        {
+            case "string":
+            case "System.String":
+                sb.AppendIndentedLine($"{varName} = entryReader.ReadString(entryWireType);");
+                break;
+            case "int":
+            case "System.Int32":
+            case "Int32":
+                sb.AppendIndentedLine($"{varName} = entryReader.ReadVarInt32();");
+                break;
+            case "long":
+            case "System.Int64":
+            case "Int64":
+                sb.AppendIndentedLine($"{varName} = entryReader.ReadVarInt64();");
+                break;
+            case "bool":
+            case "System.Boolean":
+            case "Boolean":
+                sb.AppendIndentedLine($"{varName} = entryReader.ReadBool(entryWireType);");
+                break;
+            case "float":
+            case "System.Single":
+            case "Single":
+                sb.AppendIndentedLine($"{varName} = entryReader.ReadFloat(entryWireType);");
+                break;
+            case "double":
+            case "System.Double":
+            case "Double":
+                sb.AppendIndentedLine($"{varName} = entryReader.ReadDouble(entryWireType);");
+                break;
+            default:
+                // For complex types, deserialize as message
+                sb.AppendIndentedLine($"var fieldLength = entryReader.ReadVarInt32();");
+                sb.AppendIndentedLine($"var fieldReader = new SpanReader(entryReader.GetSlice(fieldLength));");
+                sb.AppendIndentedLine($"{varName} = global::{GetNamespaceFromType(fieldType)}.Serialization.SpanReaders.Read{typeName}(ref fieldReader);");
+                break;
+        }
+    }
+    
+    /// <summary>
     /// Writes the serialization logic for array types (string[], Message[], etc.)
     /// </summary>
     private static void WriteArrayProtoMemberSerializer(StringBuilderWithIndent sb, ProtoMemberAttribute protoMember, string objectName)
@@ -3369,6 +3515,126 @@ class ObjectTree
         }
         
         sb.EndBlock();
+    }
+
+    /// <summary>
+    /// Writes the size calculation logic for map/dictionary types
+    /// </summary>
+    private static void WriteMapProtoMemberSizeCalculator(StringBuilderWithIndent sb, ProtoMemberAttribute protoMember)
+    {
+        var keyType = protoMember.MapKeyType;
+        var valueType = protoMember.MapValueType;
+        
+        // Check if map is not null
+        sb.AppendIndentedLine($"if (obj.{protoMember.Name} != null)");
+        sb.StartNewBlock();
+        
+        // Iterate through each map entry
+        sb.AppendIndentedLine($"foreach (var entry in obj.{protoMember.Name})");
+        sb.StartNewBlock();
+        
+        // Calculate size for the map entry message (tag + length + entry content)
+        sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+        sb.AppendIndentedLine($"var entryCalculator = new global::GProtobuf.Core.WriteSizeCalculator();");
+        
+        // Calculate key size (field 1)
+        sb.AppendIndentedLine($"entryCalculator.WriteTag(1, {GetWireTypeForMapField(keyType)});");
+        WriteMapFieldSizeCalculation(sb, "entry.Key", keyType, "entryCalculator");
+        
+        // Calculate value size (field 2)
+        sb.AppendIndentedLine($"entryCalculator.WriteTag(2, {GetWireTypeForMapField(valueType)});");
+        WriteMapFieldSizeCalculation(sb, "entry.Value", valueType, "entryCalculator");
+        
+        // Write entry length and add to total size
+        sb.AppendIndentedLine($"calculator.WriteVarUInt32((uint)entryCalculator.Length);");
+        sb.AppendIndentedLine($"calculator.AddByteLength(entryCalculator.Length);");
+        
+        sb.EndBlock();
+        sb.EndBlock();
+    }
+    
+    /// <summary>
+    /// Gets the wire type for a map field based on the field type
+    /// </summary>
+    private static string GetWireTypeForMapField(string fieldType)
+    {
+        var typeName = GetClassNameFromFullName(fieldType);
+        
+        switch (typeName)
+        {
+            case "string":
+            case "System.String":
+                return "WireType.Len";
+            case "int":
+            case "System.Int32":
+            case "Int32":
+            case "long":
+            case "System.Int64":
+            case "Int64":
+            case "bool":
+            case "System.Boolean":
+            case "Boolean":
+                return "WireType.VarInt";
+            case "float":
+            case "System.Single":
+            case "Single":
+                return "WireType.Fixed32b";
+            case "double":
+            case "System.Double":
+            case "Double":
+                return "WireType.Fixed64b";
+            default:
+                // Complex types are length-delimited
+                return "WireType.Len";
+        }
+    }
+    
+    /// <summary>
+    /// Writes the size calculation for a map key/value field
+    /// </summary>
+    private static void WriteMapFieldSizeCalculation(StringBuilderWithIndent sb, string valueAccess, string fieldType, string calculatorVar)
+    {
+        var typeName = GetClassNameFromFullName(fieldType);
+        
+        switch (typeName)
+        {
+            case "string":
+            case "System.String":
+                sb.AppendIndentedLine($"{calculatorVar}.WriteString({valueAccess});");
+                break;
+            case "int":
+            case "System.Int32":
+            case "Int32":
+                sb.AppendIndentedLine($"{calculatorVar}.WriteVarint32({valueAccess});");
+                break;
+            case "long":
+            case "System.Int64":
+            case "Int64":
+                sb.AppendIndentedLine($"{calculatorVar}.WriteVarint64({valueAccess});");
+                break;
+            case "bool":
+            case "System.Boolean":
+            case "Boolean":
+                sb.AppendIndentedLine($"{calculatorVar}.WriteBool({valueAccess});");
+                break;
+            case "float":
+            case "System.Single":
+            case "Single":
+                sb.AppendIndentedLine($"{calculatorVar}.WriteFloat({valueAccess});");
+                break;
+            case "double":
+            case "System.Double":
+            case "Double":
+                sb.AppendIndentedLine($"{calculatorVar}.WriteDouble({valueAccess});");
+                break;
+            default:
+                // For complex types, calculate nested message size
+                sb.AppendIndentedLine($"var valueCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+                sb.AppendIndentedLine($"SizeCalculators.Calculate{GetClassNameFromFullName(fieldType)}Size(ref valueCalc, {valueAccess});");
+                sb.AppendIndentedLine($"{calculatorVar}.WriteVarUInt32((uint)valueCalc.Length);");
+                sb.AppendIndentedLine($"{calculatorVar}.AddByteLength(valueCalc.Length);");
+                break;
+        }
     }
 
     /// <summary>
@@ -3588,6 +3854,250 @@ class ObjectTree
     /// <summary>
     /// Writes the serialization logic for primitive collection types
     /// </summary>
+    private static void WriteMapProtoMemberSerializer(StringBuilderWithIndent sb, ProtoMemberAttribute protoMember, string objectName)
+    {
+        sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != null)");
+        sb.StartNewBlock();
+        
+        // Maps are serialized as repeated message entries
+        // Each entry has field 1 for key and field 2 for value
+        sb.AppendIndentedLine($"foreach (var kvp in {objectName}.{protoMember.Name})");
+        sb.StartNewBlock();
+        
+        // Calculate entry size
+        sb.AppendIndentedLine($"var entryCalculator = new global::GProtobuf.Core.WriteSizeCalculator();");
+        
+        // Add key (field 1)
+        WriteMapKeySize(sb, protoMember.MapKeyType, "kvp.Key", "entryCalculator");
+        
+        // Add value (field 2)  
+        WriteMapValueSize(sb, protoMember.MapValueType, "kvp.Value", "entryCalculator");
+        
+        // Write the entry tag and length
+        WritePrecomputedTag(sb, protoMember.FieldId, WireType.Len);
+        sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)entryCalculator.Length);");
+        
+        // Write the actual key and value
+        WriteMapKey(sb, protoMember.MapKeyType, "kvp.Key");
+        WriteMapValue(sb, protoMember.MapValueType, "kvp.Value");
+        
+        sb.EndBlock(); // end foreach
+        sb.EndBlock(); // end if not null
+    }
+    
+    private static void WriteMapKeySize(StringBuilderWithIndent sb, string keyType, string keyAccess, string calculator)
+    {
+        // Key is always field 1
+        var simpleType = GetSimpleTypeName(keyType);
+        
+        switch (simpleType)
+        {
+            case "string":
+                sb.AppendIndentedLine($"if ({keyAccess} != null)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"{calculator}.AddByteLength(1); // tag for field 1");
+                sb.AppendIndentedLine($"{calculator}.WriteString({keyAccess});");
+                sb.EndBlock();
+                break;
+                
+            case "int":
+            case "Int32":
+                sb.AppendIndentedLine($"{calculator}.AddByteLength(1); // tag for field 1");
+                sb.AppendIndentedLine($"{calculator}.WriteVarint32({keyAccess});");
+                break;
+                
+            case "long":
+            case "Int64":
+                sb.AppendIndentedLine($"{calculator}.AddByteLength(1); // tag for field 1");
+                sb.AppendIndentedLine($"{calculator}.WriteVarint64({keyAccess});");
+                break;
+                
+            case "bool":
+                sb.AppendIndentedLine($"{calculator}.AddByteLength(1); // tag for field 1");
+                sb.AppendIndentedLine($"{calculator}.WriteBool({keyAccess});");
+                break;
+                
+            case "uint":
+            case "UInt32":
+                sb.AppendIndentedLine($"{calculator}.AddByteLength(1); // tag for field 1");
+                sb.AppendIndentedLine($"{calculator}.WriteUInt32({keyAccess});");
+                break;
+                
+            case "ulong":
+            case "UInt64":
+                sb.AppendIndentedLine($"{calculator}.AddByteLength(1); // tag for field 1");
+                sb.AppendIndentedLine($"{calculator}.WriteUInt64({keyAccess});");
+                break;
+        }
+    }
+    
+    private static void WriteMapValueSize(StringBuilderWithIndent sb, string valueType, string valueAccess, string calculator)
+    {
+        // Value is always field 2
+        var simpleType = GetSimpleTypeName(valueType);
+        
+        switch (simpleType)
+        {
+            case "string":
+                sb.AppendIndentedLine($"if ({valueAccess} != null)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"{calculator}.AddByteLength(1); // tag for field 2");
+                sb.AppendIndentedLine($"{calculator}.WriteString({valueAccess});");
+                sb.EndBlock();
+                break;
+                
+            case "int":
+            case "Int32":
+                sb.AppendIndentedLine($"{calculator}.AddByteLength(1); // tag for field 2");
+                sb.AppendIndentedLine($"{calculator}.WriteVarint32({valueAccess});");
+                break;
+                
+            case "long":
+            case "Int64":
+                sb.AppendIndentedLine($"{calculator}.AddByteLength(1); // tag for field 2");
+                sb.AppendIndentedLine($"{calculator}.WriteVarint64({valueAccess});");
+                break;
+                
+            case "bool":
+                sb.AppendIndentedLine($"{calculator}.AddByteLength(1); // tag for field 2");
+                sb.AppendIndentedLine($"{calculator}.WriteBool({valueAccess});");
+                break;
+                
+            case "float":
+                sb.AppendIndentedLine($"{calculator}.AddByteLength(1); // tag for field 2, Fixed32b");
+                sb.AppendIndentedLine($"{calculator}.WriteFloat({valueAccess});");
+                break;
+                
+            case "double":
+                sb.AppendIndentedLine($"{calculator}.AddByteLength(1); // tag for field 2, Fixed64b");
+                sb.AppendIndentedLine($"{calculator}.WriteDouble({valueAccess});");
+                break;
+                
+            default:
+                // For complex types, we need to calculate their size
+                sb.AppendIndentedLine($"if ({valueAccess} != null)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"{calculator}.AddByteLength(1); // tag for field 2");
+                sb.AppendIndentedLine($"var valueCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+                sb.AppendIndentedLine($"SizeCalculators.Calculate{GetClassNameFromFullName(valueType)}Size(ref valueCalc, {valueAccess});");
+                sb.AppendIndentedLine($"{calculator}.WriteVarUInt32((uint)valueCalc.Length);");
+                sb.AppendIndentedLine($"{calculator}.AddByteLength(valueCalc.Length);");
+                sb.EndBlock();
+                break;
+        }
+    }
+    
+    private static void WriteMapKey(StringBuilderWithIndent sb, string keyType, string keyAccess)
+    {
+        var simpleType = GetSimpleTypeName(keyType);
+        
+        // Key is field 1, wire type depends on the type
+        switch (simpleType)
+        {
+            case "string":
+                sb.AppendIndentedLine($"if ({keyAccess} != null)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x0A); // field 1, Len");
+                sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)System.Text.Encoding.UTF8.GetByteCount({keyAccess}));");
+                sb.AppendIndentedLine($"writer.WriteString({keyAccess});");
+                sb.EndBlock();
+                break;
+                
+            case "int":
+            case "Int32":
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x08); // field 1, VarInt");
+                sb.AppendIndentedLine($"writer.WriteVarint32({keyAccess});");
+                break;
+                
+            case "long":
+            case "Int64":
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x08); // field 1, VarInt");
+                sb.AppendIndentedLine($"writer.WriteVarint64({keyAccess});");
+                break;
+                
+            case "bool":
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x08); // field 1, VarInt");
+                sb.AppendIndentedLine($"writer.WriteBool({keyAccess});");
+                break;
+                
+            case "uint":
+            case "UInt32":
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x08); // field 1, VarInt");
+                sb.AppendIndentedLine($"writer.WriteUInt32({keyAccess});");
+                break;
+                
+            case "ulong":
+            case "UInt64":
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x08); // field 1, VarInt");
+                sb.AppendIndentedLine($"writer.WriteUInt64({keyAccess});");
+                break;
+        }
+    }
+    
+    private static void WriteMapValue(StringBuilderWithIndent sb, string valueType, string valueAccess)
+    {
+        var simpleType = GetSimpleTypeName(valueType);
+        
+        // Value is field 2, wire type depends on the type
+        switch (simpleType)
+        {
+            case "string":
+                sb.AppendIndentedLine($"if ({valueAccess} != null)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x12); // field 2, Len");
+                sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)System.Text.Encoding.UTF8.GetByteCount({valueAccess}));");
+                sb.AppendIndentedLine($"writer.WriteString({valueAccess});");
+                sb.EndBlock();
+                break;
+                
+            case "int":
+            case "Int32":
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x10); // field 2, VarInt");
+                sb.AppendIndentedLine($"writer.WriteVarint32({valueAccess});");
+                break;
+                
+            case "long":
+            case "Int64":
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x10); // field 2, VarInt");
+                sb.AppendIndentedLine($"writer.WriteVarint64({valueAccess});");
+                break;
+                
+            case "bool":
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x10); // field 2, VarInt");
+                sb.AppendIndentedLine($"writer.WriteBool({valueAccess});");
+                break;
+                
+            case "float":
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x15); // field 2, Fixed32b");
+                sb.AppendIndentedLine($"writer.WriteFloat({valueAccess});");
+                break;
+                
+            case "double":
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x11); // field 2, Fixed64b");
+                sb.AppendIndentedLine($"writer.WriteDouble({valueAccess});");
+                break;
+                
+            default:
+                // For complex types
+                sb.AppendIndentedLine($"if ({valueAccess} != null)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x12); // field 2, Len");
+                sb.AppendIndentedLine($"var valueCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+                sb.AppendIndentedLine($"SizeCalculators.Calculate{GetClassNameFromFullName(valueType)}Size(ref valueCalc, {valueAccess});");
+                sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)valueCalc.Length);");
+                sb.AppendIndentedLine($"StreamWriters.Write{GetClassNameFromFullName(valueType)}(ref writer, {valueAccess});");
+                sb.EndBlock();
+                break;
+        }
+    }
+    
+    private static string GetSimpleTypeName(string fullTypeName)
+    {
+        // Remove namespace and get just the type name
+        var lastDot = fullTypeName.LastIndexOf('.');
+        return lastDot >= 0 ? fullTypeName.Substring(lastDot + 1) : fullTypeName;
+    }
+
     private static void WritePrimitiveCollectionProtoMemberSerializer(StringBuilderWithIndent sb, ProtoMemberAttribute protoMember, string objectName)
     {
         var elementType = protoMember.CollectionElementType;
@@ -4201,6 +4711,46 @@ class ObjectTree
             "ulong" or "System.UInt64" => dataFormat == DataFormat.FixedSize ? "WireType.Fixed64b" : "WireType.VarInt",
             _ => "WireType.VarInt"
         };
+    }
+    
+    /// <summary>
+    /// Determines the correct type to create for a dictionary/map based on the target property type
+    /// </summary>
+    private static string GetDictionaryCreationType(string mapType, string keyType, string valueType)
+    {
+        // For List<KeyValuePair<K,V>> we need to use Dictionary<K,V> for intermediate storage
+        if (mapType.Contains("KeyValuePair<"))
+        {
+            return $"global::System.Collections.Generic.Dictionary<{keyType}, {valueType}>";
+        }
+        
+        // For interface types (IDictionary<K,V>), use Dictionary<K,V>
+        if (mapType.Contains("IDictionary<") || mapType.StartsWith("System.Collections.Generic.IDictionary<"))
+        {
+            return $"global::System.Collections.Generic.Dictionary<{keyType}, {valueType}>";
+        }
+        
+        // For concrete Dictionary<K,V>, use Dictionary<K,V>
+        if (mapType.Contains("Dictionary<") && !IsCustomDictionaryType(mapType))
+        {
+            return $"global::System.Collections.Generic.Dictionary<{keyType}, {valueType}>";
+        }
+        
+        // For custom derived dictionary types, use the full qualified type name
+        // This handles cases like DerivedDictionary : Dictionary<long, string>
+        return $"global::{mapType}";
+    }
+    
+    /// <summary>
+    /// Checks if the type is a custom dictionary type (derived from Dictionary)
+    /// </summary>
+    private static bool IsCustomDictionaryType(string mapType)
+    {
+        // If it's not the standard Dictionary<K,V> type name pattern, it's likely a custom type
+        // Standard patterns: "Dictionary<", "System.Collections.Generic.Dictionary<"
+        return !mapType.StartsWith("System.Collections.Generic.Dictionary<") && 
+               !mapType.StartsWith("Dictionary<") &&
+               mapType.Contains("Dictionary");
     }
     
     #endregion
