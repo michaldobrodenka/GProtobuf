@@ -43,7 +43,7 @@ namespace GProtobuf.Core
         public void WriteTag(int fieldId, WireType wireType)
         {
             int tag = (fieldId << 3) | (int)wireType;
-            WriteVarint32(tag);
+            WriteVarInt32(tag);
         }
 
         //// Optimized version for unsigned/positive values only (lengths, byte, ushort, uint)
@@ -102,24 +102,19 @@ namespace GProtobuf.Core
             WriteToBuffer(MemoryMarshal.Cast<ulong, byte>(MemoryMarshal.CreateReadOnlySpan(ref ulongValue, 1)));
         }
 
-        public void WriteVarint32(int intValue)
+        public void WriteVarInt32(int intValue)
         {
             WriteVarUInt32((uint)intValue);
         }
 
-        public void WriteVarint64(long value)
-        {
-            WriteVarintUInt64((ulong)value);
-        }
-
         public void WriteZigZag32(int value)
         {
-            WriteVarint32((value << 1) ^ (value >> 31));
+            WriteVarInt32((value << 1) ^ (value >> 31));
         }
 
         public void WriteZigZag64(long value)
         {
-            WriteVarint64((value << 1) ^ (value >> 63));
+            WriteVarInt64((value << 1) ^ (value >> 63));
         }
 
         public void WriteBool(bool value)
@@ -137,7 +132,7 @@ namespace GProtobuf.Core
             if (zigZag)
                 WriteZigZag32(value);
             else
-                WriteVarint32(value); // Keep as signed to handle negatives correctly
+                WriteVarInt32(value); // Keep as signed to handle negatives correctly
         }
 
         public void WriteInt16(short value, bool zigZag = false)
@@ -145,7 +140,7 @@ namespace GProtobuf.Core
             if (zigZag)
                 WriteZigZag32(value);
             else
-                WriteVarint32(value); // Keep as signed to handle negatives correctly
+                WriteVarInt32(value); // Keep as signed to handle negatives correctly
         }
 
         public void WriteUInt16(ushort value)
@@ -163,7 +158,7 @@ namespace GProtobuf.Core
             if (zigZag)
                 WriteZigZag64(value);
             else
-                WriteVarint64(value);
+                WriteVarInt64(value);
         }
 
         public void WriteUInt64(ulong value)

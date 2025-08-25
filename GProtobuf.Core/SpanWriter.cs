@@ -28,11 +28,11 @@
 //        public void WriteTag(int fieldId, WireType wireType)
 //        {
 //            int tag = (fieldId << 3) | (int)wireType;
-//            WriteVarint32(tag);
+//            WriteVarInt32(tag);
 //        }
 
 //        // Write VarInt (int32, uint32)
-//        public void WriteVarint32(int value)
+//        public void WriteVarInt32(int value)
 //        {
 //            EnsureSpace(5); // Max 5 bajtov pre 32-bit VarInt
 //            while (value > 0x7F)
@@ -44,7 +44,7 @@
 //        }
 
 //        // Write VarInt (int64, uint64)
-//        public void WriteVarint64(long value)
+//        public void WriteVarInt64(long value)
 //        {
 //            EnsureSpace(10); // Max 10 bajtov pre 64-bit VarInt
 //            while (value > 0x7F)
@@ -58,13 +58,13 @@
 //        // Write ZigZag-encoded int32
 //        public void WriteZigZag32(int value)
 //        {
-//            WriteVarint32((value << 1) ^ (value >> 31));
+//            WriteVarInt32((value << 1) ^ (value >> 31));
 //        }
 
 //        // Write ZigZag-encoded int64
 //        public void WriteZigZag64(long value)
 //        {
-//            WriteVarint64((value << 1) ^ (value >> 63));
+//            WriteVarInt64((value << 1) ^ (value >> 63));
 //        }
 
 //        // Write Fixed32 (float, int32)
@@ -87,7 +87,7 @@
 //        public void WriteString(string value)
 //        {
 //            byte[] utf8Bytes = Encoding.UTF8.GetBytes(value);
-//            WriteVarint32(utf8Bytes.Length); // Dĺžka ako VarInt
+//            WriteVarInt32(utf8Bytes.Length); // Dĺžka ako VarInt
 //            EnsureSpace(utf8Bytes.Length);
 //            utf8Bytes.CopyTo(_buffer.Slice(_position));
 //            _position += utf8Bytes.Length;
@@ -96,7 +96,7 @@
 //        // Write Bytes (LengthPrefixed)
 //        public void WriteBytes(ReadOnlySpan<byte> value)
 //        {
-//            WriteVarint32(value.Length);
+//            WriteVarInt32(value.Length);
 //            EnsureSpace(value.Length);
 //            value.CopyTo(_buffer.Slice(_position));
 //            _position += value.Length;
@@ -117,7 +117,7 @@
 //        // Write Bool (VarInt)
 //        public void WriteBool(bool value)
 //        {
-//            WriteVarint32(value ? 1 : 0);
+//            WriteVarInt32(value ? 1 : 0);
 //        }
 
 //        // Write Length-prefixed message (nested)

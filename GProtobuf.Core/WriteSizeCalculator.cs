@@ -1,11 +1,14 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Tasks;
 
 namespace GProtobuf.Core
 {
+    [SkipLocalsInit]
     public ref struct WriteSizeCalculator
     {
         public int Length { get; private set; }
@@ -15,20 +18,23 @@ namespace GProtobuf.Core
             Length = 0;
         }
 
-        public void WriteVarint32(uint value)
-        {
-            WriteVarUInt32(value); // Delegate to optimized version
-        }
+        //public void WriteVarInt32(uint value)
+        //{
+        //    //WriteVarUInt32(value); // Delegate to optimized version
+        //}
 
         // Optimized version for unsigned/positive values only (lengths, byte, ushort, uint)
         public void WriteVarUInt32(uint value)
         {
-            while (value > 0x7F)
-            {
-                Length++;
-                value >>= 7;
-            }
-            Length++;
+            // 0 → 1 bajt; inak zaokrúhlenie nahor po 7 bitoch
+            int nbits = 32 - BitOperations.LeadingZeroCount(value);
+            this.Length += nbits == 0 ? 1 : (nbits + 6) / 7;
+            //while (value > 0x7F)
+            //{
+            //    Length++;
+            //    value >>= 7;
+            //}
+            //Length++;
         }
 
         public void WriteFixedSizeInt32(int intValue)
@@ -36,36 +42,40 @@ namespace GProtobuf.Core
             Length += sizeof(int);
         }
 
-        public void WriteVarint32(int intValue)
+        public void WriteVarInt32(int value)
         {
-            var value = (uint)intValue; // Convert int to uint for proper Varint encoding for int32 in Protobuf
-            while (value > 0x7F)
-            {
-                Length++;
-                value >>= 7;
-            }
-            Length++;
+            //var value = (uint)intValue; // Convert int to uint for proper Varint encoding for int32 in Protobuf
+            //while (value > 0x7F)
+            //{
+            //    Length++;
+            //    value >>= 7;
+            //}
+            //Length++;
+            int nbits = 32 - BitOperations.LeadingZeroCount((uint)value);
+            this.Length += nbits == 0 ? 1 : (nbits + 6) / 7;
         }
 
-        public void WriteVarint64(long value)
-        {
-            ulong uValue = (ulong)value; // Convert to unsigned for proper bit operations
-            while (uValue > 0x7F)
-            {
-                Length++;
-                uValue >>= 7;
-            }
-            Length++;
-        }
+        //public void WriteVarInt64(long value)
+        //{
+        //    //ulong uValue = (ulong)value; // Convert to unsigned for proper bit operations
+        //    //while (uValue > 0x7F)
+        //    //{
+        //    //    Length++;
+        //    //    uValue >>= 7;
+        //    //}
+        //    //Length++;
+        //    int nbits = 64 - BitOperations.LeadingZeroCount((ulong)value);
+        //    this.Length += nbits == 0 ? 1 : (nbits + 6) / 7;
+        //}
 
         public void WriteZigZag32(int value)
         {
-            WriteVarint32((value << 1) ^ (value >> 31));
+            WriteVarInt32((value << 1) ^ (value >> 31));
         }
 
         public void WriteZigZag64(long value)
         {
-            WriteVarint64((value << 1) ^ (value >> 63));
+            WriteVarInt64((value << 1) ^ (value >> 63));
         }
 
         public void WriteDouble(double value)
@@ -174,7 +184,7 @@ namespace GProtobuf.Core
             if (zigZag)
                 WriteZigZag32(value);
             else
-                WriteVarint32(value); // Keep as signed to handle negatives correctly
+                WriteVarInt32(value); // Keep as signed to handle negatives correctly
         }
 
         public void WriteInt16(short value, bool zigZag = false)
@@ -182,7 +192,7 @@ namespace GProtobuf.Core
             if (zigZag)
                 WriteZigZag32(value);
             else
-                WriteVarint32(value); // Keep as signed to handle negatives correctly
+                WriteVarInt32(value); // Keep as signed to handle negatives correctly
         }
 
         public void WriteUInt16(ushort value)
@@ -200,23 +210,25 @@ namespace GProtobuf.Core
             if (zigZag)
                 WriteZigZag64(value);
             else
-                WriteVarint64(value);
+                WriteVarInt64(value);
         }
 
         public void WriteUInt64(ulong value)
         {
-            WriteVarintUInt64(value);
+            WriteVarUInt64(value);
         }
 
-        public void WriteVarintUInt64(ulong value)
-        {
-            while (value > 0x7F)
-            {
-                Length++;
-                value >>= 7;
-            }
-            Length++;
-        }
+        //public void WriteVarUInt64(ulong value)
+        //{
+        //    int nbits = 64 - BitOperations.LeadingZeroCount((ulong)value);
+        //    this.Length += nbits == 0 ? 1 : (nbits + 6) / 7;
+        //    //while (value > 0x7F)
+        //    //{
+        //    //    Length++;
+        //    //    value >>= 7;
+        //    //}WriteUInt64
+        //    //Length++;
+        //}
 
         public void WriteFixed32(uint value)
         {
@@ -357,7 +369,9 @@ namespace GProtobuf.Core
         /// </summary>
         public void WriteVarUInt64(ulong value)
         {
-            Length += Utils.GetVarUInt64Size(value);
+            //Length += Utils.GetVarUInt64Size(value);
+            int nbits = 64 - BitOperations.LeadingZeroCount(value);
+            this.Length += nbits == 0 ? 1 : (nbits + 6) / 7;
         }
 
         #endregion
