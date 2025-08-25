@@ -1784,6 +1784,7 @@ public sealed class GProtobufToGProtobufTests : BaseSerializationTest
     {
         var model = new PrimitiveCollectionsTestModel
         {
+            IntList = new List<int> { -1, 2, -3, 100, -1000 },
             ByteList = new List<byte> { 1, 2, 3, 255, 0, 128 },
             ByteICollection = new List<byte> { 10, 20, 30 },
             ByteIList = new List<byte> { 100, 200 },
