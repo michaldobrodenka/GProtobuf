@@ -14,7 +14,7 @@
   <ItemGroup>
     <ProjectReference Include="..\GProtobuf.Core\GProtobuf.Core.csproj" />
     <ProjectReference Include="..\Model\Model.csproj" />
-    <ProjectReference Include="..\Serializer\Serializer.csproj" />
+    <ProjectReference Include="..\GProtobuf.Generator\GProtobuf.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
 </Project>

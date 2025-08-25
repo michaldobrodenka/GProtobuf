@@ -759,12 +759,6 @@ class ObjectTree
             sb.AppendNewLine();
         }
 
-        // Add Guid helper method for StreamWriters
-        sb.AppendNewLine();
-        sb.AppendIndentedLine("public static void WriteGuid(global::GProtobuf.Core.StreamWriter writer, Guid value)");
-        sb.StartNewBlock();
-        sb.AppendIndentedLine("writer.WriteGuid(value);");
-        sb.EndBlock();
 
         sb.EndBlock();
 
@@ -941,12 +935,6 @@ class ObjectTree
             sb.AppendNewLine();
         }
 
-        // Add Guid helper method for SizeCalculators
-        sb.AppendNewLine();
-        sb.AppendIndentedLine("public static void CalculateGuidSize(ref global::GProtobuf.Core.WriteSizeCalculator calculator, Guid value)");
-        sb.StartNewBlock();
-        sb.AppendIndentedLine("calculator.WriteGuid(value);");
-        sb.EndBlock();
 
         sb.EndBlock();
         sb.EndBlock(); // Close namespace
