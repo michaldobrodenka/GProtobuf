@@ -70,6 +70,14 @@ class ObjectTree
         sb.AppendIndentedLine($"// Tag for field {fieldId}, {wireType}");
         sb.AppendIndentedLine($"calculator.AddByteLength({tagLen}); // Precomputed tag bytes: {tagBytes}");
     }
+    
+    // Helper to generate optimized tag calculation for named size calculator (e.g., entryCalculator)
+    private static void WritePrecomputedTagForCalculatorWithName(StringBuilderWithIndent sb, string calculatorName, int fieldId, WireType wireType)
+    {
+        var (tagBytes, tagLen) = PrecomputeTagBytes(fieldId, wireType);
+        sb.AppendIndentedLine($"// Tag for field {fieldId}, {wireType}");
+        sb.AppendIndentedLine($"{calculatorName}.AddByteLength({tagLen}); // Precomputed tag bytes: {tagBytes}");
+    }
 
     private TypeDefinition FindTypeByFullName(string fullName)
     {
@@ -801,7 +809,7 @@ class ObjectTree
                     {
                         sb.AppendNewLine();
                         // Calculate tag 5 (B wrapper) size
-                        sb.AppendIndentedLine($"calculator.WriteTag({protoIncludeAtoB.FieldId}, WireType.Len);");
+                        WritePrecomputedTagForCalculator(sb, protoIncludeAtoB.FieldId, WireType.Len);
                         
                         // Calculate B wrapper content inline (Tag10 + C size + C content + B content)
                         sb.AppendIndentedLine($"var tempCalc{protoIncludeAtoB.FieldId} = new global::GProtobuf.Core.WriteSizeCalculator();");
@@ -837,7 +845,7 @@ class ObjectTree
                     if (protoInclude != null)
                     {
                         sb.AppendNewLine();
-                        sb.AppendIndentedLine($"calculator.WriteTag({protoInclude.FieldId}, WireType.Len);");
+                        WritePrecomputedTagForCalculator(sb, protoInclude.FieldId, WireType.Len);
                         // Check if this type has its own fields
                         if (obj.ProtoMembers != null && obj.ProtoMembers.Count > 0)
                         {
@@ -883,7 +891,7 @@ class ObjectTree
                         var className = GetClassNameFromFullName(include.Type);
                         sb.AppendIndentedLine($"case global::{include.Type} obj1:");
                         sb.IncreaseIndent();
-                        sb.AppendIndentedLine($"calculator.WriteTag({include.FieldId}, WireType.Len);");
+                        WritePrecomputedTagForCalculator(sb, include.FieldId, WireType.Len);
                         sb.AppendIndentedLine($"var lengthBefore{include.FieldId} = calculator.Length;");
                         sb.AppendIndentedLine($"Calculate{className}Size(ref calculator, obj1);");
                         sb.AppendIndentedLine($"var contentLength{include.FieldId} = calculator.Length - lengthBefore{include.FieldId};");
@@ -2371,16 +2379,18 @@ class ObjectTree
                 {
                     sb.AppendIndentedLine($"if (obj.{protoMember.Name}.HasValue)");
                     sb.StartNewBlock();
-                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
                     switch (protoMember.DataFormat)
                     {
                         case DataFormat.FixedSize:
+                            WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.Fixed32b);
                             sb.AppendIndentedLine($"calculator.WriteFixedSizeInt32(obj.{protoMember.Name}.Value);");
                             break;
                         case DataFormat.ZigZag:
+                            WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.VarInt);
                             sb.AppendIndentedLine($"calculator.WriteZigZag32(obj.{protoMember.Name}.Value);");
                             break;
                         default:
+                            WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.VarInt);
                             sb.AppendIndentedLine($"calculator.WriteVarint32(obj.{protoMember.Name}.Value);");
                             break;
                     }
@@ -2390,16 +2400,18 @@ class ObjectTree
                 {
                     sb.AppendIndentedLine($"if (obj.{protoMember.Name} != 0)");
                     sb.StartNewBlock();
-                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
                     switch (protoMember.DataFormat)
                     {
                         case DataFormat.FixedSize:
+                            WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.Fixed32b);
                             sb.AppendIndentedLine($"calculator.WriteFixedSizeInt32(obj.{protoMember.Name});");
                             break;
                         case DataFormat.ZigZag:
+                            WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.VarInt);
                             sb.AppendIndentedLine($"calculator.WriteZigZag32(obj.{protoMember.Name});");
                             break;
                         default:
+                            WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.VarInt);
                             sb.AppendIndentedLine($"calculator.WriteVarint32(obj.{protoMember.Name});");
                             break;
                     }
@@ -2414,13 +2426,13 @@ class ObjectTree
                 {
                     sb.AppendIndentedLine($"if (obj.{protoMember.Name}.HasValue)");
                     sb.StartNewBlock();
-                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.VarInt);
                     sb.AppendIndentedLine($"calculator.WriteBool(obj.{protoMember.Name}.Value);");
                     sb.EndBlock();
                 }
                 else
                 {
-                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.VarInt);
                     sb.AppendIndentedLine($"calculator.WriteBool(obj.{protoMember.Name});");
                 }
                 break;
@@ -2432,7 +2444,7 @@ class ObjectTree
                 {
                     sb.AppendIndentedLine($"if (obj.{protoMember.Name}.HasValue)");
                     sb.StartNewBlock();
-                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.VarInt);
                     sb.AppendIndentedLine($"calculator.WriteByte(obj.{protoMember.Name}.Value);");
                     sb.EndBlock();
                 }
@@ -2440,7 +2452,7 @@ class ObjectTree
                 {
                     sb.AppendIndentedLine($"if (obj.{protoMember.Name} != 0)");
                     sb.StartNewBlock();
-                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.VarInt);
                     sb.AppendIndentedLine($"calculator.WriteByte(obj.{protoMember.Name});");
                     sb.EndBlock();
                 }
@@ -2453,7 +2465,7 @@ class ObjectTree
                 {
                     sb.AppendIndentedLine($"if (obj.{protoMember.Name}.HasValue)");
                     sb.StartNewBlock();
-                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.VarInt);
                     switch (protoMember.DataFormat)
                     {
                         case DataFormat.ZigZag:
@@ -2469,7 +2481,7 @@ class ObjectTree
                 {
                     sb.AppendIndentedLine($"if (obj.{protoMember.Name} != 0)");
                     sb.StartNewBlock();
-                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.VarInt);
                     switch (protoMember.DataFormat)
                     {
                         case DataFormat.ZigZag:
@@ -2490,7 +2502,7 @@ class ObjectTree
                 {
                     sb.AppendIndentedLine($"if (obj.{protoMember.Name}.HasValue)");
                     sb.StartNewBlock();
-                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.VarInt);
                     switch (protoMember.DataFormat)
                     {
                         case DataFormat.ZigZag:
@@ -2506,7 +2518,7 @@ class ObjectTree
                 {
                     sb.AppendIndentedLine($"if (obj.{protoMember.Name} != 0)");
                     sb.StartNewBlock();
-                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.VarInt);
                     switch (protoMember.DataFormat)
                     {
                         case DataFormat.ZigZag:
@@ -2527,7 +2539,7 @@ class ObjectTree
                 {
                     sb.AppendIndentedLine($"if (obj.{protoMember.Name}.HasValue)");
                     sb.StartNewBlock();
-                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.VarInt);
                     sb.AppendIndentedLine($"calculator.WriteUInt16(obj.{protoMember.Name}.Value);");
                     sb.EndBlock();
                 }
@@ -2535,7 +2547,7 @@ class ObjectTree
                 {
                     sb.AppendIndentedLine($"if (obj.{protoMember.Name} != 0)");
                     sb.StartNewBlock();
-                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.VarInt);
                     sb.AppendIndentedLine($"calculator.WriteUInt16(obj.{protoMember.Name});");
                     sb.EndBlock();
                 }
@@ -2548,7 +2560,7 @@ class ObjectTree
                 {
                     sb.AppendIndentedLine($"if (obj.{protoMember.Name}.HasValue)");
                     sb.StartNewBlock();
-                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.VarInt);
                     sb.AppendIndentedLine($"calculator.WriteUInt32(obj.{protoMember.Name}.Value);");
                     sb.EndBlock();
                 }
@@ -2556,7 +2568,7 @@ class ObjectTree
                 {
                     sb.AppendIndentedLine($"if (obj.{protoMember.Name} != 0)");
                     sb.StartNewBlock();
-                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.VarInt);
                     sb.AppendIndentedLine($"calculator.WriteUInt32(obj.{protoMember.Name});");
                     sb.EndBlock();
                 }
@@ -2569,7 +2581,7 @@ class ObjectTree
                 {
                     sb.AppendIndentedLine($"if (obj.{protoMember.Name}.HasValue)");
                     sb.StartNewBlock();
-                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.VarInt);
                     switch (protoMember.DataFormat)
                     {
                         case DataFormat.ZigZag:
@@ -2585,7 +2597,7 @@ class ObjectTree
                 {
                     sb.AppendIndentedLine($"if (obj.{protoMember.Name} != 0)");
                     sb.StartNewBlock();
-                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.VarInt);
                     switch (protoMember.DataFormat)
                     {
                         case DataFormat.ZigZag:
@@ -2606,7 +2618,7 @@ class ObjectTree
                 {
                     sb.AppendIndentedLine($"if (obj.{protoMember.Name}.HasValue)");
                     sb.StartNewBlock();
-                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.VarInt);
                     sb.AppendIndentedLine($"calculator.WriteUInt64(obj.{protoMember.Name}.Value);");
                     sb.EndBlock();
                 }
@@ -2614,7 +2626,7 @@ class ObjectTree
                 {
                     sb.AppendIndentedLine($"if (obj.{protoMember.Name} != 0)");
                     sb.StartNewBlock();
-                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.VarInt);");
+                    WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.VarInt);
                     sb.AppendIndentedLine($"calculator.WriteUInt64(obj.{protoMember.Name});");
                     sb.EndBlock();
                 }
@@ -2626,13 +2638,13 @@ class ObjectTree
                 {
                     sb.AppendIndentedLine($"if (obj.{protoMember.Name}.HasValue)");
                     sb.StartNewBlock();
-                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Fixed64b);");
+                    WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.Fixed64b);
                     sb.AppendIndentedLine($"calculator.WriteDouble(obj.{protoMember.Name}.Value);");
                     sb.EndBlock();
                 }
                 else
                 {
-                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Fixed64b);");
+                    WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.Fixed64b);
                     sb.AppendIndentedLine($"calculator.WriteDouble(obj.{protoMember.Name});");
                 }
                 break;
@@ -2644,13 +2656,13 @@ class ObjectTree
                 {
                     sb.AppendIndentedLine($"if (obj.{protoMember.Name}.HasValue)");
                     sb.StartNewBlock();
-                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Fixed32b);");
+                    WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.Fixed32b);
                     sb.AppendIndentedLine($"calculator.WriteFloat(obj.{protoMember.Name}.Value);");
                     sb.EndBlock();
                 }
                 else
                 {
-                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Fixed32b);");
+                    WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.Fixed32b);
                     sb.AppendIndentedLine($"calculator.WriteFloat(obj.{protoMember.Name});");
                 }
                 break;
@@ -2660,7 +2672,7 @@ class ObjectTree
             case "string":
                 sb.AppendIndentedLine($"if (obj.{protoMember.Name} != null)");
                 sb.StartNewBlock();
-                sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+                WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.Len);
                 sb.AppendIndentedLine($"calculator.WriteString(obj.{protoMember.Name});");
                 sb.EndBlock();
                 break;
@@ -2671,13 +2683,13 @@ class ObjectTree
                 {
                     sb.AppendIndentedLine($"if (obj.{protoMember.Name}.HasValue)");
                     sb.StartNewBlock();
-                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+                    WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.Len);
                     sb.AppendIndentedLine($"calculator.WriteVarUInt32(18u); // BCL Guid: 2*(tag+fixed64) = 2*(1+8) = 18 bytes");
                     sb.AppendIndentedLine($"// Field 1: low (tag + fixed64)");
-                    sb.AppendIndentedLine($"calculator.WriteTag(1, WireType.Fixed64b);");
+                    WritePrecomputedTagForCalculator(sb, 1, WireType.Fixed64b);
                     sb.AppendIndentedLine($"calculator.WriteFixed64(0ul); // placeholder");
                     sb.AppendIndentedLine($"// Field 2: high (tag + fixed64)");
-                    sb.AppendIndentedLine($"calculator.WriteTag(2, WireType.Fixed64b);");
+                    WritePrecomputedTagForCalculator(sb, 2, WireType.Fixed64b);
                     sb.AppendIndentedLine($"calculator.WriteFixed64(0ul); // placeholder");
                     sb.EndBlock();
                 }
@@ -2685,13 +2697,13 @@ class ObjectTree
                 {
                     sb.AppendIndentedLine($"if (obj.{protoMember.Name} != Guid.Empty)");
                     sb.StartNewBlock();
-                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+                    WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.Len);
                     sb.AppendIndentedLine($"calculator.WriteVarUInt32(18u); // BCL Guid: 2*(tag+fixed64) = 2*(1+8) = 18 bytes");
                     sb.AppendIndentedLine($"// Field 1: low (tag + fixed64)");
-                    sb.AppendIndentedLine($"calculator.WriteTag(1, WireType.Fixed64b);");
+                    WritePrecomputedTagForCalculator(sb, 1, WireType.Fixed64b);
                     sb.AppendIndentedLine($"calculator.WriteFixed64(0ul); // placeholder");
                     sb.AppendIndentedLine($"// Field 2: high (tag + fixed64)");
-                    sb.AppendIndentedLine($"calculator.WriteTag(2, WireType.Fixed64b);");
+                    WritePrecomputedTagForCalculator(sb, 2, WireType.Fixed64b);
                     sb.AppendIndentedLine($"calculator.WriteFixed64(0ul); // placeholder");
                     sb.EndBlock();
                 }
@@ -2702,7 +2714,7 @@ class ObjectTree
             case "System.Byte[]":
                 sb.AppendIndentedLine($"if (obj.{protoMember.Name} != null)");
                 sb.StartNewBlock();
-                sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+                WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.Len);
                 sb.AppendIndentedLine($"calculator.WriteBytes(obj.{protoMember.Name});");
                 sb.EndBlock();
                 break;
@@ -2714,7 +2726,7 @@ class ObjectTree
                 sb.StartNewBlock();
                 if (protoMember.IsPacked)
                 {
-                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+                    WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.Len);
                     switch (protoMember.DataFormat)
                     {
                         case DataFormat.FixedSize:
@@ -2757,7 +2769,7 @@ class ObjectTree
                 sb.StartNewBlock();
                 if (protoMember.IsPacked)
                 {
-                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+                    WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.Len);
                     sb.AppendIndentedLine($"calculator.WriteVarUInt32((uint)(obj.{protoMember.Name}.Length * 4));");
                     sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteFloat(v); }}");
                 }
@@ -2776,7 +2788,7 @@ class ObjectTree
                 sb.StartNewBlock();
                 if (protoMember.IsPacked)
                 {
-                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+                    WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.Len);
                     sb.AppendIndentedLine($"calculator.WriteVarUInt32((uint)(obj.{protoMember.Name}.Length * 8));");
                     sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteDouble(v); }}");
                 }
@@ -2795,7 +2807,7 @@ class ObjectTree
                 sb.StartNewBlock();
                 if (protoMember.IsPacked)
                 {
-                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+                    WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.Len);
                     switch (protoMember.DataFormat)
                     {
                         case DataFormat.FixedSize:
@@ -2838,7 +2850,7 @@ class ObjectTree
                 sb.StartNewBlock();
                 if (protoMember.IsPacked)
                 {
-                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+                    WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.Len);
                     sb.AppendIndentedLine($"calculator.WritePackedBoolArray(obj.{protoMember.Name});");
                 }
                 else
@@ -2856,7 +2868,7 @@ class ObjectTree
                 sb.StartNewBlock();
                 if (protoMember.IsPacked)
                 {
-                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+                    WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.Len);
                     if (protoMember.DataFormat == DataFormat.ZigZag)
                     {
                         sb.AppendIndentedLine($"calculator.WritePackedZigZagSByteArray(obj.{protoMember.Name});");
@@ -2882,7 +2894,7 @@ class ObjectTree
                 sb.StartNewBlock();
                 if (protoMember.IsPacked)
                 {
-                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+                    WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.Len);
                     switch (protoMember.DataFormat)
                     {
                         case DataFormat.FixedSize:
@@ -2925,7 +2937,7 @@ class ObjectTree
                 sb.StartNewBlock();
                 if (protoMember.IsPacked)
                 {
-                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+                    WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.Len);
                     if (protoMember.DataFormat == DataFormat.FixedSize)
                     {
                         sb.AppendIndentedLine($"calculator.WriteVarUInt32((uint)(obj.{protoMember.Name}.Length * 4)); // 4 bytes per ushort (fixed32)");
@@ -2959,7 +2971,7 @@ class ObjectTree
                 sb.StartNewBlock();
                 if (protoMember.IsPacked)
                 {
-                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+                    WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.Len);
                     if (protoMember.DataFormat == DataFormat.FixedSize)
                     {
                         sb.AppendIndentedLine($"calculator.WriteVarUInt32((uint)(obj.{protoMember.Name}.Length * 4)); // 4 bytes per uint");
@@ -2993,7 +3005,7 @@ class ObjectTree
                 sb.StartNewBlock();
                 if (protoMember.IsPacked)
                 {
-                    sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+                    WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.Len);
                     if (protoMember.DataFormat == DataFormat.FixedSize)
                     {
                         sb.AppendIndentedLine($"calculator.WriteVarUInt32((uint)(obj.{protoMember.Name}.Length * 8)); // 8 bytes per ulong");
@@ -3023,7 +3035,7 @@ class ObjectTree
             default:
                 sb.AppendIndentedLine($"if (obj.{protoMember.Name} != null)");
                 sb.StartNewBlock();
-                sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+                WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.Len);
                 sb.AppendIndentedLine($"var lengthBefore{protoMember.FieldId} = calculator.Length;");
                 sb.AppendIndentedLine($"SizeCalculators.Calculate{GetClassNameFromFullName(protoMember.Type)}Size(ref calculator, obj.{protoMember.Name});");
                 sb.AppendIndentedLine($"var contentLength{protoMember.FieldId} = calculator.Length - lengthBefore{protoMember.FieldId};");
@@ -3405,6 +3417,40 @@ class ObjectTree
     }
     
     /// <summary>
+    /// Check if collection type should use for instead of foreach for better performance
+    /// </summary>
+    private static bool ShouldUseForLoop(ProtoMemberAttribute protoMember)
+    {
+        var collectionType = protoMember.Type;
+        return collectionType.StartsWith("System.Collections.Generic.List<") ||
+               collectionType.StartsWith("List<") ||
+               collectionType.EndsWith("[]");
+    }
+    
+    /// <summary>
+    /// Writes optimized loop (for vs foreach) based on collection type
+    /// </summary>
+    private static void WriteOptimizedLoop(StringBuilderWithIndent sb, ProtoMemberAttribute protoMember, string objectName, System.Action<StringBuilderWithIndent> writeLoopBody)
+    {
+        if (ShouldUseForLoop(protoMember))
+        {
+            string lengthProperty = protoMember.Type.EndsWith("[]") ? "Length" : "Count";
+            sb.AppendIndentedLine($"for (int i = 0; i < {objectName}.{protoMember.Name}.{lengthProperty}; i++)");
+            sb.StartNewBlock();
+            sb.AppendIndentedLine($"var item = {objectName}.{protoMember.Name}[i];");
+            writeLoopBody(sb);
+            sb.EndBlock();
+        }
+        else
+        {
+            sb.AppendIndentedLine($"foreach (var item in {objectName}.{protoMember.Name})");
+            sb.StartNewBlock();
+            writeLoopBody(sb);
+            sb.EndBlock();
+        }
+    }
+
+    /// <summary>
     /// Writes the serialization logic for array types (string[], Message[], etc.)
     /// </summary>
     private static void WriteArrayProtoMemberSerializer(StringBuilderWithIndent sb, ProtoMemberAttribute protoMember, string objectName)
@@ -3419,19 +3465,18 @@ class ObjectTree
         if (elementTypeName == "string" || elementTypeName == "System.String")
         {
             // String arrays - each string gets its own tag + length + content
-            sb.AppendIndentedLine($"foreach (var item in {objectName}.{protoMember.Name})");
-            sb.StartNewBlock();
-            sb.AppendIndentedLine($"if (item != null)");
-            sb.StartNewBlock();
-            WritePrecomputedTag(sb, protoMember.FieldId, WireType.Len);
-            sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)System.Text.Encoding.UTF8.GetByteCount(item));");
-            sb.AppendIndentedLine($"writer.WriteString(item);");
-            sb.EndBlock();
-            sb.AppendIndentedLine($"else");
-            sb.StartNewBlock();
-            sb.AppendIndentedLine($"throw new System.InvalidOperationException(\"An element of type string was null; this might be as contents in a list/array\");");
-            sb.EndBlock();
-            sb.EndBlock();
+            WriteOptimizedLoop(sb, protoMember, objectName, (loopSb) => {
+                loopSb.AppendIndentedLine($"if (item != null)");
+                loopSb.StartNewBlock();
+                WritePrecomputedTag(loopSb, protoMember.FieldId, WireType.Len);
+                loopSb.AppendIndentedLine($"writer.WriteVarUInt32((uint)System.Text.Encoding.UTF8.GetByteCount(item));");
+                loopSb.AppendIndentedLine($"writer.WriteString(item);");
+                loopSb.EndBlock();
+                loopSb.AppendIndentedLine($"else");
+                loopSb.StartNewBlock();
+                loopSb.AppendIndentedLine($"throw new System.InvalidOperationException(\"An element of type string was null; this might be as contents in a list/array\");");
+                loopSb.EndBlock();
+            });
         }
         else if (IsPrimitiveArrayType(elementTypeName))
         {
@@ -3441,21 +3486,20 @@ class ObjectTree
         else
         {
             // Custom message types - each message gets its own tag + length + serialized content
-            sb.AppendIndentedLine($"foreach (var item in {objectName}.{protoMember.Name})");
-            sb.StartNewBlock();
-            sb.AppendIndentedLine($"if (item != null)");
-            sb.StartNewBlock();
-            sb.AppendIndentedLine($"var calculator = new global::GProtobuf.Core.WriteSizeCalculator();");
-            sb.AppendIndentedLine($"SizeCalculators.Calculate{GetClassNameFromFullName(elementType)}Size(ref calculator, item);");
-            WritePrecomputedTag(sb, protoMember.FieldId, WireType.Len);
-            sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)calculator.Length);");
-            sb.AppendIndentedLine($"StreamWriters.Write{GetClassNameFromFullName(elementType)}(ref writer, item);");
-            sb.EndBlock();
-            sb.AppendIndentedLine($"else");
-            sb.StartNewBlock();
-            sb.AppendIndentedLine($"throw new System.InvalidOperationException(\"An element of type {GetClassNameFromFullName(elementType)} was null; this might be as contents in a list/array\");");
-            sb.EndBlock();
-            sb.EndBlock();
+            WriteOptimizedLoop(sb, protoMember, objectName, (loopSb) => {
+                loopSb.AppendIndentedLine($"if (item != null)");
+                loopSb.StartNewBlock();
+                loopSb.AppendIndentedLine($"var calculator = new global::GProtobuf.Core.WriteSizeCalculator();");
+                loopSb.AppendIndentedLine($"SizeCalculators.Calculate{GetClassNameFromFullName(elementType)}Size(ref calculator, item);");
+                WritePrecomputedTag(loopSb, protoMember.FieldId, WireType.Len);
+                loopSb.AppendIndentedLine($"writer.WriteVarUInt32((uint)calculator.Length);");
+                loopSb.AppendIndentedLine($"StreamWriters.Write{GetClassNameFromFullName(elementType)}(ref writer, item);");
+                loopSb.EndBlock();
+                loopSb.AppendIndentedLine($"else");
+                loopSb.StartNewBlock();
+                loopSb.AppendIndentedLine($"throw new System.InvalidOperationException(\"An element of type {GetClassNameFromFullName(elementType)} was null; this might be as contents in a list/array\");");
+                loopSb.EndBlock();
+            });
         }
         
         sb.EndBlock();
@@ -3476,18 +3520,17 @@ class ObjectTree
         if (elementTypeName == "string" || elementTypeName == "System.String")
         {
             // String arrays - each string gets tag + length + content
-            sb.AppendIndentedLine($"foreach (var item in obj.{protoMember.Name})");
-            sb.StartNewBlock();
-            sb.AppendIndentedLine($"if (item != null)");
-            sb.StartNewBlock();
-            sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
-            sb.AppendIndentedLine($"calculator.WriteString(item);");
-            sb.EndBlock();
-            sb.AppendIndentedLine($"else");
-            sb.StartNewBlock();
-            sb.AppendIndentedLine($"throw new System.InvalidOperationException(\"An element of type string was null; this might be as contents in a list/array\");");
-            sb.EndBlock();
-            sb.EndBlock();
+            WriteOptimizedLoop(sb, protoMember, "obj", (loopSb) => {
+                loopSb.AppendIndentedLine($"if (item != null)");
+                loopSb.StartNewBlock();
+                WritePrecomputedTagForCalculator(loopSb, protoMember.FieldId, WireType.Len);
+                loopSb.AppendIndentedLine($"calculator.WriteString(item);");
+                loopSb.EndBlock();
+                loopSb.AppendIndentedLine($"else");
+                loopSb.StartNewBlock();
+                loopSb.AppendIndentedLine($"throw new System.InvalidOperationException(\"An element of type string was null; this might be as contents in a list/array\");");
+                loopSb.EndBlock();
+            });
         }
         else if (IsPrimitiveArrayType(elementTypeName))
         {
@@ -3497,21 +3540,20 @@ class ObjectTree
         else
         {
             // Custom message types - each message gets tag + length + content
-            sb.AppendIndentedLine($"foreach (var item in obj.{protoMember.Name})");
-            sb.StartNewBlock();
-            sb.AppendIndentedLine($"if (item != null)");
-            sb.StartNewBlock();
-            sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
-            sb.AppendIndentedLine($"var itemCalculator = new global::GProtobuf.Core.WriteSizeCalculator();");
-            sb.AppendIndentedLine($"SizeCalculators.Calculate{GetClassNameFromFullName(elementType)}Size(ref itemCalculator, item);");
-            sb.AppendIndentedLine($"calculator.WriteVarUInt32((uint)itemCalculator.Length);");
-            sb.AppendIndentedLine($"calculator.AddByteLength(itemCalculator.Length);");
-            sb.EndBlock();
-            sb.AppendIndentedLine($"else");
-            sb.StartNewBlock();
-            sb.AppendIndentedLine($"throw new System.InvalidOperationException(\"An element of type {GetClassNameFromFullName(elementType)} was null; this might be as contents in a list/array\");");
-            sb.EndBlock();
-            sb.EndBlock();
+            WriteOptimizedLoop(sb, protoMember, "obj", (loopSb) => {
+                loopSb.AppendIndentedLine($"if (item != null)");
+                loopSb.StartNewBlock();
+                WritePrecomputedTagForCalculator(loopSb, protoMember.FieldId, WireType.Len);
+                loopSb.AppendIndentedLine($"var itemCalculator = new global::GProtobuf.Core.WriteSizeCalculator();");
+                loopSb.AppendIndentedLine($"SizeCalculators.Calculate{GetClassNameFromFullName(elementType)}Size(ref itemCalculator, item);");
+                loopSb.AppendIndentedLine($"calculator.WriteVarUInt32((uint)itemCalculator.Length);");
+                loopSb.AppendIndentedLine($"calculator.AddByteLength(itemCalculator.Length);");
+                loopSb.EndBlock();
+                loopSb.AppendIndentedLine($"else");
+                loopSb.StartNewBlock();
+                loopSb.AppendIndentedLine($"throw new System.InvalidOperationException(\"An element of type {GetClassNameFromFullName(elementType)} was null; this might be as contents in a list/array\");");
+                loopSb.EndBlock();
+            });
         }
         
         sb.EndBlock();
@@ -3534,15 +3576,33 @@ class ObjectTree
         sb.StartNewBlock();
         
         // Calculate size for the map entry message (tag + length + entry content)
-        sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+        WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.Len);
         sb.AppendIndentedLine($"var entryCalculator = new global::GProtobuf.Core.WriteSizeCalculator();");
         
         // Calculate key size (field 1)
-        sb.AppendIndentedLine($"entryCalculator.WriteTag(1, {GetWireTypeForMapField(keyType)});");
+        var keyWireTypeStr = GetWireTypeForMapField(keyType);
+        var keyWireType = keyWireTypeStr switch
+        {
+            "WireType.VarInt" => WireType.VarInt,
+            "WireType.Fixed32b" => WireType.Fixed32b,
+            "WireType.Fixed64b" => WireType.Fixed64b,
+            "WireType.Len" => WireType.Len,
+            _ => WireType.VarInt
+        };
+        WritePrecomputedTagForCalculatorWithName(sb, "entryCalculator", 1, keyWireType);
         WriteMapFieldSizeCalculation(sb, "entry.Key", keyType, "entryCalculator");
         
         // Calculate value size (field 2)
-        sb.AppendIndentedLine($"entryCalculator.WriteTag(2, {GetWireTypeForMapField(valueType)});");
+        var valueWireTypeStr = GetWireTypeForMapField(valueType);
+        var valueWireType = valueWireTypeStr switch
+        {
+            "WireType.VarInt" => WireType.VarInt,
+            "WireType.Fixed32b" => WireType.Fixed32b,
+            "WireType.Fixed64b" => WireType.Fixed64b,
+            "WireType.Len" => WireType.Len,
+            _ => WireType.VarInt
+        };
+        WritePrecomputedTagForCalculatorWithName(sb, "entryCalculator", 2, valueWireType);
         WriteMapFieldSizeCalculation(sb, "entry.Value", valueType, "entryCalculator");
         
         // Write entry length and add to total size
@@ -4363,7 +4423,7 @@ class ObjectTree
     {
         sb.AppendIndentedLine($"if (obj.{protoMember.Name} != null)");
         sb.StartNewBlock();
-        sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+        WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.Len);
         
         if (protoMember.CollectionKind == Core.CollectionKind.Array)
         {
@@ -4396,13 +4456,12 @@ class ObjectTree
         if (protoMember.IsPacked)
         {
             // Packed size calculation - iterate directly over collection
-            sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, WireType.Len);");
+            WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.Len);
             sb.AppendIndentedLine($"var tempCalculator = new global::GProtobuf.Core.WriteSizeCalculator();");
             var elementSizeMethod = GetPrimitiveElementSizeMethod(elementTypeName, protoMember.DataFormat);
-            sb.AppendIndentedLine($"foreach(var item in obj.{protoMember.Name})");
-            sb.StartNewBlock();
-            sb.AppendIndentedLine($"{elementSizeMethod.Replace("calculator.", "tempCalculator.")};");
-            sb.EndBlock();
+            WriteOptimizedLoop(sb, protoMember, "obj", (loopSb) => {
+                loopSb.AppendIndentedLine($"{elementSizeMethod.Replace("calculator.", "tempCalculator.")};");
+            });
             sb.AppendIndentedLine($"calculator.WriteVarUInt32((uint)tempCalculator.Length);");
             sb.AppendIndentedLine($"calculator.AddByteLength(tempCalculator.Length);");
         }
@@ -4410,11 +4469,19 @@ class ObjectTree
         {
             // Non-packed size calculation
             var elementSizeMethod = GetPrimitiveElementSizeMethod(elementTypeName, protoMember.DataFormat);
-            sb.AppendIndentedLine($"foreach(var item in obj.{protoMember.Name})");
-            sb.StartNewBlock();
-            sb.AppendIndentedLine($"calculator.WriteTag({protoMember.FieldId}, {GetWireTypeForElement(elementTypeName, protoMember.DataFormat)});");
-            sb.AppendIndentedLine($"{elementSizeMethod};");
-            sb.EndBlock();
+            WriteOptimizedLoop(sb, protoMember, "obj", (loopSb) => {
+                var wireTypeStr = GetWireTypeForElement(elementTypeName, protoMember.DataFormat);
+                var wireType = wireTypeStr switch
+                {
+                    "WireType.VarInt" => WireType.VarInt,
+                    "WireType.Fixed32b" => WireType.Fixed32b,
+                    "WireType.Fixed64b" => WireType.Fixed64b,
+                    "WireType.Len" => WireType.Len,
+                    _ => WireType.VarInt
+                };
+                WritePrecomputedTagForCalculator(loopSb, protoMember.FieldId, wireType);
+                loopSb.AppendIndentedLine($"{elementSizeMethod};");
+            });
         }
         
         sb.EndBlock();

@@ -15,12 +15,6 @@ namespace GProtobuf.Core
             Length = 0;
         }
 
-        public void WriteTag(int fieldId, WireType wireType)
-        {
-            int tag = (fieldId << 3) | (int)wireType;
-            WriteVarint32(tag);
-        }
-
         public void WriteVarint32(uint value)
         {
             WriteVarUInt32(value); // Delegate to optimized version
