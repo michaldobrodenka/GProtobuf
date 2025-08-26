@@ -4208,17 +4208,34 @@ class ObjectTree
         {
             // Packed serialization - iterate directly over collection
             WritePrecomputedTag(sb, protoMember.FieldId, WireType.Len);
-            sb.AppendIndentedLine($"var calculator = new global::GProtobuf.Core.WriteSizeCalculator();");
-            var elementWriteMethod = GetPrimitiveElementWriteMethod(elementTypeName, protoMember.DataFormat);
-            sb.AppendIndentedLine($"foreach(var item in {objectName}.{protoMember.Name})");
-            sb.StartNewBlock();
-            sb.AppendIndentedLine($"{elementWriteMethod.Replace("writer.", "calculator.")};"); // Calculate size first
-            sb.EndBlock();
-            sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)calculator.Length);");
-            sb.AppendIndentedLine($"foreach(var item in {objectName}.{protoMember.Name})");
-            sb.StartNewBlock();
-            sb.AppendIndentedLine($"{elementWriteMethod};"); // Write actual data
-            sb.EndBlock();
+            
+            // Optimize for fixed-size int32: length = 4 * count
+            if (elementTypeName == "int" && protoMember.DataFormat == DataFormat.FixedSize)
+            {
+                // Use appropriate count/length property and batch write method based on collection type
+                string countProperty = protoMember.CollectionKind == CollectionKind.Array ? "Length" : "Count";
+                string batchWriteMethod = protoMember.CollectionKind == CollectionKind.Array 
+                    ? "WritePackedFixedSizeIntArray" 
+                    : "WritePackedFixedSizeIntList";
+                    
+                sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)({objectName}.{protoMember.Name}.{countProperty} * 4));");
+                sb.AppendIndentedLine($"writer.{batchWriteMethod}({objectName}.{protoMember.Name});");
+            }
+            else
+            {
+                // General case: use calculator
+                sb.AppendIndentedLine($"var calculator = new global::GProtobuf.Core.WriteSizeCalculator();");
+                var elementWriteMethod = GetPrimitiveElementWriteMethod(elementTypeName, protoMember.DataFormat);
+                sb.AppendIndentedLine($"foreach(var item in {objectName}.{protoMember.Name})");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"{elementWriteMethod.Replace("writer.", "calculator.")};"); // Calculate size first
+                sb.EndBlock();
+                sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)calculator.Length);");
+                sb.AppendIndentedLine($"foreach(var item in {objectName}.{protoMember.Name})");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"{elementWriteMethod};"); // Write actual data
+                sb.EndBlock();
+            }
         }
         else
         {
@@ -4495,13 +4512,27 @@ class ObjectTree
         {
             // Packed size calculation - iterate directly over collection
             WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.Len);
-            sb.AppendIndentedLine($"var tempCalculator = new global::GProtobuf.Core.WriteSizeCalculator();");
-            var elementSizeMethod = GetPrimitiveElementSizeMethod(elementTypeName, protoMember.DataFormat);
-            WriteOptimizedLoop(sb, protoMember, "obj", (loopSb) => {
-                loopSb.AppendIndentedLine($"{elementSizeMethod.Replace("calculator.", "tempCalculator.")};");
-            });
-            sb.AppendIndentedLine($"calculator.WriteVarUInt32((uint)tempCalculator.Length);");
-            sb.AppendIndentedLine($"calculator.AddByteLength(tempCalculator.Length);");
+            
+            // Optimize for fixed-size int32: length = 4 * count
+            if (elementTypeName == "int" && protoMember.DataFormat == DataFormat.FixedSize)
+            {
+                // Use appropriate count/length property based on collection type
+                string countProperty = protoMember.CollectionKind == CollectionKind.Array ? "Length" : "Count";
+                sb.AppendIndentedLine($"var tempLength = obj.{protoMember.Name}.{countProperty} * 4;");
+                sb.AppendIndentedLine($"calculator.WriteVarUInt32((uint)tempLength);");
+                sb.AppendIndentedLine($"calculator.AddByteLength(tempLength);");
+            }
+            else
+            {
+                // General case: use temporary calculator
+                sb.AppendIndentedLine($"var tempCalculator = new global::GProtobuf.Core.WriteSizeCalculator();");
+                var elementSizeMethod = GetPrimitiveElementSizeMethod(elementTypeName, protoMember.DataFormat);
+                WriteOptimizedLoop(sb, protoMember, "obj", (loopSb) => {
+                    loopSb.AppendIndentedLine($"{elementSizeMethod.Replace("calculator.", "tempCalculator.")};");
+                });
+                sb.AppendIndentedLine($"calculator.WriteVarUInt32((uint)tempCalculator.Length);");
+                sb.AppendIndentedLine($"calculator.AddByteLength(tempCalculator.Length);");
+            }
         }
         else
         {

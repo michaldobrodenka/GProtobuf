@@ -165,9 +165,8 @@ namespace GProtobuf.Core
         public void WriteBytes(scoped ReadOnlySpan<byte> bytes)
         {
             EnsureSpace(bytes.Length);
-            var toCopy = Math.Min(bytes.Length, currentSpan.Length - currentPosition);
-            bytes.Slice(0, toCopy).CopyTo(currentSpan.Slice(currentPosition));
-            currentPosition += toCopy;
+            bytes.Slice(0, bytes.Length).CopyTo(currentSpan.Slice(currentPosition));
+            currentPosition += bytes.Length;
         }
 
         public void WriteBool(bool value)
@@ -287,24 +286,12 @@ namespace GProtobuf.Core
         // Packed array methods
         public void WritePackedFixedSizeIntArray(int[] array)
         {
-            if (array == null || array.Length == 0) return;
-            
-            WriteVarUInt32((uint)(array.Length * 4));
-            foreach (var item in array)
-            {
-                WriteFixed32((uint)item);
-            }
+            WriteBytes(MemoryMarshal.Cast<int, byte>(array.AsSpan()));
         }
 
         public void WritePackedFixedSizeIntList(List<int> list)
         {
-            if (list == null || list.Count == 0) return;
-            
-            WriteVarUInt32((uint)(list.Count * 4));
-            foreach (var item in list)
-            {
-                WriteFixed32((uint)item);
-            }
+            WriteBytes(MemoryMarshal.Cast<int, byte>(CollectionsMarshal.AsSpan(list)));
         }
 
         // Precomputed tag support
