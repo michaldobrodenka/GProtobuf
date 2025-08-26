@@ -1949,7 +1949,7 @@ class ObjectTree
                 sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != null)");
                 sb.StartNewBlock();
                 WritePrecomputedTag(sb, protoMember.FieldId, WireType.Len);
-                sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)Encoding.UTF8.GetByteCount({objectName}.{protoMember.Name}));");
+                //sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)Encoding.UTF8.GetByteCount({objectName}.{protoMember.Name}));");
                 sb.AppendIndentedLine($"writer.WriteString({objectName}.{protoMember.Name});");
                 sb.EndBlock();
                 break;
@@ -3493,7 +3493,7 @@ class ObjectTree
                 loopSb.AppendIndentedLine($"if (item != null)");
                 loopSb.StartNewBlock();
                 WritePrecomputedTag(loopSb, protoMember.FieldId, WireType.Len);
-                loopSb.AppendIndentedLine($"writer.WriteVarUInt32((uint)System.Text.Encoding.UTF8.GetByteCount(item));");
+                //loopSb.AppendIndentedLine($"writer.WriteVarUInt32((uint)System.Text.Encoding.UTF8.GetByteCount(item));");
                 loopSb.AppendIndentedLine($"writer.WriteString(item);");
                 loopSb.EndBlock();
                 loopSb.AppendIndentedLine($"else");
@@ -4082,7 +4082,7 @@ class ObjectTree
                 sb.AppendIndentedLine($"if ({keyAccess} != null)");
                 sb.StartNewBlock();
                 sb.AppendIndentedLine($"writer.WriteSingleByte(0x0A); // field 1, Len");
-                sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)System.Text.Encoding.UTF8.GetByteCount({keyAccess}));");
+                //sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)System.Text.Encoding.UTF8.GetByteCount({keyAccess}));");
                 sb.AppendIndentedLine($"writer.WriteString({keyAccess});");
                 sb.EndBlock();
                 break;
@@ -4129,7 +4129,7 @@ class ObjectTree
                 sb.AppendIndentedLine($"if ({valueAccess} != null)");
                 sb.StartNewBlock();
                 sb.AppendIndentedLine($"writer.WriteSingleByte(0x12); // field 2, Len");
-                sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)System.Text.Encoding.UTF8.GetByteCount({valueAccess}));");
+                //sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)System.Text.Encoding.UTF8.GetByteCount({valueAccess}));");
                 sb.AppendIndentedLine($"writer.WriteString({valueAccess});");
                 sb.EndBlock();
                 break;

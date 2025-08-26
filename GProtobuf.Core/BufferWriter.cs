@@ -15,7 +15,8 @@ namespace GProtobuf.Core
         private IBufferWriter<byte> writer;
         private Span<byte> currentSpan;
         private int currentPosition;
-        private const int MinBufferSize = 256;
+        private int lastAdvancePosition;
+        private const int MinBufferSize = 1024;
 
         public BufferWriter(IBufferWriter<byte> writer)
         {
@@ -29,11 +30,14 @@ namespace GProtobuf.Core
         {
             if (currentPosition + bytesNeeded > currentSpan.Length)
             {
-                Flush();
-                if (bytesNeeded > currentSpan.Length)
-                {
-                    currentSpan = writer.GetSpan(bytesNeeded);
-                }
+                this.writer.Advance(currentPosition- this.lastAdvancePosition);
+                //if (bytesNeeded > currentSpan.Length)
+                //{
+                currentSpan = writer.GetSpan(this.currentPosition + (bytesNeeded < MinBufferSize ? MinBufferSize : bytesNeeded));
+                //}
+
+                this.lastAdvancePosition = 0;
+                this.currentPosition = 0;
             }
         }
 
@@ -42,9 +46,9 @@ namespace GProtobuf.Core
         {
             if (currentPosition > 0)
             {
-                writer.Advance(currentPosition);
-                currentSpan = writer.GetSpan(MinBufferSize);
-                currentPosition = 0;
+                this.writer.Advance(currentPosition - this.lastAdvancePosition);
+                //currentSpan = writer.GetSpan(MinBufferSize);
+                //currentPosition = 0;
             }
         }
 
@@ -132,10 +136,10 @@ namespace GProtobuf.Core
         public void WriteString(string value)
         {
             if (value == null) return;
-            
+
             var byteCount = System.Text.Encoding.UTF8.GetByteCount(value);
             WriteVarUInt32((uint)byteCount);
-            
+
             EnsureSpace(byteCount);
             if (byteCount <= currentSpan.Length - currentPosition)
             {
@@ -144,26 +148,20 @@ namespace GProtobuf.Core
             }
             else
             {
-                // For large strings, flush and get a bigger buffer
-                Flush();
-                currentSpan = writer.GetSpan(byteCount);
-                var written = System.Text.Encoding.UTF8.GetBytes(value.AsSpan(), currentSpan);
+                //// For large strings, flush and get a bigger buffer
+                //Flush();
+                //currentSpan = writer.GetSpan(byteCount);
+                var written = System.Text.Encoding.UTF8.GetBytes(value.AsSpan(), currentSpan.Slice(currentPosition));
                 currentPosition += written;
             }
         }
 
         public void WriteBytes(scoped ReadOnlySpan<byte> bytes)
         {
-            WriteVarUInt32((uint)bytes.Length);
-            
-            while (bytes.Length > 0)
-            {
-                EnsureSpace(1);
-                var toCopy = Math.Min(bytes.Length, currentSpan.Length - currentPosition);
-                bytes.Slice(0, toCopy).CopyTo(currentSpan.Slice(currentPosition));
-                currentPosition += toCopy;
-                bytes = bytes.Slice(toCopy);
-            }
+            EnsureSpace(bytes.Length);
+            var toCopy = Math.Min(bytes.Length, currentSpan.Length - currentPosition);
+            bytes.Slice(0, toCopy).CopyTo(currentSpan.Slice(currentPosition));
+            currentPosition += toCopy;
         }
 
         public void WriteBool(bool value)

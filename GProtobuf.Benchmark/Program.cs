@@ -56,9 +56,11 @@ namespace GProtobuf.Benchmark
 
         private static void RunAllBenchmarks(IConfig config)
         {
-            var bench = new NestedMessagesBenchmark();
-            bench.Setup();
-            bench.GProtobuf_SerializeCustom();
+            //var bench = new NestedMessagesBenchmark();
+            //bench.Setup();
+            //bench.GProtobuf_Serialize_IBufferWriter();
+            //bench.GProtobuf_Serialize_Stream();
+            //bench.GProtobuf_SerializeCustom();
 
             Console.WriteLine("Running All Benchmarks...");
             Console.WriteLine();

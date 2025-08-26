@@ -201,7 +201,10 @@ namespace GProtobuf.Core
         public void WriteString(string value)
         {
             //var rentedBuffer = ArrayPool<byte>.Shared.Rent(Encoding.UTF8.GetMaxByteCount(value.Length));
-            var rentedBuffer = ArrayPool<byte>.Shared.Rent(value.Length*4);
+            //var rentedBuffer = ArrayPool<byte>.Shared.Rent(value.Length*4);
+            var byteCount = System.Text.Encoding.UTF8.GetByteCount(value);
+            WriteVarUInt32((uint)byteCount);
+            var rentedBuffer = ArrayPool<byte>.Shared.Rent(byteCount);
             try
             {
                 var tempBuffer = rentedBuffer.AsSpan();

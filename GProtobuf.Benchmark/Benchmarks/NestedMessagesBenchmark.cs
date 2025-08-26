@@ -46,15 +46,16 @@ namespace GProtobuf.Benchmark.Benchmarks
 
             _testModel = new NestedMessagesModel
             {
-                //StringField1 = "Test String 1",
-                //StringField2 = "Test String 2",
-                //StringField3 = "Test String 3",
-                //StringField4 = "Test String 4",
-                //StringField5 = "Test String 5",
+                //Value = -1,
+                StringField1 = "1",
+                StringField2 = "Test String 2",
+                StringField3 = "Test String 3",
+                StringField4 = "Test String 4",
+                StringField5 = "Test String 5",
                 Person = people[0],
-                //People = people,
+                People = people,
                 Address = addresses[0],
-                //Addresses = addresses,
+                Addresses = addresses,
                 Company = new CompanyModel
                 {
                     Name = "Tech Corp Inc.",
@@ -88,9 +89,13 @@ namespace GProtobuf.Benchmark.Benchmarks
         public void GProtobuf_Serialize_Stream()
         {
             _memoryStream.Position = 0;
-            //_memoryStream.SetLength(0);
+            _memoryStream.SetLength(0);
             Models.Serialization.Serializers.SerializeNestedMessagesModel((Stream)_memoryStream, _testModel);
+            //streamResult = _memoryStream.ToArray();
         }
+
+        //private byte[] streamResult;
+        //private byte[] bufferResult;
 
 
         [Benchmark]
@@ -102,6 +107,7 @@ namespace GProtobuf.Benchmark.Benchmarks
             arrayPoolBufferWriter.Clear();
             Models.Serialization.Serializers.SerializeNestedMessagesModel((IBufferWriter<byte>)arrayPoolBufferWriter, _testModel);
             var mem = arrayPoolBufferWriter.WrittenMemory;
+            //bufferResult = arrayPoolBufferWriter.WrittenSpan.ToArray();
         }
 
         [Benchmark]
