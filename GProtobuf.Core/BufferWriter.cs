@@ -3,6 +3,7 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace GProtobuf.Core
 {
@@ -135,24 +136,29 @@ namespace GProtobuf.Core
 
         public void WriteString(string value)
         {
-            if (value == null) return;
-
-            var byteCount = System.Text.Encoding.UTF8.GetByteCount(value);
-            WriteVarUInt32((uint)byteCount);
-
-            EnsureSpace(byteCount);
-            if (byteCount <= currentSpan.Length - currentPosition)
+            if (value.Length < 256)
             {
-                var written = System.Text.Encoding.UTF8.GetBytes(value.AsSpan(), currentSpan.Slice(currentPosition));
-                currentPosition += written;
+                Span<byte> tempBuffer = stackalloc byte[value.Length * 4];
+                int bytesWritten = Encoding.UTF8.GetBytes(value, tempBuffer);
+                WriteVarUInt32((uint)bytesWritten);
+                this.WriteBytes(tempBuffer);
+                //WriteToBuffer(tempBuffer.Slice(0, bytesWritten));
             }
             else
             {
-                //// For large strings, flush and get a bigger buffer
-                //Flush();
-                //currentSpan = writer.GetSpan(byteCount);
-                var written = System.Text.Encoding.UTF8.GetBytes(value.AsSpan(), currentSpan.Slice(currentPosition));
-                currentPosition += written;
+                var rentedBuffer = ArrayPool<byte>.Shared.Rent(value.Length * 4);
+                try
+                {
+                    var tempBuffer = rentedBuffer.AsSpan();
+                    int bytesWritten = Encoding.UTF8.GetBytes(value, tempBuffer);
+                    WriteVarUInt32((uint)bytesWritten);
+                    this.WriteBytes(tempBuffer.Slice(0, bytesWritten));
+                    //WriteToBuffer(tempBuffer.Slice(0, bytesWritten));
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(rentedBuffer);
+                }
             }
         }
 

@@ -13,15 +13,15 @@ namespace GProtobuf.Benchmark
         static void Main(string[] args)
         {
             var config = ManualConfig.Create(DefaultConfig.Instance);
-            
+
             // Add .NET 8.0 job with optimized settings
             config.AddJob(Job.Default
-                .WithRuntime(CoreRuntime.Core80)
-                .WithWarmupCount(3)
-                .WithIterationCount(5)
+                //.WithRuntime(CoreRuntime.Core80)
+                .WithWarmupCount(0)
+                .WithIterationCount(1));
                 //.WithGcServer(true)
-                .WithGcConcurrent(true)
-                .WithId(".NET 8.0"));
+                //.WithGcConcurrent(true);
+                //.WithId(".NET 8.0"));
 
             // Uncomment to run with InProcess toolchain (faster but less accurate)
             // config.AddJob(Job.Default.WithToolchain(InProcessEmitToolchain.Instance));
@@ -58,26 +58,27 @@ namespace GProtobuf.Benchmark
         {
             //var bench = new NestedMessagesBenchmark();
             //bench.Setup();
-            //bench.GProtobuf_Serialize_IBufferWriter();
+            ////bench.GProtobuf_Serialize_IBufferWriter();
+            //for (int i = 0; i < 10000000; i++) 
             //bench.GProtobuf_Serialize_Stream();
             //bench.GProtobuf_SerializeCustom();
 
-            Console.WriteLine("Running All Benchmarks...");
-            Console.WriteLine();
+            //Console.WriteLine("Running All Benchmarks...");
+            //Console.WriteLine();
 
             //Console.WriteLine("1. Primitive Types Benchmarks");
             //BenchmarkRunner.Run<PrimitiveTypesBenchmark>(config);
 
-            //Console.WriteLine();
-            //Console.WriteLine("2. Collections Benchmarks");
-            //BenchmarkRunner.Run<CollectionsBenchmark>(config);
-
-            //Console.WriteLine();
-            Console.WriteLine("3. Nested Messages Benchmarks");
-            BenchmarkRunner.Run<NestedMessagesBenchmark>(config);
-
             Console.WriteLine();
-            Console.WriteLine("All benchmarks completed!");
+            Console.WriteLine("2. Collections Benchmarks");
+            BenchmarkRunner.Run<CollectionsBenchmark>(config);
+
+            //////Console.WriteLine();
+            //Console.WriteLine("3. Nested Messages Benchmarks");
+            //BenchmarkRunner.Run<NestedMessagesBenchmark>(config);
+
+            //Console.WriteLine();
+            //Console.WriteLine("All benchmarks completed!");
         }
     }
 }

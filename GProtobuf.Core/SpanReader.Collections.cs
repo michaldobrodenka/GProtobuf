@@ -39,6 +39,34 @@ namespace GProtobuf.Core
             return result;
         }
 
+        public List<int> ReadPackedFixedSizeInt32List()
+        {
+            var length = ReadVarUInt32();
+
+            if (length == 0)
+                return null;
+
+            if (position + length > buffer.Length)
+                throw new InvalidOperationException("Buffer overrun");
+
+            if (length % 4 != 0)
+                throw new InvalidOperationException("Invalid packed fixed size array length.");
+
+            var slice = buffer.Slice(position, (int)length);
+            position += (int)length;
+
+            int count = (int)length / 4;
+            List<int> fixedSizeResult = new (count);
+            int p = 0;
+            for (int i = 0; i < count; i++)
+            {
+                fixedSizeResult[i] = BinaryPrimitives.ReadInt32LittleEndian(slice.Slice(p, 4));
+                p += 4;
+            }
+
+            return fixedSizeResult;
+        }
+
         public int[] ReadPackedFixedSizeInt32Array()
         {
             var length = ReadVarUInt32();

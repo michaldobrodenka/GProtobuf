@@ -4,8 +4,6 @@ VisualStudioVersion = 17.13.35731.43
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Example", "Example\Example.csproj", "{B566B2E1-16FB-447D-80E8-2D2E5BADA278}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Model", "Model\Model.csproj", "{6DBE696C-F8FA-4E6B-A262-1C87EEB1BBBC}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GProtobuf.Core", "GProtobuf.Core\GProtobuf.Core.csproj", "{34471AD5-B45C-4BDF-82B5-5FF09DA5AEF8}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Serializer", "Serializer\Serializer.csproj", "{93358587-39FD-4552-9799-903F62C28DB5}"
@@ -35,10 +33,6 @@ Global
 		{B566B2E1-16FB-447D-80E8-2D2E5BADA278}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{B566B2E1-16FB-447D-80E8-2D2E5BADA278}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{B566B2E1-16FB-447D-80E8-2D2E5BADA278}.Release|Any CPU.Build.0 = Release|Any CPU
-		{6DBE696C-F8FA-4E6B-A262-1C87EEB1BBBC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{6DBE696C-F8FA-4E6B-A262-1C87EEB1BBBC}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{6DBE696C-F8FA-4E6B-A262-1C87EEB1BBBC}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{6DBE696C-F8FA-4E6B-A262-1C87EEB1BBBC}.Release|Any CPU.Build.0 = Release|Any CPU
 		{34471AD5-B45C-4BDF-82B5-5FF09DA5AEF8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{34471AD5-B45C-4BDF-82B5-5FF09DA5AEF8}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{34471AD5-B45C-4BDF-82B5-5FF09DA5AEF8}.Release|Any CPU.ActiveCfg = Release|Any CPU

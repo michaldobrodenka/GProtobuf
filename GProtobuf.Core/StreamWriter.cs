@@ -200,20 +200,27 @@ namespace GProtobuf.Core
         // Write non null string value, for shorter strings we use stackalloc for performance
         public void WriteString(string value)
         {
-            //var rentedBuffer = ArrayPool<byte>.Shared.Rent(Encoding.UTF8.GetMaxByteCount(value.Length));
-            //var rentedBuffer = ArrayPool<byte>.Shared.Rent(value.Length*4);
-            var byteCount = System.Text.Encoding.UTF8.GetByteCount(value);
-            WriteVarUInt32((uint)byteCount);
-            var rentedBuffer = ArrayPool<byte>.Shared.Rent(byteCount);
-            try
+            if (value.Length < 256)
             {
-                var tempBuffer = rentedBuffer.AsSpan();
+                Span<byte> tempBuffer = stackalloc byte[value.Length * 4];
                 int bytesWritten = Encoding.UTF8.GetBytes(value, tempBuffer);
+                WriteVarUInt32((uint)bytesWritten);
                 WriteToBuffer(tempBuffer.Slice(0, bytesWritten));
             }
-            finally
+            else
             {
-                ArrayPool<byte>.Shared.Return(rentedBuffer);
+                var rentedBuffer = ArrayPool<byte>.Shared.Rent(value.Length * 4);
+                try
+                {
+                    var tempBuffer = rentedBuffer.AsSpan();
+                    int bytesWritten = Encoding.UTF8.GetBytes(value, tempBuffer);
+                    WriteVarUInt32((uint)bytesWritten);
+                    WriteToBuffer(tempBuffer.Slice(0, bytesWritten));
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(rentedBuffer);
+                }
             }
         }
 

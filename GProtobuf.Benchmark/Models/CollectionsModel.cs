@@ -33,7 +33,7 @@ namespace GProtobuf.Benchmark.Models
         [ProtoMember(9)]
         public string[] StringArray { get; set; }
 
-        [ProtoMember(10, DataFormat = DataFormat.FixedSize)]
+        [ProtoMember(10, DataFormat = DataFormat.FixedSize, IsPacked = true)]
         public List<int> PackedFixedIntList { get; set; }
 
         [ProtoMember(11, DataFormat = DataFormat.ZigZag)]
