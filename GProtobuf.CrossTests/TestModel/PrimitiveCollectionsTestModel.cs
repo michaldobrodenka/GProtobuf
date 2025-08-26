@@ -114,5 +114,9 @@ namespace GProtobuf.Tests.TestModel
 
         [ProtoMember(33, DataFormat = DataFormat.FixedSize)]
         public ICollection<ulong> FixedSizeULongICollection { get; set; }
+
+        // Test case for ReadPackedFixedSizeInt32List() optimization
+        [ProtoMember(34, IsPacked = true, DataFormat = DataFormat.FixedSize)]
+        public List<int> PackedFixedSizeIntList { get; set; }
     }
 }

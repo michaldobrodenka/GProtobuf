@@ -3774,36 +3774,50 @@ class ObjectTree
         
         if (protoMember.IsPacked)
         {
-            // Packed reading - use specialized array readers
-            var arrayReadMethod = GetPrimitiveArrayReadMethod(elementTypeName, protoMember.DataFormat, true);
-            sb.AppendIndentedLine($"var primitiveArray = {arrayReadMethod};");
-            
-            // Convert to appropriate collection type
-            switch (protoMember.CollectionKind)
+            // Check if we can use specialized List reader methods for common cases
+            bool canUseDirectListReader = (protoMember.CollectionKind == CollectionKind.ConcreteCollection && 
+                                          (protoMember.Type.StartsWith("List<") || 
+                                           protoMember.Type.StartsWith("System.Collections.Generic.List<") ||
+                                           protoMember.Type == "System.Collections.Generic.List`1")) ||
+                                          protoMember.CollectionKind == CollectionKind.InterfaceCollection;
+
+            if (canUseDirectListReader && elementTypeName == "int" && protoMember.DataFormat == DataFormat.FixedSize)
             {
-                case CollectionKind.Array:
-                    sb.AppendIndentedLine($"result.{protoMember.Name} = primitiveArray;");
-                    break;
-                case CollectionKind.InterfaceCollection:
-                    // ICollection<T>, IList<T>, IEnumerable<T> → assign List<T>
-                    sb.AppendIndentedLine($"result.{protoMember.Name} = new List<{elementType}>(primitiveArray);");
-                    break;
-                case CollectionKind.ConcreteCollection:
-                    var concreteType = protoMember.Type;
-                    if (concreteType.StartsWith("List<") || concreteType == "System.Collections.Generic.List`1")
-                    {
-                        // List<T> → assign List<T>
+                sb.AppendIndentedLine($"result.{protoMember.Name} = reader.ReadPackedFixedSizeInt32List();");
+            }
+            else
+            {
+                // Fallback to array-based approach
+                var arrayReadMethod = GetPrimitiveArrayReadMethod(elementTypeName, protoMember.DataFormat, true);
+                sb.AppendIndentedLine($"var primitiveArray = {arrayReadMethod};");
+                
+                // Convert to appropriate collection type
+                switch (protoMember.CollectionKind)
+                {
+                    case CollectionKind.Array:
+                        sb.AppendIndentedLine($"result.{protoMember.Name} = primitiveArray;");
+                        break;
+                    case CollectionKind.InterfaceCollection:
+                        // ICollection<T>, IList<T>, IEnumerable<T> → assign List<T>
                         sb.AppendIndentedLine($"result.{protoMember.Name} = new List<{elementType}>(primitiveArray);");
-                    }
-                    else
-                    {
-                        // Custom collection type → create instance and add items via ICollection<T>
-                        sb.AppendIndentedLine($"var customCollection = new {concreteType}();");
-                        sb.AppendIndentedLine($"var iCollection = (global::System.Collections.Generic.ICollection<{elementType}>)customCollection;");
-                        sb.AppendIndentedLine($"foreach (var item in primitiveArray) iCollection.Add(item);");
-                        sb.AppendIndentedLine($"result.{protoMember.Name} = customCollection;");
-                    }
-                    break;
+                        break;
+                    case CollectionKind.ConcreteCollection:
+                        var concreteType = protoMember.Type;
+                        if (concreteType.StartsWith("List<") || concreteType == "System.Collections.Generic.List`1")
+                        {
+                            // List<T> → assign List<T>
+                            sb.AppendIndentedLine($"result.{protoMember.Name} = new List<{elementType}>(primitiveArray);");
+                        }
+                        else
+                        {
+                            // Custom collection type → create instance and add items via ICollection<T>
+                            sb.AppendIndentedLine($"var customCollection = new {concreteType}();");
+                            sb.AppendIndentedLine($"var iCollection = (global::System.Collections.Generic.ICollection<{elementType}>)customCollection;");
+                            sb.AppendIndentedLine($"foreach (var item in primitiveArray) iCollection.Add(item);");
+                            sb.AppendIndentedLine($"result.{protoMember.Name} = customCollection;");
+                        }
+                        break;
+                }
             }
         }
         else

@@ -2,6 +2,7 @@
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -55,15 +56,10 @@ namespace GProtobuf.Core
             var slice = buffer.Slice(position, (int)length);
             position += (int)length;
 
-            int count = (int)length / 4;
+            int count = (int)(length >> 2);
             List<int> fixedSizeResult = new (count);
-            int p = 0;
-            for (int i = 0; i < count; i++)
-            {
-                fixedSizeResult[i] = BinaryPrimitives.ReadInt32LittleEndian(slice.Slice(p, 4));
-                p += 4;
-            }
-
+            CollectionsMarshal.SetCount(fixedSizeResult, count);
+            MemoryMarshal.Cast<byte, int>(slice).CopyTo(CollectionsMarshal.AsSpan(fixedSizeResult));
             return fixedSizeResult;
         }
 
