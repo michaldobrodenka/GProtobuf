@@ -40,7 +40,7 @@ namespace GProtobuf.Benchmark.Benchmarks
             _protobufNetSerializedData = _memoryStream.ToArray();
             _memoryStream.Position = 0;
 
-            Models.Serialization.Serializers.SerializePrimitiveTypesModel(_memoryStream, _testModel);
+            Models.Serialization.Serializers.SerializePrimitiveTypesModel((Stream)_memoryStream, _testModel);
             _gprotobufSerializedData = _memoryStream.ToArray();
         }
 
@@ -59,7 +59,7 @@ namespace GProtobuf.Benchmark.Benchmarks
         {
             _memoryStream.Position = 0;
             _memoryStream.SetLength(0);
-            Models.Serialization.Serializers.SerializePrimitiveTypesModel(_memoryStream, _testModel);
+            Models.Serialization.Serializers.SerializePrimitiveTypesModel((Stream)_memoryStream, _testModel);
         }
 
         [Benchmark]

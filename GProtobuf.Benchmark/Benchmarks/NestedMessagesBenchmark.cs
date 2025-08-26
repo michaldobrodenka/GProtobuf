@@ -1,6 +1,8 @@
 using BenchmarkDotNet.Attributes;
+using CommunityToolkit.HighPerformance.Buffers;
 using GProtobuf.Benchmark.Models;
 using Microsoft.IO;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -15,6 +17,8 @@ namespace GProtobuf.Benchmark.Benchmarks
         private byte[] _protobufNetSerializedData;
         private RecyclableMemoryStream _memoryStream;
         private static readonly RecyclableMemoryStreamManager _streamManager = new RecyclableMemoryStreamManager();
+        private static ArrayPoolBufferWriter<byte> arrayPoolBufferWriter = new ArrayPoolBufferWriter<byte>(1024);
+
 
         [GlobalSetup]
         public void Setup()
@@ -66,7 +70,7 @@ namespace GProtobuf.Benchmark.Benchmarks
             _protobufNetSerializedData = _memoryStream.ToArray();
             _memoryStream.Position = 0;
 
-            Models.Serialization.Serializers.SerializeNestedMessagesModel(_memoryStream, _testModel);
+            Models.Serialization.Serializers.SerializeNestedMessagesModel((Stream)_memoryStream, _testModel);
             _gprotobufSerializedData = _memoryStream.ToArray();
         }
 
@@ -81,11 +85,23 @@ namespace GProtobuf.Benchmark.Benchmarks
 
         [Benchmark]
         [BenchmarkCategory("Serialization")]
-        public void GProtobuf_Serialize()
+        public void GProtobuf_Serialize_Stream()
         {
             _memoryStream.Position = 0;
             //_memoryStream.SetLength(0);
-            Models.Serialization.Serializers.SerializeNestedMessagesModel(_memoryStream, _testModel);
+            Models.Serialization.Serializers.SerializeNestedMessagesModel((Stream)_memoryStream, _testModel);
+        }
+
+
+        [Benchmark]
+        [BenchmarkCategory("Serialization")]
+        public void GProtobuf_Serialize_IBufferWriter()
+        {
+            //_memoryStream.Position = 0;
+            //_memoryStream.SetLength(0);
+            arrayPoolBufferWriter.Clear();
+            Models.Serialization.Serializers.SerializeNestedMessagesModel((IBufferWriter<byte>)arrayPoolBufferWriter, _testModel);
+            var mem = arrayPoolBufferWriter.WrittenMemory;
         }
 
         [Benchmark]
