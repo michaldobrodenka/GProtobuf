@@ -21,7 +21,7 @@ namespace GProtobuf.Benchmark.Benchmarks
         {
             _memoryStream = _streamManager.GetStream();
 
-            var intData = Enumerable.Range(1, 30).ToList();
+            var intData = Enumerable.Range(1, 300).ToList();
             var longData = Enumerable.Range(1, 100).Select(i => (long)i * 1000000).ToList();
             var floatData = Enumerable.Range(1, 100).Select(i => i * 1.5f).ToList();
             var doubleData = Enumerable.Range(1, 100).Select(i => i * 2.5).ToList();
@@ -29,17 +29,17 @@ namespace GProtobuf.Benchmark.Benchmarks
 
             _testModel = new CollectionsModel
             {
-                //IntList = intData,
-                //LongList = longData,
-                //FloatList = floatData,
-                //DoubleList = doubleData,
-                ////StringList = stringData,
-                //IntArray = intData.ToArray(),
-                //FloatArray = floatData.ToArray(),
-                //DoubleArray = doubleData.ToArray(),
-                StringArray = stringData.ToArray(),
-                //PackedFixedIntList = intData.Take(50).ToList(),
-                //PackedZigZagIntList = intData.Select(i => i % 2 == 0 ? i : -i).ToList()
+                IntList = intData,
+                LongList = longData,
+                FloatList = floatData,
+                DoubleList = doubleData,
+                //StringList = stringData,
+                IntArray = intData.ToArray(),
+                FloatArray = floatData.ToArray(),
+                DoubleArray = doubleData.ToArray(),
+                //StringArray = stringData.ToArray(),
+                PackedFixedIntList = intData.Take(50).ToList(),
+                PackedZigZagIntList = intData.Select(i => i % 2 == 0 ? i : -i).ToList()
             };
 
             // Pre-serialize for deserialization benchmarks

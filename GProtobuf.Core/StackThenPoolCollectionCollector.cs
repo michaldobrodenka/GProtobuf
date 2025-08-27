@@ -1,6 +1,7 @@
 ﻿using System;
+using System.Buffers;
 using System.Collections.Generic;
-using System.Drawing;
+using System.Diagnostics;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -13,8 +14,14 @@ namespace GProtobuf.Core
     {
         private Span<T> stage;            // stackalloc staging buffer
         private int stageCount;
-        private PooledByteCollectionCollector<T>? pool; // lazy created
-        private readonly int pooledInit;
+
+        // Pooled buffer fields (replacing PooledByteCollectionCollector)
+        private byte[] pooledBuffer;
+        private int pooledWrittenBytes;
+        private int pooledCount;
+        
+        private readonly int pooledInitialElements;
+        private static readonly int SizeOfT = Unsafe.SizeOf<T>();
 
         public StackThenPoolCollectionCollector(scoped Span<T> initialBuffer, int pooledInitialElements = 64)
         {
@@ -25,8 +32,12 @@ namespace GProtobuf.Core
 #pragma warning restore CS9080 // Use of variable in this context may expose referenced variables outside of their declaration scope
             }
             stageCount = 0;
-            pool = null;
-            pooledInit = pooledInitialElements;
+            
+            // Initialize pooled buffer fields
+            pooledBuffer = Array.Empty<byte>();
+            pooledWrittenBytes = 0;
+            pooledCount = 0;
+            this.pooledInitialElements = pooledInitialElements;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -66,7 +77,7 @@ namespace GProtobuf.Core
                 values = values[space..];
             }
 
-            // 2) Staging is full → flush it to the pool with a single AddRange.
+            // 2) Staging is full → flush it to the pool
             FlushStageToPool();
 
             // 3) Send the large bulk directly to the pool in one or a few large AddRange calls,
@@ -77,8 +88,7 @@ namespace GProtobuf.Core
                 int bulkLen = rem - (rem % stage.Length); // leave a tail for staging
                 if (bulkLen > 0)
                 {
-                    EnsurePool();
-                    pool!.AddRange(values[..bulkLen]);
+                    AddRangeToPool(values[..bulkLen]);
                     values = values[bulkLen..];
                     rem = values.Length;
                 }
@@ -92,102 +102,49 @@ namespace GProtobuf.Core
             }
         }
 
-        public int Count => (pool is null ? stageCount : pool.Count + stageCount);
+        public int Count => pooledCount + stageCount;
 
         public T[] ToArray()
         {
-            T[] arr;
-            if (pool is null)
-            {
-                arr = GC.AllocateUninitializedArray<T>(stageCount);
+            int totalCount = pooledCount + stageCount;
+            T[] arr = GC.AllocateUninitializedArray<T>(totalCount);
 
-                if (stageCount > 0)
-                    stage[..stageCount].CopyTo(arr);
-            }
-            else
+            if (pooledCount > 0)
             {
-                if (stageCount > 0)
-                FlushStageToPool();
-                arr = pool.ToArray();
+                // Copy from pooled buffer
+                Debug.Assert(pooledWrittenBytes == pooledCount * SizeOfT);
+                var pooledSpan = MemoryMarshal.Cast<byte, T>(pooledBuffer.AsSpan(0, pooledWrittenBytes));
+                pooledSpan.CopyTo(arr.AsSpan());
+            }
+
+            if (stageCount > 0)
+            {
+                // Copy from stage buffer
+                stage[..stageCount].CopyTo(arr.AsSpan(pooledCount));
             }
 
             return arr;
         }
 
-        //public unsafe T[] ToArrayUnsafe()
-        //{
-        //    T[] arr;
-
-        //    if (pool == null)
-        //    {
-        //        arr = GC.AllocateUninitializedArray<T>(stageCount);
-
-
-        //        if (stageCount > 0)
-        //        {
-        //            //_stage[.._stageCount].CopyTo(arr);
-        //            var numberOfBytes = (long)stageCount * Unsafe.SizeOf<T>();
-        //            var byteBuffer = MemoryMarshal.Cast<T, byte>(stage);
-        //            fixed (byte* pSrc = byteBuffer)
-        //            fixed (T* pDst = arr)
-        //            {
-        //                Buffer.MemoryCopy(
-        //                    source: pSrc,
-        //                    destination: pDst,
-        //                    destinationSizeInBytes: numberOfBytes,
-        //                    sourceBytesToCopy: numberOfBytes);
-        //            }
-        //        }
-        //    }
-        //    else
-        //    {
-        //        if (stageCount > 0)
-        //            FlushStageToPool();
-
-        //        arr = pool.ToArrayUnsafe();
-        //    }
-
-        //    return arr;
-        //}
-
-        //public List<T> ToList()
-        //{
-        //    List<T> list;
-
-        //    if (pool == null)
-        //    {
-        //        list = new(stageCount);
-        //        CollectionsMarshal.SetCount(list, stageCount);
-        //        var dst = CollectionsMarshal.AsSpan(list);
-        //        stage[..stageCount].CopyTo(dst);
-        //    }
-        //    else
-        //    {
-        //        if (stageCount > 0)
-        //            FlushStageToPool();
-        //        list = pool.ToList();
-        //    }
-
-        //    return list;
-        //}
-
         public List<T> ToList()
         {
-            List<T> list;
+            int totalCount = pooledCount + stageCount;
+            List<T> list = new(totalCount);
+            CollectionsMarshal.SetCount(list, totalCount);
+            var dst = CollectionsMarshal.AsSpan(list);
 
-            if (pool == null)
+            if (pooledCount > 0)
             {
-                list = new(stageCount);
-                //CollectionsMarshal.SetCount(list, stageCount);
-                //var dst = CollectionsMarshal.AsSpan(list);
-                //stage[..stageCount].CopyTo(dst);
-                list.AddRange(stage[..stageCount]);
+                // Copy from pooled buffer
+                Debug.Assert(pooledWrittenBytes == pooledCount * SizeOfT);
+                var pooledSpan = MemoryMarshal.Cast<byte, T>(pooledBuffer.AsSpan(0, pooledWrittenBytes));
+                pooledSpan.CopyTo(dst);
             }
-            else
+
+            if (stageCount > 0)
             {
-                if (stageCount > 0)
-                    FlushStageToPool();
-                list = pool.ToList();
+                // Copy from stage buffer
+                stage[..stageCount].CopyTo(dst[pooledCount..]);
             }
 
             return list;
@@ -195,8 +152,13 @@ namespace GProtobuf.Core
 
         public void Dispose()
         {
-            pool?.Dispose();
-            pool = null;
+            if (pooledBuffer.Length > 0)
+            {
+                ArrayPool<byte>.Shared.Return(pooledBuffer, clearArray: false);
+                pooledBuffer = Array.Empty<byte>();
+            }
+            pooledWrittenBytes = 0;
+            pooledCount = 0;
             stage = default;
             stageCount = 0;
         }
@@ -205,15 +167,52 @@ namespace GProtobuf.Core
         private void FlushStageToPool()
         {
             if (stageCount == 0) return;
-            EnsurePool();
-            pool!.AddRange(stage[..stageCount]); // jedno AddRange = jedno fixed/memcopy
+            AddRangeToPool(stage[..stageCount]);
             stageCount = 0;
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void EnsurePool()
+        private unsafe void AddRangeToPool(scoped Span<T> values)
         {
-            pool ??= new PooledByteCollectionCollector<T>(pooledInit);
+            int n = values.Length;
+            if (n == 0) return;
+
+            int bytesToCopy = n * SizeOfT;
+            EnsurePoolCapacity(bytesToCopy);
+
+            fixed (T* pSrc = values)
+            fixed (byte* pDst = &pooledBuffer[pooledWrittenBytes])
+            {
+                Buffer.MemoryCopy(
+                    source: pSrc,
+                    destination: pDst,
+                    destinationSizeInBytes: (long)(pooledBuffer.Length - pooledWrittenBytes),
+                    sourceBytesToCopy: (long)bytesToCopy);
+            }
+
+            pooledWrittenBytes += bytesToCopy;
+            pooledCount += n;
+        }
+
+        private void EnsurePoolCapacity(int sizeHint)
+        {
+            // Initialize pool if needed
+            if (pooledBuffer.Length == 0)
+            {
+                int bytes = Math.Max(pooledInitialElements * SizeOfT, 16);
+                pooledBuffer = ArrayPool<byte>.Shared.Rent(bytes);
+                return;
+            }
+
+            // Check if we need to grow
+            int needed = pooledWrittenBytes + sizeHint;
+            if (needed <= pooledBuffer.Length) return;
+
+            // Grow the pool
+            int newCap = Math.Max(pooledBuffer.Length * 2, needed);
+            var newArr = ArrayPool<byte>.Shared.Rent(newCap);
+            pooledBuffer.AsSpan(0, pooledWrittenBytes).CopyTo(newArr);
+            ArrayPool<byte>.Shared.Return(pooledBuffer, clearArray: false);
+            pooledBuffer = newArr;
         }
     }
 }
