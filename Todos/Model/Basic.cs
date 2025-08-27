@@ -23,7 +23,13 @@ namespace Todos.Model
         [ProtoMember(2)]
         public TimeSpan TimeSpan { get; set; }
 
-        //[ProtoMember(3)]
+        [ProtoMember(3)]
+        public HashSet<string> Tags { get; set; }
+
+        [ProtoMember(4)]
+        public HashSet<int> UniqueNumbers { get; set; }
+
+        //[ProtoMember(5)]
         //public DateTime DateTime { get; set; }
     }
 }

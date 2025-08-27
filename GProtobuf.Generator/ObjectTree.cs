@@ -3384,12 +3384,17 @@ class ObjectTree
                 sb.AppendIndentedLine($"result.{protoMember.Name} = resultCollector.ToList();");
                 break;
             case CollectionKind.ConcreteCollection:
-                // For concrete types like List<T> or custom collections
+                // For concrete types like List<T>, HashSet<T> or custom collections
                 var concreteType = protoMember.Type;
                 if (concreteType.StartsWith("List<") || concreteType.StartsWith("System.Collections.Generic.List<") || concreteType == "System.Collections.Generic.List`1")
                 {
                     // List<T> → assign directly
                     sb.AppendIndentedLine($"result.{protoMember.Name} = resultCollector.ToList();");
+                }
+                else if (concreteType.StartsWith("HashSet<") || concreteType.StartsWith("System.Collections.Generic.HashSet<"))
+                {
+                    // HashSet<T> → create HashSet from items
+                    sb.AppendIndentedLine($"result.{protoMember.Name} = new global::System.Collections.Generic.HashSet<{elementType}>(resultCollector.ToArray());");
                 }
                 else
                 {
@@ -3845,6 +3850,11 @@ class ObjectTree
                     // List<byte> → assign List<byte>
                     sb.AppendIndentedLine($"result.{protoMember.Name} = new List<byte>(byteArray);");
                 }
+                else if (concreteType.StartsWith("HashSet<") || concreteType.StartsWith("System.Collections.Generic.HashSet<"))
+                {
+                    // HashSet<byte> → create HashSet from byte array
+                    sb.AppendIndentedLine($"result.{protoMember.Name} = new global::System.Collections.Generic.HashSet<byte>(byteArray);");
+                }
                 else
                 {
                     // Custom collection type → create instance and add items via ICollection<byte>
@@ -3906,6 +3916,11 @@ class ObjectTree
                             // List<T> → assign List<T>
                             sb.AppendIndentedLine($"result.{protoMember.Name} = new List<{elementType}>(primitiveArray);");
                         }
+                        else if (concreteType.StartsWith("HashSet<") || concreteType.StartsWith("System.Collections.Generic.HashSet<"))
+                        {
+                            // HashSet<T> → create HashSet from array
+                            sb.AppendIndentedLine($"result.{protoMember.Name} = new global::System.Collections.Generic.HashSet<{elementType}>(primitiveArray);");
+                        }
                         else
                         {
                             // Custom collection type → create instance and add items via ICollection<T>
@@ -3946,9 +3961,20 @@ class ObjectTree
                     sb.AppendIndentedLine($"result.{protoMember.Name} = resultCollector.ToArray();");
                     break;
                 case CollectionKind.InterfaceCollection:
-                case CollectionKind.ConcreteCollection:
-                    // For non-packed, we built List<T> directly, so assign it
                     sb.AppendIndentedLine($"result.{protoMember.Name} = resultCollector.ToList();");
+                    break;
+                case CollectionKind.ConcreteCollection:
+                    var concreteType = protoMember.Type;
+                    if (concreteType.StartsWith("HashSet<") || concreteType.StartsWith("System.Collections.Generic.HashSet<"))
+                    {
+                        // HashSet<T> → create HashSet from items
+                        sb.AppendIndentedLine($"result.{protoMember.Name} = new global::System.Collections.Generic.HashSet<{elementType}>(resultCollector.ToArray());");
+                    }
+                    else
+                    {
+                        // Default to List<T> for other concrete collections
+                        sb.AppendIndentedLine($"result.{protoMember.Name} = resultCollector.ToList();");
+                    }
                     break;
             }
         }

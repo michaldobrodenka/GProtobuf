@@ -6,7 +6,15 @@
       "Bash(dotnet test:*)",
       "Bash(Remove-Item:*)",
       "Bash(rm:*)",
-      "Bash(dotnet run:*)"
+      "Bash(dotnet run:*)",
+      "Bash(powershell:*)",
+      "mcp__serena__list_dir",
+      "mcp__serena__find_symbol",
+      "mcp__serena__search_for_pattern",
+      "Bash(dotnet --version)",
+      "mcp__serena__write_memory",
+      "mcp__serena__think_about_collected_information",
+      "mcp__serena__think_about_whether_you_are_done"
     ],
     "deny": [],
     "ask": []
