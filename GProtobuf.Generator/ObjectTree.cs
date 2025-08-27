@@ -3238,7 +3238,8 @@ class ObjectTree
         var elementTypeName = GetClassNameFromFullName(elementType);
         
         // For arrays, we always expect repeated fields (non-packed for length-delimited types)
-        sb.AppendIndentedLine($"List<{elementType}> resultList = new();");
+        // Use ClassCollectionCollector for reference types (string, custom messages)
+        sb.AppendIndentedLine($"using var resultCollector = new global::GProtobuf.Core.ClassCollectionCollector<{elementType}>();");
         sb.AppendIndentedLine($"var wireType1 = wireType;");
         sb.AppendIndentedLine($"var fieldId1 = fieldId;");
         
@@ -3249,7 +3250,7 @@ class ObjectTree
         if (elementTypeName == "string" || elementTypeName == "System.String")
         {
             // String arrays - direct string reading
-            sb.AppendIndentedLine($"resultList.Add(reader.ReadString(wireType));");
+            sb.AppendIndentedLine($"resultCollector.Add(reader.ReadString(wireType));");
         }
         else if (IsPrimitiveArrayType(elementTypeName))
         {
@@ -3262,7 +3263,7 @@ class ObjectTree
             sb.AppendIndentedLine($"var length = reader.ReadVarInt32();");
             sb.AppendIndentedLine($"var reader1 = new SpanReader(reader.GetSlice(length));");
             sb.AppendIndentedLine($"var item = global::{protoMember.Namespace}.Serialization.SpanReaders.Read{GetClassNameFromFullName(elementType)}(ref reader1);");
-            sb.AppendIndentedLine($"resultList.Add(item);");
+            sb.AppendIndentedLine($"resultCollector.Add(item);");
         }
         
         // Standard array reading loop continuation logic
@@ -3280,11 +3281,11 @@ class ObjectTree
         switch (protoMember.CollectionKind)
         {
             case CollectionKind.Array:
-                sb.AppendIndentedLine($"result.{protoMember.Name} = resultList.ToArray();");
+                sb.AppendIndentedLine($"result.{protoMember.Name} = resultCollector.ToArray();");
                 break;
             case CollectionKind.InterfaceCollection:
                 // ICollection<T>, IList<T>, IEnumerable<T> → assign List<T>
-                sb.AppendIndentedLine($"result.{protoMember.Name} = resultList;");
+                sb.AppendIndentedLine($"result.{protoMember.Name} = resultCollector.ToList();");
                 break;
             case CollectionKind.ConcreteCollection:
                 // For concrete types like List<T> or custom collections
@@ -3292,14 +3293,15 @@ class ObjectTree
                 if (concreteType.StartsWith("List<") || concreteType.StartsWith("System.Collections.Generic.List<") || concreteType == "System.Collections.Generic.List`1")
                 {
                     // List<T> → assign directly
-                    sb.AppendIndentedLine($"result.{protoMember.Name} = resultList;");
+                    sb.AppendIndentedLine($"result.{protoMember.Name} = resultCollector.ToList();");
                 }
                 else
                 {
                     // Custom collection type → create instance and add items via ICollection<T>
                     sb.AppendIndentedLine($"var customCollection = new {concreteType}();");
                     sb.AppendIndentedLine($"var iCollection = (global::System.Collections.Generic.ICollection<{elementType}>)customCollection;");
-                    sb.AppendIndentedLine($"foreach (var item in resultList) iCollection.Add(item);");
+                    sb.AppendIndentedLine($"var items = resultCollector.ToArray();");
+                    sb.AppendIndentedLine($"foreach (var item in items) iCollection.Add(item);");
                     sb.AppendIndentedLine($"result.{protoMember.Name} = customCollection;");
                 }
                 break;
@@ -3825,7 +3827,7 @@ class ObjectTree
             // Non-packed reading - generate loop-based reading similar to existing array logic
             var elementReadMethod = GetPrimitiveElementReadMethod(elementTypeName, protoMember.DataFormat);
             //sb.AppendIndentedLine($"List<{elementType}> resultList = new(1);");
-            sb.AppendIndentedLine($"using StackThenPoolCollectionCollector<{elementType}> resultCollector = new(stackalloc {elementType}[256 / sizeof({elementType})], 1024);");
+            sb.AppendIndentedLine($"using UnmanagedCollectionCollector<{elementType}> resultCollector = new(stackalloc {elementType}[256 / sizeof({elementType})], 1024);");
             sb.AppendIndentedLine($"var wireType1 = wireType;");
             sb.AppendIndentedLine($"var fieldId1 = fieldId;");
             sb.AppendIndentedLine($"while (fieldId1 == fieldId && wireType1 == {GetExpectedWireType(elementTypeName, protoMember.DataFormat)})");

@@ -33,11 +33,11 @@ namespace GProtobuf.Benchmark.Benchmarks
                 LongList = longData,
                 FloatList = floatData,
                 DoubleList = doubleData,
-                //StringList = stringData,
+                StringList = stringData,
                 IntArray = intData.ToArray(),
                 FloatArray = floatData.ToArray(),
                 DoubleArray = doubleData.ToArray(),
-                //StringArray = stringData.ToArray(),
+                StringArray = stringData.ToArray(),
                 PackedFixedIntList = intData.Take(50).ToList(),
                 PackedZigZagIntList = intData.Select(i => i % 2 == 0 ? i : -i).ToList()
             };

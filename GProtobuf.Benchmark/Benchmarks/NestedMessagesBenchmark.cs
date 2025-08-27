@@ -110,29 +110,29 @@ namespace GProtobuf.Benchmark.Benchmarks
             //bufferResult = arrayPoolBufferWriter.WrittenSpan.ToArray();
         }
 
+        //[Benchmark]
+        //[BenchmarkCategory("Serialization")]
+        //public void GProtobuf_SerializeCustom()
+        //{
+        //    _memoryStream.Position = 0;
+        //    //_memoryStream.SetLength(0);
+        //    Models.Serialization.Serializers2.SerializeNestedMessagesModel(_memoryStream, _testModel);
+        //}
+
+
         [Benchmark]
-        [BenchmarkCategory("Serialization")]
-        public void GProtobuf_SerializeCustom()
+        [BenchmarkCategory("Deserialization")]
+        public NestedMessagesModel ProtobufNet_Deserialize()
         {
-            _memoryStream.Position = 0;
-            //_memoryStream.SetLength(0);
-            Models.Serialization.Serializers2.SerializeNestedMessagesModel(_memoryStream, _testModel);
+            return global::ProtoBuf.Serializer.Deserialize<NestedMessagesModel>((ReadOnlySpan<byte>)_protobufNetSerializedData);
         }
 
-
-        //[Benchmark]
-        //[BenchmarkCategory("Deserialization")]
-        //public NestedMessagesModel ProtobufNet_Deserialize()
-        //{
-        //    return global::ProtoBuf.Serializer.Deserialize<NestedMessagesModel>((ReadOnlySpan<byte>)_protobufNetSerializedData);
-        //}
-
-        //[Benchmark]
-        //[BenchmarkCategory("Deserialization")]
-        //public NestedMessagesModel GProtobuf_Deserialize()
-        //{
-        //    return Models.Serialization.Deserializers.DeserializeNestedMessagesModel(_gprotobufSerializedData);
-        //}
+        [Benchmark]
+        [BenchmarkCategory("Deserialization")]
+        public NestedMessagesModel GProtobuf_Deserialize()
+        {
+            return Models.Serialization.Deserializers.DeserializeNestedMessagesModel(_gprotobufSerializedData);
+        }
 
         [GlobalCleanup]
         public void Cleanup()

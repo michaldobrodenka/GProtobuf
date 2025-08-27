@@ -63,17 +63,21 @@ namespace GProtobuf.Benchmark
             //bench.GProtobuf_Serialize_Stream();
             //bench.GProtobuf_SerializeCustom();
 
+            //var bench = new CollectionsBenchmark();
+            //bench.Setup();
+            //bench.GProtobuf_Deserialize();
+
             //Console.WriteLine("Running All Benchmarks...");
             //Console.WriteLine();
 
-            //Console.WriteLine("1. Primitive Types Benchmarks");
-            //BenchmarkRunner.Run<PrimitiveTypesBenchmark>(config);
+            Console.WriteLine("1. Primitive Types Benchmarks");
+            BenchmarkRunner.Run<PrimitiveTypesBenchmark>(config);
 
-            Console.WriteLine();
-            Console.WriteLine("2. Collections Benchmarks");
-            BenchmarkRunner.Run<CollectionsBenchmark>(config);
+            ////Console.WriteLine();
+            //Console.WriteLine("2. Collections Benchmarks");
+            //BenchmarkRunner.Run<CollectionsBenchmark>(config);
 
-            //////Console.WriteLine();
+            ////Console.WriteLine();
             //Console.WriteLine("3. Nested Messages Benchmarks");
             //BenchmarkRunner.Run<NestedMessagesBenchmark>(config);
 
