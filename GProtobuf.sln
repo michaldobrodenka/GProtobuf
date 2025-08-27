@@ -23,6 +23,10 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "items", "items", "{75B64D78
 		README.md = README.md
 	EndProjectSection
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Playground", "Playground", "{02EA681E-C7D8-13C7-8484-4AC65E1B71E8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PooledBufferBenchmark", "PooledBufferBench\PooledBufferBenchmark\PooledBufferBenchmark.csproj", "{AB4824A1-55C4-4F50-B387-6821F0C92466}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -57,9 +61,16 @@ Global
 		{7A959C79-01DA-4919-892D-D01EFA3166BF}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{7A959C79-01DA-4919-892D-D01EFA3166BF}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{7A959C79-01DA-4919-892D-D01EFA3166BF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{AB4824A1-55C4-4F50-B387-6821F0C92466}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{AB4824A1-55C4-4F50-B387-6821F0C92466}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{AB4824A1-55C4-4F50-B387-6821F0C92466}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{AB4824A1-55C4-4F50-B387-6821F0C92466}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{AB4824A1-55C4-4F50-B387-6821F0C92466} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {151172C7-2EFA-4ECF-89E5-4BFE8AB1827E}
