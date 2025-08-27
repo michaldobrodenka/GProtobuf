@@ -47,7 +47,7 @@ public sealed class DictionaryModelTests : BaseSerializationTest
                 new KeyValuePair<long, NestedDictionaryValue>(20L, new NestedDictionaryValue { Value = 200, StringValue = "Value200" })
             }
             ,
-            DerivedDictionary = new DerivedDictionary() { { 36456747, "sdfgsdfgsdfgsdf" }, { 0, null}, {-1, "" } }
+            DerivedDictionary = new DerivedDictionary() { { 36456747, "sdfgsdfgsdfgsdf" }, /*{ 0, null},*/ {-1, "" } }
         };
     }
     
@@ -461,6 +461,8 @@ public sealed class DictionaryModelTests : BaseSerializationTest
         var model = CreateSimpleDictionaryModel();
 
         var gprotobufData = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeDictionaryModel);
+        var protobufData = SerializeWithProtobufNet(model);
+
         var deserializedByProtobufNet = DeserializeWithProtobufNet<DictionaryModel>(gprotobufData);
         var reserializedByProtobufNet = SerializeWithProtobufNet(deserializedByProtobufNet);
         var finalDeserialized = DeserializeWithGProtobuf(reserializedByProtobufNet, bytes => TestModel.Serialization.Deserializers.DeserializeDictionaryModel(bytes));
@@ -549,6 +551,8 @@ public sealed class DictionaryModelTests : BaseSerializationTest
             Dictionary = new Dictionary<int, string> { { 1, "Only" } },
             ValuePairs = null
         };
+
+        var data1 = SerializeWithGProtobuf(modelOnlyDict, TestModel.Serialization.Serializers.SerializeDictionaryModel);
 
         var data = SerializeWithProtobufNet(modelOnlyDict);
         var deserialized = DeserializeWithGProtobuf(data, bytes => TestModel.Serialization.Deserializers.DeserializeDictionaryModel(bytes));

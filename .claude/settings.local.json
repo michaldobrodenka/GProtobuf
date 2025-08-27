@@ -16,7 +16,15 @@
       "mcp__serena__think_about_collected_information",
       "mcp__serena__think_about_whether_you_are_done",
       "Bash(dotnet clean:*)",
-      "mcp__serena__replace_symbol_body"
+      "mcp__serena__replace_symbol_body",
+      "mcp__serena__activate_project",
+      "mcp__serena__insert_after_symbol",
+      "mcp__serena__find_referencing_symbols",
+      "Read(E:\\work\\GProtobuf\\GProtobuf.Generator/**)",
+      "Read(E:\\work\\GProtobuf\\GProtobuf.Generator/**)",
+      "mcp__serena__insert_before_symbol",
+      "Read(E:\\work\\GProtobuf\\GProtobuf.CrossTests\\obj\\Generated\\GProtobuf.Generator\\GProtobuf.Generator.SerializerGenerator/**)",
+      "Read(E:\\work\\GProtobuf\\GProtobuf.CrossTests\\obj\\Generated\\GProtobuf.Generator\\GProtobuf.Generator.SerializerGenerator/**)"
     ],
     "deny": [],
     "ask": []
