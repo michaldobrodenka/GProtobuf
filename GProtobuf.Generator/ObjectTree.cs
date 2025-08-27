@@ -3824,12 +3824,13 @@ class ObjectTree
         {
             // Non-packed reading - generate loop-based reading similar to existing array logic
             var elementReadMethod = GetPrimitiveElementReadMethod(elementTypeName, protoMember.DataFormat);
-            sb.AppendIndentedLine($"List<{elementType}> resultList = new();");
+            //sb.AppendIndentedLine($"List<{elementType}> resultList = new(1);");
+            sb.AppendIndentedLine($"using StackThenPoolCollectionCollector<{elementType}> resultCollector = new(stackalloc {elementType}[256 / sizeof({elementType})], 1024);");
             sb.AppendIndentedLine($"var wireType1 = wireType;");
             sb.AppendIndentedLine($"var fieldId1 = fieldId;");
             sb.AppendIndentedLine($"while (fieldId1 == fieldId && wireType1 == {GetExpectedWireType(elementTypeName, protoMember.DataFormat)})");
             sb.StartNewBlock();
-            sb.AppendIndentedLine($"resultList.Add({elementReadMethod});");
+            sb.AppendIndentedLine($"resultCollector.Add({elementReadMethod});");
             sb.AppendIndentedLine($"if (reader.EndOfData) break;");
             sb.AppendIndentedLine($"var p = reader.Position;");
             sb.AppendIndentedLine($"(wireType1, fieldId1) = reader.ReadKey();");
@@ -3844,12 +3845,12 @@ class ObjectTree
             switch (protoMember.CollectionKind)
             {
                 case CollectionKind.Array:
-                    sb.AppendIndentedLine($"result.{protoMember.Name} = resultList.ToArray();");
+                    sb.AppendIndentedLine($"result.{protoMember.Name} = resultCollector.ToArray();");
                     break;
                 case CollectionKind.InterfaceCollection:
                 case CollectionKind.ConcreteCollection:
                     // For non-packed, we built List<T> directly, so assign it
-                    sb.AppendIndentedLine($"result.{protoMember.Name} = resultList;");
+                    sb.AppendIndentedLine($"result.{protoMember.Name} = resultCollector.ToList();");
                     break;
             }
         }

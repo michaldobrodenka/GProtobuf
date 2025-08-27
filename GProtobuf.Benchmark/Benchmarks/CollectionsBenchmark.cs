@@ -6,7 +6,7 @@ using System.Linq;
 
 namespace GProtobuf.Benchmark.Benchmarks
 {
-    [MemoryDiagnoser(displayGenColumns: false)]
+    [MemoryDiagnoser(displayGenColumns: true)]
     [CategoriesColumn]
     public class CollectionsBenchmark
     {
@@ -21,7 +21,7 @@ namespace GProtobuf.Benchmark.Benchmarks
         {
             _memoryStream = _streamManager.GetStream();
 
-            var intData = Enumerable.Range(1, 100).ToList();
+            var intData = Enumerable.Range(1, 30).ToList();
             var longData = Enumerable.Range(1, 100).Select(i => (long)i * 1000000).ToList();
             var floatData = Enumerable.Range(1, 100).Select(i => i * 1.5f).ToList();
             var doubleData = Enumerable.Range(1, 100).Select(i => i * 2.5).ToList();
@@ -33,12 +33,12 @@ namespace GProtobuf.Benchmark.Benchmarks
                 //LongList = longData,
                 //FloatList = floatData,
                 //DoubleList = doubleData,
-                //StringList = stringData,
+                ////StringList = stringData,
                 //IntArray = intData.ToArray(),
                 //FloatArray = floatData.ToArray(),
                 //DoubleArray = doubleData.ToArray(),
-                //StringArray = stringData.ToArray(),
-                PackedFixedIntList = intData.Take(50).ToList(),
+                StringArray = stringData.ToArray(),
+                //PackedFixedIntList = intData.Take(50).ToList(),
                 //PackedZigZagIntList = intData.Select(i => i % 2 == 0 ? i : -i).ToList()
             };
 
@@ -51,8 +51,9 @@ namespace GProtobuf.Benchmark.Benchmarks
             _gprotobufSerializedData = _memoryStream.ToArray();
         }
 
-        [Benchmark(Baseline = true)]
-        [BenchmarkCategory("Serialization")]
+        //[Benchmark(Baseline = true)]
+        //[BenchmarkCategory("Serialization")]
+        [Benchmark]
         public void ProtobufNet_Serialize()
         {
             _memoryStream.Position = 0;
@@ -61,7 +62,7 @@ namespace GProtobuf.Benchmark.Benchmarks
         }
 
         [Benchmark]
-        [BenchmarkCategory("Serialization")]
+        //[BenchmarkCategory("Serialization")]
         public void GProtobuf_Serialize()
         {
             _memoryStream.Position = 0;
@@ -69,15 +70,16 @@ namespace GProtobuf.Benchmark.Benchmarks
             Models.Serialization.Serializers.SerializeCollectionsModel((Stream)_memoryStream, _testModel);
         }
 
+        //[Benchmark(Baseline = true)]
+        //[BenchmarkCategory("Deserialization")]
         [Benchmark]
-        [BenchmarkCategory("Deserialization")]
         public CollectionsModel ProtobufNet_Deserialize()
         {
             return global::ProtoBuf.Serializer.Deserialize<CollectionsModel>((ReadOnlySpan<byte>)_protobufNetSerializedData);
         }
 
         [Benchmark]
-        [BenchmarkCategory("Deserialization")]
+        //[BenchmarkCategory("Deserialization")]
         public CollectionsModel GProtobuf_Deserialize()
         {
             return Models.Serialization.Deserializers.DeserializeCollectionsModel(_gprotobufSerializedData);

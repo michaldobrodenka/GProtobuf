@@ -7,14 +7,14 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace PooledBufferBenchmark
+namespace GProtobuf.Core
 {
-    ref struct StackThenPoolCollectionCollector<T> where T : unmanaged
+    public ref struct StackThenPoolCollectionCollector<T> where T : unmanaged
     {
         private Span<T> stage;            // stackalloc staging buffer
         private int stageCount;
         private PooledByteCollectionCollector<T>? pool; // lazy created
-        private readonly int _pooledInit;
+        private readonly int pooledInit;
 
         public StackThenPoolCollectionCollector(scoped Span<T> initialBuffer, int pooledInitialElements = 64)
         {
@@ -26,7 +26,7 @@ namespace PooledBufferBenchmark
             }
             stageCount = 0;
             pool = null;
-            _pooledInit = pooledInitialElements;
+            pooledInit = pooledInitialElements;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -213,7 +213,7 @@ namespace PooledBufferBenchmark
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void EnsurePool()
         {
-            pool ??= new PooledByteCollectionCollector<T>(_pooledInit);
+            pool ??= new PooledByteCollectionCollector<T>(pooledInit);
         }
     }
 }

@@ -96,16 +96,16 @@ namespace PooledBufferBenchmark
             return result;
         }
 
-        [Benchmark]
-        public List<int> StackPooledBufferCollector_ToList2()
-        {
-            using var collector = new StackThenPoolCollectionCollector<int>(stackalloc int[32], 1024);
-            for (int i = 0; i < ElementCount; i++)
-            {
-                collector.Add(i);
-            }
-            var result = collector.ToList2();
-            return result;
-        }
+        //[Benchmark]
+        //public List<int> StackPooledBufferCollector_ToList2()
+        //{
+        //    using var collector = new StackThenPoolCollectionCollector<int>(stackalloc int[32], 1024);
+        //    for (int i = 0; i < ElementCount; i++)
+        //    {
+        //        collector.Add(i);
+        //    }
+        //    var result = collector.ToList2();
+        //    return result;
+        //}
     }
 }
