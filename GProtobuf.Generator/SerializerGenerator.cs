@@ -251,6 +251,24 @@ public sealed class SerializerGenerator : IIncrementalGenerator
     }
     
     /// <summary>
+    /// Checks if a type string represents a collection type (array, List, HashSet, etc.)
+    /// </summary>
+    private static bool IsCollectionType(string typeName)
+    {
+        return typeName.EndsWith("[]") || 
+               typeName.Contains("List<") || 
+               typeName.Contains("HashSet<") || 
+               typeName.Contains("IList<") || 
+               typeName.Contains("ICollection<") || 
+               typeName.Contains("IEnumerable<") ||
+               typeName.Contains("System.Collections.Generic.List<") ||
+               typeName.Contains("System.Collections.Generic.HashSet<") ||
+               typeName.Contains("System.Collections.Generic.IList<") ||
+               typeName.Contains("System.Collections.Generic.ICollection<") ||
+               typeName.Contains("System.Collections.Generic.IEnumerable<");
+    }
+    
+    /// <summary>
     /// Analyzes if the type is a dictionary/map type and extracts key/value types
     /// </summary>
     private static (bool isMap, string keyType, string valueType) AnalyzeMapType(ITypeSymbol typeSymbol)
@@ -264,7 +282,14 @@ public sealed class SerializerGenerator : IIncrementalGenerator
         {
             if (namedType.TypeArguments.Length == 2)
             {
-                return (true, namedType.TypeArguments[0].ToDisplayString(), namedType.TypeArguments[1].ToDisplayString());
+                var keyType = namedType.TypeArguments[0].ToDisplayString();
+                // Check if key type is a collection - not supported as keys
+                if (IsCollectionType(keyType))
+                {
+                    // Skip map types with collections as keys - they're not valid dictionary keys
+                    return (false, null, null);
+                }
+                return (true, keyType, namedType.TypeArguments[1].ToDisplayString());
             }
         }
         
@@ -274,7 +299,13 @@ public sealed class SerializerGenerator : IIncrementalGenerator
         
         if (dictionaryInterface != null && dictionaryInterface.TypeArguments.Length == 2)
         {
-            return (true, dictionaryInterface.TypeArguments[0].ToDisplayString(), dictionaryInterface.TypeArguments[1].ToDisplayString());
+            var keyType = dictionaryInterface.TypeArguments[0].ToDisplayString();
+            // Check if key type is a collection - not supported as keys
+            if (IsCollectionType(keyType))
+            {
+                return (false, null, null);
+            }
+            return (true, keyType, dictionaryInterface.TypeArguments[1].ToDisplayString());
         }
         
         // Check for ICollection<KeyValuePair<TKey, TValue>>
@@ -286,7 +317,13 @@ public sealed class SerializerGenerator : IIncrementalGenerator
         
         if (collectionInterface?.TypeArguments[0] is INamedTypeSymbol kvpType && kvpType.TypeArguments.Length == 2)
         {
-            return (true, kvpType.TypeArguments[0].ToDisplayString(), kvpType.TypeArguments[1].ToDisplayString());
+            var keyType = kvpType.TypeArguments[0].ToDisplayString();
+            // Check if key type is a collection - not supported as keys
+            if (IsCollectionType(keyType))
+            {
+                return (false, null, null);
+            }
+            return (true, keyType, kvpType.TypeArguments[1].ToDisplayString());
         }
         
         return (false, null, null);

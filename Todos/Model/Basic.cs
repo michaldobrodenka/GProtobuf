@@ -29,7 +29,13 @@ namespace Todos.Model
         [ProtoMember(4)]
         public HashSet<int> UniqueNumbers { get; set; }
 
-        //[ProtoMember(5)]
-        //public DateTime DateTime { get; set; }
+        [ProtoMember(5)]
+        public Dictionary<string, HashSet<int>> StringIntHashsetMap { get; set; }
+        
+        [ProtoMember(6)]
+        public Dictionary<int, List<string>> IntStringListMap { get; set; }
+        
+        [ProtoMember(7)]
+        public Dictionary<string, int[]> StringIntArrayMap { get; set; }
     }
 }
