@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(/E:\\work\\GProtobuf\\PooledBufferBench\\PooledBufferBenchmark/**)",
+      "Read(/E:\\work\\GProtobuf\\PooledBufferBench\\PooledBufferBenchmark/**)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
