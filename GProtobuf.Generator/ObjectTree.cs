@@ -3634,8 +3634,8 @@ class ObjectTree
                 {
                     // For complex types, deserialize as message
                     sb.AppendIndentedLine($"var fieldLength = entryReader.ReadVarInt32();");
-                    sb.AppendIndentedLine($"var fieldReader = new SpanReader(entryReader.GetSlice(fieldLength));");
-                    sb.AppendIndentedLine($"{varName} = global::{GetNamespaceFromType(fieldType)}.Serialization.SpanReaders.Read{typeName}(ref fieldReader);");
+                    sb.AppendIndentedLine($"var fieldReader{varName} = new SpanReader(entryReader.GetSlice(fieldLength));");
+                    sb.AppendIndentedLine($"{varName} = global::{GetNamespaceFromType(fieldType)}.Serialization.SpanReaders.Read{typeName}(ref fieldReader{varName});");
                 }
                 break;
         }
@@ -4407,7 +4407,7 @@ class ObjectTree
         sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)entryCalculator.Length);");
         
         // Write the actual key and value
-        WriteMapKey(sb, protoMember.MapKeyType, "kvp.Key");
+        WriteMapKey(sb, protoMember.MapKeyType, "kvp.Key", writeTarget, writeTargetShortName);
         WriteMapValue(sb, protoMember.MapValueType, "kvp.Value", writeTarget, writeTargetShortName);
         
         sb.EndBlock(); // end foreach
@@ -4456,6 +4456,20 @@ class ObjectTree
             case "UInt64":
                 sb.AppendIndentedLine($"{calculator}.AddByteLength(1); // tag for field 1");
                 sb.AppendIndentedLine($"{calculator}.WriteUInt64({keyAccess});");
+                break;
+                
+            default:
+                // For complex types (custom classes)
+                sb.AppendIndentedLine($"if ({keyAccess} != null)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"{calculator}.AddByteLength(1); // tag for field 1");
+                var sanitizedTypeName = SanitizeTypeNameForMethod(keyType);
+                var keyCalcName = $"keyCalc{sanitizedTypeName}";
+                sb.AppendIndentedLine($"var {keyCalcName} = new global::GProtobuf.Core.WriteSizeCalculator();");
+                sb.AppendIndentedLine($"SizeCalculators.Calculate{sanitizedTypeName}Size(ref {keyCalcName}, {keyAccess});");
+                sb.AppendIndentedLine($"{calculator}.WriteVarUInt32((uint){keyCalcName}.Length);");
+                sb.AppendIndentedLine($"{calculator}.AddByteLength({keyCalcName}.Length);");
+                sb.EndBlock();
                 break;
         }
     }
@@ -4633,7 +4647,7 @@ class ObjectTree
         }
     }
     
-    private static void WriteMapKey(StringBuilderWithIndent sb, string keyType, string keyAccess)
+    private static void WriteMapKey(StringBuilderWithIndent sb, string keyType, string keyAccess, WriteTarget writeTarget, string writeTargetShortName)
     {
         var simpleType = GetSimpleTypeName(keyType);
         
@@ -4676,6 +4690,19 @@ class ObjectTree
             case "UInt64":
                 sb.AppendIndentedLine($"writer.WriteSingleByte(0x08); // field 1, VarInt");
                 sb.AppendIndentedLine($"writer.WriteUInt64({keyAccess});");
+                break;
+                
+            default:
+                // For complex types (custom classes)
+                sb.AppendIndentedLine($"if ({keyAccess} != null)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x0A); // field 1, Len");
+                sb.AppendIndentedLine($"var keyCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+                var sanitizedTypeName = SanitizeTypeNameForMethod(keyType);
+                sb.AppendIndentedLine($"SizeCalculators.Calculate{sanitizedTypeName}Size(ref keyCalc, {keyAccess});");
+                sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)keyCalc.Length);");
+                sb.AppendIndentedLine($"{writeTargetShortName}Writers.Write{sanitizedTypeName}(ref writer, {keyAccess});");
+                sb.EndBlock();
                 break;
         }
     }

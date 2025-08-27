@@ -15,6 +15,33 @@ namespace Todos.Model
     }
 
     [ProtoContract]
+    public class CustomNested
+    {
+        [ProtoMember(1)]
+        public int Id { get; set; }
+        
+        [ProtoMember(2)]
+        public string Name { get; set; }
+        
+        [ProtoMember(3)]
+        public double Score { get; set; }
+
+        public override bool Equals(object obj)
+        {
+            if (obj is CustomNested other)
+            {
+                return Id == other.Id && Name == other.Name && Score == other.Score;
+            }
+            return false;
+        }
+
+        public override int GetHashCode()
+        {
+            return HashCode.Combine(Id, Name, Score);
+        }
+    }
+
+    [ProtoContract]
     public class Basic
     {
         [ProtoMember(1)]
@@ -37,5 +64,14 @@ namespace Todos.Model
         
         [ProtoMember(7)]
         public Dictionary<string, int[]> StringIntArrayMap { get; set; }
+        
+        [ProtoMember(8)]
+        public Dictionary<string, CustomNested> StringCustomNestedMap { get; set; }
+        
+        [ProtoMember(9)]
+        public Dictionary<CustomNested, string> CustomNestedStringMap { get; set; }
+        
+        [ProtoMember(10)]
+        public Dictionary<CustomNested, List<int>> CustomNestedIntListMap { get; set; }
     }
 }
