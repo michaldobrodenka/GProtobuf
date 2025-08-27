@@ -88,6 +88,24 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                     // Analyze map/dictionary information
                     var (isMap, keyType, valueType) = AnalyzeMapType(property.Type);
 
+                    // Check if type is enum
+                    bool isEnum = false;
+                    string enumUnderlyingType = null;
+                    
+                    // Handle nullable enum types
+                    var checkType = property.Type;
+                    if (isNullable && property.Type is INamedTypeSymbol nullableType && nullableType.TypeArguments.Length == 1)
+                    {
+                        checkType = nullableType.TypeArguments[0];
+                    }
+                    
+                    if (checkType.TypeKind == TypeKind.Enum)
+                    {
+                        isEnum = true;
+                        var enumType = (INamedTypeSymbol)checkType;
+                        enumUnderlyingType = enumType.EnumUnderlyingType?.ToDisplayString() ?? "System.Int32";
+                    }
+
                     // Vytvoríme inštanciu s FieldId
                     var protoMember = new Core.ProtoMemberAttribute(fieldId)
                     {
@@ -102,6 +120,8 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                         IsMap = isMap,
                         MapKeyType = keyType,
                         MapValueType = valueType,
+                        IsEnum = isEnum,
+                        EnumUnderlyingType = enumUnderlyingType,
                     };
 
                     // Spracujeme voliteľné NamedArguments

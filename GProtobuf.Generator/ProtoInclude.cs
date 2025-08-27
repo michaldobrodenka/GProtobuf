@@ -157,5 +157,15 @@ namespace GProtobuf.Core
         /// The value type for map/dictionary types (e.g., "int" for Dictionary<string, int>)
         /// </summary>
         public string MapValueType { get; set; }
+        
+        /// <summary>
+        /// Indicates if this member is an enum type
+        /// </summary>
+        public bool IsEnum { get; set; }
+        
+        /// <summary>
+        /// The underlying type of the enum (e.g., "System.Int32")
+        /// </summary>
+        public string EnumUnderlyingType { get; set; }
     }
 }

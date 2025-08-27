@@ -1045,6 +1045,15 @@ class ObjectTree
             WriteArrayProtoMember(sb, protoMember);
             return;
         }
+        else if (protoMember.IsEnum)
+        {
+            // Handle enum types - serialize as varint32 (cast to int)
+            sb.AppendIndentedLine($"result.{protoMember.Name} = ({typeName})reader.ReadVarInt32();");
+            sb.AppendIndentedLine($"continue;");
+            sb.EndBlock();
+            sb.AppendNewLine();
+            return;
+        }
         
         switch(typeName)
         {
@@ -1184,6 +1193,11 @@ class ObjectTree
             case "Byte[]":
             case "System.Byte[]":
                 sb.AppendIndentedLine($"result.{protoMember.Name} = reader.ReadByteArray();");
+                break;
+
+            case "TimeSpan":
+            case "System.TimeSpan":
+                sb.AppendIndentedLine($"result.{protoMember.Name} = new TimeSpan((long)reader.ReadUInt64(wireType));");
                 break;
 
             case "System.Int32[]":
@@ -1643,6 +1657,27 @@ class ObjectTree
             WriteArrayProtoMemberSerializer(sb, protoMember, objectName, writeTarget, writeTargetShortName);
             return;
         }
+        else if (protoMember.IsEnum)
+        {
+            // Handle enum types - serialize as varint32 (cast to int)
+            if (isNullable)
+            {
+                sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name}.HasValue)");
+                sb.StartNewBlock();
+                WritePrecomputedTag(sb, protoMember.FieldId, WireType.VarInt);
+                sb.AppendIndentedLine($"writer.WriteVarInt32((int){objectName}.{protoMember.Name}.Value);");
+                sb.EndBlock();
+            }
+            else
+            {
+                sb.AppendIndentedLine($"if ((int){objectName}.{protoMember.Name} != 0)");
+                sb.StartNewBlock();
+                WritePrecomputedTag(sb, protoMember.FieldId, WireType.VarInt);
+                sb.AppendIndentedLine($"writer.WriteVarInt32((int){objectName}.{protoMember.Name});");
+                sb.EndBlock();
+            }
+            return;
+        }
 
         switch (typeName)
         {
@@ -2003,6 +2038,26 @@ class ObjectTree
                 sb.AppendIndentedLine($"writer.WriteVarUInt32((uint){objectName}.{protoMember.Name}.Length);");
                 sb.AppendIndentedLine($"writer.Stream.Write({objectName}.{protoMember.Name});");
                 sb.EndBlock();
+                break;
+
+            case "TimeSpan":
+            case "System.TimeSpan":
+                if (isNullable)
+                {
+                    sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name}.HasValue)");
+                    sb.StartNewBlock();
+                    WritePrecomputedTag(sb, protoMember.FieldId, WireType.VarInt);
+                    sb.AppendIndentedLine($"writer.WriteUInt64((ulong){objectName}.{protoMember.Name}.Value.Ticks);");
+                    sb.EndBlock();
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != TimeSpan.Zero)");
+                    sb.StartNewBlock();
+                    WritePrecomputedTag(sb, protoMember.FieldId, WireType.VarInt);
+                    sb.AppendIndentedLine($"writer.WriteUInt64((ulong){objectName}.{protoMember.Name}.Ticks);");
+                    sb.EndBlock();
+                }
                 break;
 
             case "System.Int32[]":
@@ -2393,6 +2448,27 @@ class ObjectTree
             WriteArrayProtoMemberSizeCalculator(sb, protoMember);
             return;
         }
+        else if (protoMember.IsEnum)
+        {
+            // Handle enum types - serialize as varint32 (cast to int)
+            if (isNullable)
+            {
+                sb.AppendIndentedLine($"if (obj.{protoMember.Name}.HasValue)");
+                sb.StartNewBlock();
+                WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.VarInt);
+                sb.AppendIndentedLine($"calculator.WriteVarInt32((int)obj.{protoMember.Name}.Value);");
+                sb.EndBlock();
+            }
+            else
+            {
+                sb.AppendIndentedLine($"if ((int)obj.{protoMember.Name} != 0)");
+                sb.StartNewBlock();
+                WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.VarInt);
+                sb.AppendIndentedLine($"calculator.WriteVarInt32((int)obj.{protoMember.Name});");
+                sb.EndBlock();
+            }
+            return;
+        }
 
         switch (typeName)
         {
@@ -2741,6 +2817,26 @@ class ObjectTree
                 WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.Len);
                 sb.AppendIndentedLine($"calculator.WriteBytes(obj.{protoMember.Name});");
                 sb.EndBlock();
+                break;
+
+            case "TimeSpan":
+            case "System.TimeSpan":
+                if (protoMember.IsNullable)
+                {
+                    sb.AppendIndentedLine($"if (obj.{protoMember.Name}.HasValue)");
+                    sb.StartNewBlock();
+                    WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.VarInt);
+                    sb.AppendIndentedLine($"calculator.WriteUInt64((ulong)obj.{protoMember.Name}.Value.Ticks);");
+                    sb.EndBlock();
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"if (obj.{protoMember.Name} != TimeSpan.Zero)");
+                    sb.StartNewBlock();
+                    WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.VarInt);
+                    sb.AppendIndentedLine($"calculator.WriteUInt64((ulong)obj.{protoMember.Name}.Ticks);");
+                    sb.EndBlock();
+                }
                 break;
 
             case "System.Int32[]":
