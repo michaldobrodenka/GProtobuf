@@ -52,5 +52,9 @@ namespace GProtobuf.Tests.TestModel
         // Test nullable Guid
         [ProtoMember(15)]
         public Guid? NullableGuidValue { get; set; }
+
+        // Test nullable Char
+        [ProtoMember(16)]
+        public char? NullableCharValue { get; set; }
     }
 }

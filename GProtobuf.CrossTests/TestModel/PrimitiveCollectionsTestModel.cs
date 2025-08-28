@@ -118,5 +118,18 @@ namespace GProtobuf.Tests.TestModel
         // Test case for ReadPackedFixedSizeInt32List() optimization
         [ProtoMember(34, IsPacked = true, DataFormat = DataFormat.FixedSize)]
         public List<int> PackedFixedSizeIntList { get; set; }
+
+        // Char collections
+        [ProtoMember(35)]
+        public List<char> CharList { get; set; }
+
+        [ProtoMember(36, IsPacked = true)]
+        public List<char> PackedCharList { get; set; }
+
+        [ProtoMember(37)]
+        public ICollection<char> CharICollection { get; set; }
+
+        [ProtoMember(38)]
+        public IList<char> CharIList { get; set; }
     }
 }

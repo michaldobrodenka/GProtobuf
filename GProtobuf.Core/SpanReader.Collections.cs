@@ -758,5 +758,20 @@ namespace GProtobuf.Core
         }
 
         #endregion
+
+        // Char array support
+        public char[] ReadPackedVarIntCharArray()
+        {
+            int packedLength = ReadVarInt32();
+            var endPos = position + packedLength;
+            var result = new List<char>();
+            
+            while (position < endPos)
+            {
+                result.Add((char)ReadVarInt32());
+            }
+            
+            return result.ToArray();
+        }
     }
 }

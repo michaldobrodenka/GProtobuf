@@ -76,5 +76,8 @@ namespace Todos.Model
 
         [ProtoMember(11)]
         public Dictionary<CustomNested[], List<int>> CustomNestedArrayIntListMap { get; set; }
+
+        [ProtoMember(12)]
+        public char MyChar { get; set; }
     }
 }

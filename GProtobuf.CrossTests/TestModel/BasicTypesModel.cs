@@ -43,5 +43,8 @@ namespace GProtobuf.Tests.TestModel
 
         [ProtoMember(13)]
         public byte[] BytesValue { get; set; }
+
+        [ProtoMember(14)]
+        public char CharValue { get; set; }
     }
 }

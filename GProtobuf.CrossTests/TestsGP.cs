@@ -144,7 +144,8 @@ public sealed class GProtobufToProtobufNetTests : BaseSerializationTest
             DoubleValue = 2.718281828459045,
             BoolValue = true,
             StringValue = "Hello, Protocol Buffers!",
-            BytesValue = new byte[] { 1, 2, 3, 4, 5, 255, 0, 127 }
+            BytesValue = new byte[] { 1, 2, 3, 4, 5, 255, 0, 127 },
+            CharValue = 'A'
         };
 
         var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeBasicTypesModel);
@@ -184,7 +185,8 @@ public sealed class GProtobufToProtobufNetTests : BaseSerializationTest
             DoubleValue = double.MaxValue,
             BoolValue = false,
             StringValue = "",
-            BytesValue = new byte[0]
+            BytesValue = new byte[0],
+            CharValue = char.MaxValue
         };
 
         var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeBasicTypesModel);
@@ -205,7 +207,8 @@ public sealed class GProtobufToProtobufNetTests : BaseSerializationTest
             DoubleValue = 123.456,
             BoolValue = true,
             StringValue = null, // Null string
-            BytesValue = null   // Null byte array
+            BytesValue = null,   // Null byte array
+            CharValue = 'Z'
         };
 
         var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeBasicTypesModel);

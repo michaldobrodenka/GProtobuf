@@ -1105,6 +1105,12 @@ class ObjectTree
                 sb.AppendIndentedLine($"result.{protoMember.Name} = reader.ReadByte(wireType);");
                 break;
 
+            case "char":
+            case "Char":
+            case "System.Char":
+                sb.AppendIndentedLine($"result.{protoMember.Name} = (char)reader.ReadVarUInt32();");
+                break;
+
             case "sbyte":
             case "SByte":
             case "System.SByte":
@@ -1629,6 +1635,37 @@ class ObjectTree
                 }
                 break;
 
+            case "System.Char[]":
+            case "Char[]":
+            case "char[]":
+                if (protoMember.IsPacked)
+                {
+                    sb.AppendIndentedLine($"result.{protoMember.Name} = reader.ReadPackedVarIntCharArray();");
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"List<char> resultList = new();");
+                    sb.AppendIndentedLine($"var wireType1 = wireType;");
+                    sb.AppendIndentedLine($"var fieldId1 = fieldId;");
+                    sb.AppendNewLine();
+                    sb.AppendIndentedLine($"while (!reader.IsEnd)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"var number = (char)reader.ReadVarInt32();");
+                    sb.AppendIndentedLine($"var p = reader.Position;");
+                    sb.AppendIndentedLine($"resultList.Add(number);");
+                    sb.AppendIndentedLine($"if (reader.IsEnd) break; // End of buffer, no more data");
+                    sb.AppendIndentedLine($"(wireType1, fieldId1) = reader.ReadWireTypeAndFieldId();");
+                    sb.AppendIndentedLine($"if (fieldId1 != fieldId)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"reader.Position = p; // rewind");
+                    sb.AppendIndentedLine($"break;");
+                    sb.EndBlock();
+                    sb.EndBlock();
+                    sb.AppendNewLine();
+                    sb.AppendIndentedLine($"result.{protoMember.Name} = resultList.ToArray();");
+                }
+                break;
+
             default:
 
                 sb.AppendIndentedLine($"var length = reader.ReadVarInt32();");
@@ -1782,6 +1819,27 @@ class ObjectTree
                     sb.StartNewBlock();
                     WritePrecomputedTag(sb, protoMember.FieldId, WireType.VarInt);
                     sb.AppendIndentedLine($"writer.WriteByte({objectName}.{protoMember.Name});");
+                    sb.EndBlock();
+                }
+                break;
+
+            case "char":
+            case "Char":
+            case "System.Char":
+                if (isNullable)
+                {
+                    sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name}.HasValue)");
+                    sb.StartNewBlock();
+                    WritePrecomputedTag(sb, protoMember.FieldId, WireType.VarInt);
+                    sb.AppendIndentedLine($"writer.WriteVarUInt32((uint){objectName}.{protoMember.Name}.Value);");
+                    sb.EndBlock();
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != '\\0')");
+                    sb.StartNewBlock();
+                    WritePrecomputedTag(sb, protoMember.FieldId, WireType.VarInt);
+                    sb.AppendIndentedLine($"writer.WriteVarUInt32((uint){objectName}.{protoMember.Name});");
                     sb.EndBlock();
                 }
                 break;
@@ -2423,6 +2481,26 @@ class ObjectTree
                 sb.EndBlock();
                 break;
 
+            case "System.Char[]":
+            case "Char[]":
+            case "char[]":
+                sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != null)");
+                sb.StartNewBlock();
+                if (protoMember.IsPacked)
+                {
+                    WritePrecomputedTag(sb, protoMember.FieldId, WireType.Len);
+                    sb.AppendIndentedLine($"var packedSize = Utils.GetVarintPackedCollectionSizeInt32({objectName}.{protoMember.Name}.Select(c => (int)c).ToArray());");
+                    sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)packedSize);");
+                    sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteVarUInt32((uint)v); }}");
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.VarInt);");
+                    sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteVarInt32(tagAndWire); writer.WriteVarUInt32((uint)v); }}");
+                }
+                sb.EndBlock();
+                break;
+
             default:
                 sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != null)");
                 sb.StartNewBlock();
@@ -2571,6 +2649,27 @@ class ObjectTree
                     sb.StartNewBlock();
                     WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.VarInt);
                     sb.AppendIndentedLine($"calculator.WriteByte(obj.{protoMember.Name});");
+                    sb.EndBlock();
+                }
+                break;
+
+            case "char":
+            case "Char":
+            case "System.Char":
+                if (isNullable)
+                {
+                    sb.AppendIndentedLine($"if (obj.{protoMember.Name}.HasValue)");
+                    sb.StartNewBlock();
+                    WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.VarInt);
+                    sb.AppendIndentedLine($"calculator.WriteVarUInt32((uint)obj.{protoMember.Name}.Value);");
+                    sb.EndBlock();
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"if (obj.{protoMember.Name} != '\\0')");
+                    sb.StartNewBlock();
+                    WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.VarInt);
+                    sb.AppendIndentedLine($"calculator.WriteVarUInt32((uint)obj.{protoMember.Name});");
                     sb.EndBlock();
                 }
                 break;
@@ -3169,6 +3268,24 @@ class ObjectTree
                 sb.EndBlock();
                 break;
 
+            case "System.Char[]":
+            case "Char[]":
+            case "char[]":
+                sb.AppendIndentedLine($"if (obj.{protoMember.Name} != null)");
+                sb.StartNewBlock();
+                if (protoMember.IsPacked)
+                {
+                    WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.Len);
+                    sb.AppendIndentedLine($"calculator.WritePackedInt32Array(obj.{protoMember.Name}.Select(c => (int)c).ToArray());");
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.VarInt);");
+                    sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteVarInt32(tagAndWire); calculator.WriteVarUInt32((uint)v); }}");
+                }
+                sb.EndBlock();
+                break;
+
             default:
                 sb.AppendIndentedLine($"if (obj.{protoMember.Name} != null)");
                 sb.StartNewBlock();
@@ -3300,6 +3417,7 @@ class ObjectTree
             "ushort" or "System.UInt16" => true,
             "uint" or "System.UInt32" => true,
             "ulong" or "System.UInt64" => true,
+            "char" or "System.Char" => true,  // char is serialized as varint
             _ => false
         };
     }
@@ -3424,6 +3542,10 @@ class ObjectTree
                     {
                         sb.AppendIndentedLine($"key = entryReader.ReadVarInt32();");
                     }
+                    else if (keyTypeName == "char" || keyTypeName == "Char")
+                    {
+                        sb.AppendIndentedLine($"key = (char)entryReader.ReadVarUInt32();");
+                    }
                     else if (keyTypeName == "string" || keyTypeName == "String")
                     {
                         sb.AppendIndentedLine($"key = entryReader.ReadString(entryWireType);");
@@ -3451,6 +3573,10 @@ class ObjectTree
                     else if (valueTypeName == "int" || valueTypeName == "Int32")
                     {
                         sb.AppendIndentedLine($"value = entryReader.ReadVarInt32();");
+                    }
+                    else if (valueTypeName == "char" || valueTypeName == "Char")
+                    {
+                        sb.AppendIndentedLine($"value = (char)entryReader.ReadVarUInt32();");
                     }
                     else if (valueTypeName == "string" || valueTypeName == "String")
                     {
@@ -4028,6 +4154,10 @@ class ObjectTree
             case "System.Boolean":
             case "Boolean":
                 return "ReadBool(WireType.VarInt)";
+            case "char":
+            case "System.Char":
+            case "Char":
+                return "(char)ReadVarUInt32()";
             case "float":
             case "System.Single":
             case "Single":
@@ -4076,6 +4206,11 @@ class ObjectTree
             case "System.Boolean":
             case "Boolean":
                 sb.AppendIndentedLine($"{targetVar} = {readerVar}.ReadBool({wireTypeVar});");
+                break;
+            case "char":
+            case "System.Char":
+            case "Char":
+                sb.AppendIndentedLine($"{targetVar} = (char){readerVar}.ReadVarUInt32();");
                 break;
             case "float":
             case "System.Single":
@@ -4141,6 +4276,10 @@ class ObjectTree
             case "System.Byte":
             case "Byte":
                 return $"ReadByte({wireTypeVar})";
+            case "char":
+            case "System.Char":
+            case "Char":
+                return $"(char)ReadVarUInt32()";
             default:
                 return $"ReadVarInt32()";
         }
@@ -4196,6 +4335,11 @@ class ObjectTree
             case "System.Boolean":
             case "Boolean":
                 sb.AppendIndentedLine($"{targetVar} = {readerVar}.ReadBool(entryWireType);");
+                break;
+            case "char":
+            case "System.Char":
+            case "Char":
+                sb.AppendIndentedLine($"{targetVar} = (char){readerVar}.ReadVarUInt32();");
                 break;
             case "float":
             case "System.Single":
@@ -4340,6 +4484,11 @@ class ObjectTree
             case "System.Byte":
             case "Byte":
                 sb.AppendIndentedLine($"{writerVar}.WriteSingleByte({varName});");
+                break;
+            case "char":
+            case "System.Char":
+            case "Char":
+                sb.AppendIndentedLine($"{writerVar}.WriteVarUInt32((uint){varName});");
                 break;
             default:
                 sb.AppendIndentedLine($"{writerVar}.WriteVarUInt32((uint){varName});");
@@ -5151,6 +5300,9 @@ class ObjectTree
             case "bool":
             case "System.Boolean":
             case "Boolean":
+            case "char":
+            case "System.Char":
+            case "Char":
                 return "WireType.VarInt";
             case "float":
             case "System.Single":
@@ -5247,6 +5399,11 @@ class ObjectTree
             case "System.Boolean":
             case "Boolean":
                 sb.AppendIndentedLine($"{calculatorVar}.WriteBool({valueAccess});");
+                break;
+            case "char":
+            case "System.Char":
+            case "Char":
+                sb.AppendIndentedLine($"{calculatorVar}.WriteVarUInt32((uint){valueAccess});");
                 break;
             case "float":
             case "System.Single":
@@ -5476,6 +5633,7 @@ class ObjectTree
             "ulong" or "System.UInt64" => dataFormat == DataFormat.FixedSize
                 ? "reader.ReadPackedFixedSizeUInt64Array()"
                 : "reader.ReadPackedUInt64Array()",
+            "char" or "System.Char" => "reader.ReadPackedVarIntCharArray()",
             _ => throw new InvalidOperationException($"Unsupported primitive type for collections: {elementTypeName}")
         };
     }
@@ -5743,6 +5901,11 @@ class ObjectTree
                 sb.AppendIndentedLine($"{calculator}.WriteBool({keyAccess});");
                 break;
                 
+            case "char":
+            case "Char":
+                sb.AppendIndentedLine($"{calculator}.WriteVarUInt32((uint){keyAccess});");
+                break;
+                
             case "uint":
             case "UInt32":
                 sb.AppendIndentedLine($"{calculator}.WriteUInt32({keyAccess});");
@@ -5904,6 +6067,11 @@ class ObjectTree
                 sb.AppendIndentedLine($"{calculator}.WriteBool({valueAccess});");
                 break;
                 
+            case "char":
+            case "Char":
+                sb.AppendIndentedLine($"{calculator}.WriteVarUInt32((uint){valueAccess});");
+                break;
+                
             case "float":
                 sb.AppendIndentedLine($"{calculator}.WriteFloat({valueAccess});");
                 break;
@@ -5955,6 +6123,10 @@ class ObjectTree
                 break;
             case "byte":
                 sb.AppendIndentedLine($"{calculator}.WriteByte({elementAccess});");
+                break;
+            case "char":
+            case "Char":
+                sb.AppendIndentedLine($"{calculator}.WriteVarUInt32((uint){elementAccess});");
                 break;
             default:
                 var sanitizedTypeName = SanitizeTypeNameForMethod(elementType);
@@ -6165,6 +6337,12 @@ class ObjectTree
                 sb.AppendIndentedLine($"writer.WriteBool({keyAccess});");
                 break;
                 
+            case "char":
+            case "Char":
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x08); // field 1, VarInt");
+                sb.AppendIndentedLine($"writer.WriteVarUInt32((uint){keyAccess});");
+                break;
+                
             case "uint":
             case "UInt32":
                 sb.AppendIndentedLine($"writer.WriteSingleByte(0x08); // field 1, VarInt");
@@ -6353,6 +6531,12 @@ class ObjectTree
                 sb.AppendIndentedLine($"writer.WriteBool({valueAccess});");
                 break;
                 
+            case "char":
+            case "Char":
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x10); // field 2, VarInt");
+                sb.AppendIndentedLine($"writer.WriteVarUInt32((uint){valueAccess});");
+                break;
+                
             case "float":
                 sb.AppendIndentedLine($"writer.WriteSingleByte(0x15); // field 2, Fixed32b");
                 sb.AppendIndentedLine($"writer.WriteFloat({valueAccess});");
@@ -6407,6 +6591,10 @@ class ObjectTree
                 break;
             case "byte":
                 sb.AppendIndentedLine($"writer.WriteByte({elementAccess});");
+                break;
+            case "char":
+            case "Char":
+                sb.AppendIndentedLine($"writer.WriteVarUInt32((uint){elementAccess});");
                 break;
             default:
                 var sanitizedTypeName = SanitizeTypeNameForMethod(elementType);
@@ -6977,6 +7165,7 @@ class ObjectTree
                 DataFormat.FixedSize => "foreach(var item in tempArray) writer.WriteFixedUInt64(item)",
                 _ => "foreach(var item in tempArray) writer.WriteUInt64(item)"
             },
+            "char" or "System.Char" => "foreach(var item in tempArray) writer.WriteVarUInt32((uint)item)",
             _ => $"foreach(var item in tempArray) writer.Write{elementTypeName}(item)"
         };
     }
@@ -7027,6 +7216,7 @@ class ObjectTree
                 DataFormat.FixedSize => "writer.WriteFixedUInt64(item)",
                 _ => "writer.WriteUInt64(item)"
             },
+            "char" or "System.Char" => "writer.WriteVarUInt32((uint)item)",
             _ => $"writer.Write{elementTypeName}(item)"
         };
     }
@@ -7090,6 +7280,7 @@ class ObjectTree
                 DataFormat.FixedSize => "foreach(var item in tempArray) calculator.WriteFixedUInt64(item)",
                 _ => "foreach(var item in tempArray) calculator.WriteUInt64(item)"
             },
+            "char" or "System.Char" => "foreach(var item in tempArray) calculator.WriteVarUInt32((uint)item)",
             _ => $"foreach(var item in tempArray) calculator.Write{elementTypeName}(item)"
         };
     }
@@ -7140,6 +7331,7 @@ class ObjectTree
                 DataFormat.FixedSize => "calculator.WriteFixedUInt64(item)",
                 _ => "calculator.WriteUInt64(item)"
             },
+            "char" or "System.Char" => "calculator.WriteVarUInt32((uint)item)",
             _ => $"calculator.Write{elementTypeName}(item)"
         };
     }
@@ -7198,6 +7390,7 @@ class ObjectTree
             "ulong" or "System.UInt64" => dataFormat == DataFormat.FixedSize
                 ? "reader.ReadFixedUInt64()"
                 : "reader.ReadUInt64(wireType1)",
+            "char" or "System.Char" => "(char)reader.ReadVarUInt32()",
             _ => throw new InvalidOperationException($"Unsupported primitive type: {elementTypeName}")
         };
     }

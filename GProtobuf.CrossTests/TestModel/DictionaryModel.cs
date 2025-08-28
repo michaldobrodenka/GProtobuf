@@ -34,5 +34,14 @@ namespace GProtobuf.Tests.TestModel
 
         [ProtoMember(3)]
         public DerivedDictionary DerivedDictionary { get; set; }
+
+        [ProtoMember(4)]
+        public Dictionary<char, string> CharKeyDictionary { get; set; }
+
+        [ProtoMember(5)]
+        public Dictionary<int, char> CharValueDictionary { get; set; }
+
+        [ProtoMember(6)]
+        public Dictionary<char, char> CharCharDictionary { get; set; }
     }
 }

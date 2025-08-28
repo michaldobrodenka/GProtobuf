@@ -157,5 +157,18 @@ namespace GProtobuf.Tests.TestModel
         
         [ProtoMember(46)]
         public ulong[] ULongArrayExtremes { get; set; } // Min/Max values
+
+        // Char arrays
+        [ProtoMember(47)]
+        public char[] CharArray { get; set; }
+
+        [ProtoMember(48, IsPacked = true)]
+        public char[] CharArrayPacked { get; set; }
+
+        [ProtoMember(49)]
+        public char[] CharArrayEmpty { get; set; }
+
+        [ProtoMember(50)]
+        public char[] CharArrayNull { get; set; }
     }
 }
