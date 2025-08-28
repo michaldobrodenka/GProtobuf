@@ -167,5 +167,25 @@ namespace GProtobuf.Core
         /// The underlying type of the enum (e.g., "System.Int32")
         /// </summary>
         public string EnumUnderlyingType { get; set; }
+        
+        /// <summary>
+        /// Indicates if the map key type is an enum
+        /// </summary>
+        public bool MapKeyIsEnum { get; set; }
+        
+        /// <summary>
+        /// The underlying type of the map key enum
+        /// </summary>
+        public string MapKeyEnumUnderlyingType { get; set; }
+        
+        /// <summary>
+        /// Indicates if the map value type is an enum
+        /// </summary>
+        public bool MapValueIsEnum { get; set; }
+        
+        /// <summary>
+        /// The underlying type of the map value enum
+        /// </summary>
+        public string MapValueEnumUnderlyingType { get; set; }
     }
 }

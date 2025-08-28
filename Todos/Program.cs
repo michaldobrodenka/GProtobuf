@@ -53,6 +53,22 @@ namespace Todos
                 CustomNestedIntListMap = new Dictionary<CustomNested, List<int>>
                 {
                     [new CustomNested { Id = 100, Name = "Complex Key", Score = 10.5 }] = new List<int> { 1, 2, 3, 4, 5 }
+                },
+                
+                // NEW: Dictionary with enum as key
+                EnumStringMap = new Dictionary<FirstEnum, string>
+                {
+                    [FirstEnum.First] = "First value",
+                    [FirstEnum.Second] = "Second value",
+                    [FirstEnum.Third] = "Third value"
+                },
+                
+                // NEW: Dictionary with enum as value
+                StringEnumMap = new Dictionary<string, FirstEnum>
+                {
+                    ["key1"] = FirstEnum.First,
+                    ["key2"] = FirstEnum.Second,
+                    ["key3"] = FirstEnum.Third
                 }
             };
 
@@ -152,6 +168,56 @@ namespace Todos
             }
             
             Console.WriteLine("\n✅ Custom nested class as map key/value works correctly!");
+            
+            // Test Dictionary<FirstEnum, string>
+            Console.WriteLine("\n=== Testing Enum as Dictionary Key ===");
+            if (basic2.EnumStringMap != null)
+            {
+                Console.WriteLine($"EnumStringMap has {basic2.EnumStringMap.Count} entries");
+                foreach (var kvp in basic2.EnumStringMap)
+                {
+                    Console.WriteLine($"  {kvp.Key}: {kvp.Value}");
+                }
+                
+                // Verify values
+                if (basic2.EnumStringMap[FirstEnum.First] != "First value" ||
+                    basic2.EnumStringMap[FirstEnum.Second] != "Second value" ||
+                    basic2.EnumStringMap[FirstEnum.Third] != "Third value")
+                {
+                    Console.WriteLine("ERROR: EnumStringMap values don't match!");
+                }
+                else
+                {
+                    Console.WriteLine("  ✓ All enum key mappings verified successfully!");
+                }
+            }
+            
+            Console.WriteLine("\n✅ Enum as dictionary key works correctly!");
+            
+            // Test Dictionary<string, FirstEnum>
+            Console.WriteLine("\n=== Testing Enum as Dictionary Value ===");
+            if (basic2.StringEnumMap != null)
+            {
+                Console.WriteLine($"StringEnumMap has {basic2.StringEnumMap.Count} entries");
+                foreach (var kvp in basic2.StringEnumMap)
+                {
+                    Console.WriteLine($"  {kvp.Key}: {kvp.Value}");
+                }
+                
+                // Verify values
+                if (basic2.StringEnumMap["key1"] != FirstEnum.First ||
+                    basic2.StringEnumMap["key2"] != FirstEnum.Second ||
+                    basic2.StringEnumMap["key3"] != FirstEnum.Third)
+                {
+                    Console.WriteLine("ERROR: StringEnumMap values don't match!");
+                }
+                else
+                {
+                    Console.WriteLine("  ✓ All enum value mappings verified successfully!");
+                }
+            }
+            
+            Console.WriteLine("\n✅ Enum as dictionary value works correctly!");
         }
     }
 }

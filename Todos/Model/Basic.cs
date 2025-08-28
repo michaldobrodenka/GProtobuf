@@ -79,5 +79,14 @@ namespace Todos.Model
 
         [ProtoMember(12)]
         public char MyChar { get; set; }
+
+        //[ProtoMember(13)]
+        //public Dictionary<int, Dictionary<int, int>> GroupPermissions { get; set; }
+
+        [ProtoMember(14)]
+        public Dictionary<FirstEnum, string> EnumStringMap { get; set; }
+
+        [ProtoMember(15)]
+        public Dictionary<string, FirstEnum> StringEnumMap { get; set; }
     }
 }

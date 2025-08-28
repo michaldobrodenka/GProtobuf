@@ -133,6 +133,35 @@ public sealed class DictionaryModelTests : BaseSerializationTest
         return model;
     }
     
+    private static DictionaryModel CreateEnumDictionaryModel()
+    {
+        return new DictionaryModel
+        {
+            Dictionary = new Dictionary<int, string> { { 1, "First" } },
+            EnumKeyDictionary = new Dictionary<TestEnum, string>
+            {
+                { TestEnum.None, "None Value" },
+                { TestEnum.First, "First Value" },
+                { TestEnum.Second, "Second Value" },
+                { TestEnum.Third, "Third Value" }
+            },
+            EnumValueDictionary = new Dictionary<string, TestEnum>
+            {
+                { "None", TestEnum.None },
+                { "First", TestEnum.First },
+                { "Second", TestEnum.Second },
+                { "Third", TestEnum.Third }
+            },
+            EnumEnumDictionary = new Dictionary<TestEnum, TestEnum>
+            {
+                { TestEnum.None, TestEnum.Third },
+                { TestEnum.First, TestEnum.Second },
+                { TestEnum.Second, TestEnum.First },
+                { TestEnum.Third, TestEnum.None }
+            }
+        };
+    }
+    
     #endregion
     
     private string GetHexDump(byte[] data, string label)
@@ -337,6 +366,39 @@ public sealed class DictionaryModelTests : BaseSerializationTest
         pair2.Value.StringValue.Should().Be("Emoji test: 🌟🎯🔥");
     }
     
+    [Fact]
+    public void DictionaryModel_EnumDictionaries_PG()
+    {
+        var model = CreateEnumDictionaryModel();
+
+        var data = SerializeWithProtobufNet(model);
+        var deserialized = DeserializeWithGProtobuf(data, bytes => TestModel.Serialization.Deserializers.DeserializeDictionaryModel(bytes));
+
+        // Verify EnumKeyDictionary
+        deserialized.EnumKeyDictionary.Should().NotBeNull();
+        deserialized.EnumKeyDictionary.Should().HaveCount(4);
+        deserialized.EnumKeyDictionary[TestEnum.None].Should().Be("None Value");
+        deserialized.EnumKeyDictionary[TestEnum.First].Should().Be("First Value");
+        deserialized.EnumKeyDictionary[TestEnum.Second].Should().Be("Second Value");
+        deserialized.EnumKeyDictionary[TestEnum.Third].Should().Be("Third Value");
+        
+        // Verify EnumValueDictionary
+        deserialized.EnumValueDictionary.Should().NotBeNull();
+        deserialized.EnumValueDictionary.Should().HaveCount(4);
+        deserialized.EnumValueDictionary["None"].Should().Be(TestEnum.None);
+        deserialized.EnumValueDictionary["First"].Should().Be(TestEnum.First);
+        deserialized.EnumValueDictionary["Second"].Should().Be(TestEnum.Second);
+        deserialized.EnumValueDictionary["Third"].Should().Be(TestEnum.Third);
+        
+        // Verify EnumEnumDictionary
+        deserialized.EnumEnumDictionary.Should().NotBeNull();
+        deserialized.EnumEnumDictionary.Should().HaveCount(4);
+        deserialized.EnumEnumDictionary[TestEnum.None].Should().Be(TestEnum.Third);
+        deserialized.EnumEnumDictionary[TestEnum.First].Should().Be(TestEnum.Second);
+        deserialized.EnumEnumDictionary[TestEnum.Second].Should().Be(TestEnum.First);
+        deserialized.EnumEnumDictionary[TestEnum.Third].Should().Be(TestEnum.None);
+    }
+    
     #endregion
     
     #region GG Tests (GProtobuf to GProtobuf)
@@ -426,6 +488,39 @@ public sealed class DictionaryModelTests : BaseSerializationTest
         data1.Should().Equal(data2, "serialization should be deterministic");
     }
     
+    [Fact]
+    public void DictionaryModel_EnumDictionaries_GG()
+    {
+        var model = CreateEnumDictionaryModel();
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeDictionaryModel);
+        var deserialized = DeserializeWithGProtobuf(data, bytes => TestModel.Serialization.Deserializers.DeserializeDictionaryModel(bytes));
+
+        // Verify EnumKeyDictionary
+        deserialized.EnumKeyDictionary.Should().NotBeNull();
+        deserialized.EnumKeyDictionary.Should().HaveCount(4);
+        deserialized.EnumKeyDictionary[TestEnum.None].Should().Be("None Value");
+        deserialized.EnumKeyDictionary[TestEnum.First].Should().Be("First Value");
+        deserialized.EnumKeyDictionary[TestEnum.Second].Should().Be("Second Value");
+        deserialized.EnumKeyDictionary[TestEnum.Third].Should().Be("Third Value");
+        
+        // Verify EnumValueDictionary
+        deserialized.EnumValueDictionary.Should().NotBeNull();
+        deserialized.EnumValueDictionary.Should().HaveCount(4);
+        deserialized.EnumValueDictionary["None"].Should().Be(TestEnum.None);
+        deserialized.EnumValueDictionary["First"].Should().Be(TestEnum.First);
+        deserialized.EnumValueDictionary["Second"].Should().Be(TestEnum.Second);
+        deserialized.EnumValueDictionary["Third"].Should().Be(TestEnum.Third);
+        
+        // Verify EnumEnumDictionary
+        deserialized.EnumEnumDictionary.Should().NotBeNull();
+        deserialized.EnumEnumDictionary.Should().HaveCount(4);
+        deserialized.EnumEnumDictionary[TestEnum.None].Should().Be(TestEnum.Third);
+        deserialized.EnumEnumDictionary[TestEnum.First].Should().Be(TestEnum.Second);
+        deserialized.EnumEnumDictionary[TestEnum.Second].Should().Be(TestEnum.First);
+        deserialized.EnumEnumDictionary[TestEnum.Third].Should().Be(TestEnum.None);
+    }
+    
     #endregion
     
     #region GP Tests (GProtobuf to Protobuf-net)
@@ -454,6 +549,39 @@ public sealed class DictionaryModelTests : BaseSerializationTest
                 actual.Should().Be(expected);
             })
             .WhenTypeIs<string>());
+    }
+    
+    [Fact]
+    public void DictionaryModel_EnumDictionaries_GP()
+    {
+        var model = CreateEnumDictionaryModel();
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeDictionaryModel);
+        var deserialized = DeserializeWithProtobufNet<DictionaryModel>(data);
+
+        // Verify EnumKeyDictionary
+        deserialized.EnumKeyDictionary.Should().NotBeNull();
+        deserialized.EnumKeyDictionary.Should().HaveCount(4);
+        deserialized.EnumKeyDictionary[TestEnum.None].Should().Be("None Value");
+        deserialized.EnumKeyDictionary[TestEnum.First].Should().Be("First Value");
+        deserialized.EnumKeyDictionary[TestEnum.Second].Should().Be("Second Value");
+        deserialized.EnumKeyDictionary[TestEnum.Third].Should().Be("Third Value");
+        
+        // Verify EnumValueDictionary
+        deserialized.EnumValueDictionary.Should().NotBeNull();
+        deserialized.EnumValueDictionary.Should().HaveCount(4);
+        deserialized.EnumValueDictionary["None"].Should().Be(TestEnum.None);
+        deserialized.EnumValueDictionary["First"].Should().Be(TestEnum.First);
+        deserialized.EnumValueDictionary["Second"].Should().Be(TestEnum.Second);
+        deserialized.EnumValueDictionary["Third"].Should().Be(TestEnum.Third);
+        
+        // Verify EnumEnumDictionary
+        deserialized.EnumEnumDictionary.Should().NotBeNull();
+        deserialized.EnumEnumDictionary.Should().HaveCount(4);
+        deserialized.EnumEnumDictionary[TestEnum.None].Should().Be(TestEnum.Third);
+        deserialized.EnumEnumDictionary[TestEnum.First].Should().Be(TestEnum.Second);
+        deserialized.EnumEnumDictionary[TestEnum.Second].Should().Be(TestEnum.First);
+        deserialized.EnumEnumDictionary[TestEnum.Third].Should().Be(TestEnum.None);
     }
     
     [Fact]

@@ -86,7 +86,7 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                     var collectionInfo = AnalyzeCollectionType(property.Type);
                     
                     // Analyze map/dictionary information
-                    var (isMap, keyType, valueType) = AnalyzeMapType(property.Type);
+                    var (isMap, keyType, valueType, keyIsEnum, keyEnumType, valueIsEnum, valueEnumType) = AnalyzeMapType(property.Type);
 
                     // Check if type is enum
                     bool isEnum = false;
@@ -120,6 +120,10 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                         IsMap = isMap,
                         MapKeyType = keyType,
                         MapValueType = valueType,
+                        MapKeyIsEnum = keyIsEnum,
+                        MapKeyEnumUnderlyingType = keyEnumType,
+                        MapValueIsEnum = valueIsEnum,
+                        MapValueEnumUnderlyingType = valueEnumType,
                         IsEnum = isEnum,
                         EnumUnderlyingType = enumUnderlyingType,
                     };
@@ -271,10 +275,10 @@ public sealed class SerializerGenerator : IIncrementalGenerator
     /// <summary>
     /// Analyzes if the type is a dictionary/map type and extracts key/value types
     /// </summary>
-    private static (bool isMap, string keyType, string valueType) AnalyzeMapType(ITypeSymbol typeSymbol)
+    private static (bool isMap, string keyType, string valueType, bool keyIsEnum, string keyEnumType, bool valueIsEnum, string valueEnumType) AnalyzeMapType(ITypeSymbol typeSymbol)
     {
         if (typeSymbol is not INamedTypeSymbol namedType)
-            return (false, null, null);
+            return (false, null, null, false, null, false, null);
         
         // Check for Dictionary<TKey, TValue>
         if (namedType.OriginalDefinition?.ToDisplayString() == "System.Collections.Generic.Dictionary<TKey, TValue>" ||
@@ -282,11 +286,23 @@ public sealed class SerializerGenerator : IIncrementalGenerator
         {
             if (namedType.TypeArguments.Length == 2)
             {
-                var keyType = namedType.TypeArguments[0].ToDisplayString();
-                var valueType = namedType.TypeArguments[1].ToDisplayString();
+                var keyTypeSymbol = namedType.TypeArguments[0];
+                var valueTypeSymbol = namedType.TypeArguments[1];
+                
+                var keyType = keyTypeSymbol.ToDisplayString();
+                var valueType = valueTypeSymbol.ToDisplayString();
+                
+                // Check if key is enum
+                bool keyIsEnum = keyTypeSymbol.TypeKind == TypeKind.Enum;
+                string keyEnumUnderlyingType = keyIsEnum ? ((INamedTypeSymbol)keyTypeSymbol).EnumUnderlyingType?.ToDisplayString() ?? "System.Int32" : null;
+                
+                // Check if value is enum
+                bool valueIsEnum = valueTypeSymbol.TypeKind == TypeKind.Enum;
+                string valueEnumUnderlyingType = valueIsEnum ? ((INamedTypeSymbol)valueTypeSymbol).EnumUnderlyingType?.ToDisplayString() ?? "System.Int32" : null;
+                
                 // Arrays as keys are supported in Protocol Buffers - they're treated as byte arrays or repeated fields
                 // Remove the check that prevented collections as keys
-                return (true, keyType, valueType);
+                return (true, keyType, valueType, keyIsEnum, keyEnumUnderlyingType, valueIsEnum, valueEnumUnderlyingType);
             }
         }
         
@@ -296,12 +312,24 @@ public sealed class SerializerGenerator : IIncrementalGenerator
         
         if (dictionaryInterface != null && dictionaryInterface.TypeArguments.Length == 2)
         {
-            var keyType = dictionaryInterface.TypeArguments[0].ToDisplayString();
-            var valueType = dictionaryInterface.TypeArguments[1].ToDisplayString();
+            var keyTypeSymbol = dictionaryInterface.TypeArguments[0];
+            var valueTypeSymbol = dictionaryInterface.TypeArguments[1];
+            
+            var keyType = keyTypeSymbol.ToDisplayString();
+            var valueType = valueTypeSymbol.ToDisplayString();
+            
+            // Check if key is enum
+            bool keyIsEnum = keyTypeSymbol.TypeKind == TypeKind.Enum;
+            string keyEnumUnderlyingType = keyIsEnum ? ((INamedTypeSymbol)keyTypeSymbol).EnumUnderlyingType?.ToDisplayString() ?? "System.Int32" : null;
+            
+            // Check if value is enum
+            bool valueIsEnum = valueTypeSymbol.TypeKind == TypeKind.Enum;
+            string valueEnumUnderlyingType = valueIsEnum ? ((INamedTypeSymbol)valueTypeSymbol).EnumUnderlyingType?.ToDisplayString() ?? "System.Int32" : null;
+            
             // Arrays as keys are supported
-            return (true, keyType, valueType);
+            return (true, keyType, valueType, keyIsEnum, keyEnumUnderlyingType, valueIsEnum, valueEnumUnderlyingType);
         }
         
-        return (false, null, null);
+        return (false, null, null, false, null, false, null);
     }
 }

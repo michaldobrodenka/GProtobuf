@@ -7,6 +7,14 @@ using System.Threading.Tasks;
 
 namespace GProtobuf.Tests.TestModel
 {
+    public enum TestEnum
+    {
+        None = 0,
+        First = 1,
+        Second = 2,
+        Third = 3
+    }
+
     public class DerivedDictionary : Dictionary<long, string>
     { 
     
@@ -43,5 +51,14 @@ namespace GProtobuf.Tests.TestModel
 
         [ProtoMember(6)]
         public Dictionary<char, char> CharCharDictionary { get; set; }
+
+        [ProtoMember(7)]
+        public Dictionary<TestEnum, string> EnumKeyDictionary { get; set; }
+
+        [ProtoMember(8)]
+        public Dictionary<string, TestEnum> EnumValueDictionary { get; set; }
+
+        [ProtoMember(9)]
+        public Dictionary<TestEnum, TestEnum> EnumEnumDictionary { get; set; }
     }
 }

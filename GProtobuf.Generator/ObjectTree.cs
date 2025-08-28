@@ -3671,7 +3671,7 @@ class ObjectTree
         
         // Create a virtual TypeDefinition for the map entry message
         // Map entries are messages with field 1 (key) and field 2 (value)
-        var mapEntryType = CreateMapEntryTypeDefinition(keyType, valueType);
+        var mapEntryType = CreateMapEntryTypeDefinition(keyType, valueType, protoMember.MapKeyIsEnum, protoMember.MapValueIsEnum);
         
         // Create dictionary to collect map entries
         var dictType = GetDictionaryCreationType(mapType, keyType, valueType);
@@ -3726,7 +3726,7 @@ class ObjectTree
         sb.AppendNewLine();
     }
 
-    private static TypeDefinition CreateMapEntryTypeDefinition(string keyType, string valueType)
+    private static TypeDefinition CreateMapEntryTypeDefinition(string keyType, string valueType, bool keyIsEnum = false, bool valueIsEnum = false)
     {
         // Create ProtoMember for key (field 1)
         var keyMember = new ProtoMemberAttribute(1)
@@ -3736,7 +3736,7 @@ class ObjectTree
             DataFormat = DataFormat.Default,
             IsPacked = false,
             IsRequired = false,
-            IsEnum = IsEnumType(keyType),
+            IsEnum = keyIsEnum,
             Namespace = GetNamespaceFromType(keyType)
         };
         
@@ -3801,7 +3801,7 @@ class ObjectTree
             DataFormat = DataFormat.Default,
             IsPacked = false,
             IsRequired = false,
-            IsEnum = IsEnumType(valueType),
+            IsEnum = valueIsEnum,
             Namespace = GetNamespaceFromType(valueType)
         };
         
@@ -4400,7 +4400,7 @@ class ObjectTree
             {
                 // Write key with field ID 1
                 // Note: WriteMapKey already writes the tag, so we don't call WritePrecomputedTag here
-                WriteMapKey(sb, keyMember.Type, keyVar, writeTarget, writeTargetShortName);
+                WriteMapKey(sb, keyMember.Type, keyVar, writeTarget, writeTargetShortName, keyMember.IsEnum);
             }
             
             if (valueMember != null)
@@ -4431,7 +4431,7 @@ class ObjectTree
                 else
                 {
                     // Note: WriteMapValue already writes the tag
-                    WriteMapValue(sb, valueMember.Type, valueVar, writeTarget, writeTargetShortName);
+                    WriteMapValue(sb, valueMember.Type, valueVar, writeTarget, writeTargetShortName, valueMember.IsEnum);
                 }
             }
         }
@@ -4591,8 +4591,17 @@ class ObjectTree
         var tagValue = (member.FieldId << 3) | GetWireTypeValue(wireType);
         sb.AppendIndentedLine($"{calculator}.WriteVarUInt32({tagValue}u); // Field {member.FieldId} tag");
         
-        // Add value size (without tag since we already added it)
-        WriteMapKeySize(sb, member.Type, sourceVar, calculator);
+        // Check if field is enum - handle as varint
+        if (member.IsEnum)
+        {
+            // Enums are serialized as varints (cast to int)
+            sb.AppendIndentedLine($"{calculator}.WriteVarInt32((int){sourceVar});");
+        }
+        else
+        {
+            // Add value size (without tag since we already added it)
+            WriteMapKeySize(sb, member.Type, sourceVar, calculator);
+        }
     }
 
     private static int GetWireTypeValue(WireType wireType)
@@ -5256,7 +5265,7 @@ class ObjectTree
         sb.StartNewBlock();
         
         // Create a virtual TypeDefinition for the map entry message
-        var mapEntryType = CreateMapEntryTypeDefinition(protoMember.MapKeyType, protoMember.MapValueType);
+        var mapEntryType = CreateMapEntryTypeDefinition(protoMember.MapKeyType, protoMember.MapValueType, protoMember.MapKeyIsEnum, protoMember.MapValueIsEnum);
         
         // Calculate size for each map entry
         sb.AppendIndentedLine($"foreach (var kvp in obj.{protoMember.Name})");
@@ -5686,7 +5695,7 @@ class ObjectTree
         sb.StartNewBlock();
         
         // Create a virtual TypeDefinition for the map entry message
-        var mapEntryType = CreateMapEntryTypeDefinition(protoMember.MapKeyType, protoMember.MapValueType);
+        var mapEntryType = CreateMapEntryTypeDefinition(protoMember.MapKeyType, protoMember.MapValueType, protoMember.MapKeyIsEnum, protoMember.MapValueIsEnum);
         
         // Maps are serialized as repeated message entries
         // Each entry has field 1 for key and field 2 for value
@@ -6135,8 +6144,16 @@ class ObjectTree
         }
     }
     
-    private static void WriteMapKey(StringBuilderWithIndent sb, string keyType, string keyAccess, WriteTarget writeTarget, string writeTargetShortName)
+    private static void WriteMapKey(StringBuilderWithIndent sb, string keyType, string keyAccess, WriteTarget writeTarget, string writeTargetShortName, bool isEnum = false)
     {
+        // Check if it's an enum first
+        if (isEnum)
+        {
+            sb.AppendIndentedLine($"writer.WriteSingleByte(0x08); // field 1, VarInt");
+            sb.AppendIndentedLine($"writer.WriteVarInt32((int){keyAccess});");
+            return;
+        }
+        
         var simpleType = GetSimpleTypeName(keyType);
         
         // Check if it's an array type
@@ -6370,8 +6387,16 @@ class ObjectTree
         }
     }
     
-    private static void WriteMapValue(StringBuilderWithIndent sb, string valueType, string valueAccess, WriteTarget writeTarget, string writeTargetShortName)
+    private static void WriteMapValue(StringBuilderWithIndent sb, string valueType, string valueAccess, WriteTarget writeTarget, string writeTargetShortName, bool isEnum = false)
     {
+        // Check if it's an enum first
+        if (isEnum)
+        {
+            sb.AppendIndentedLine($"writer.WriteSingleByte(0x10); // field 2, VarInt");
+            sb.AppendIndentedLine($"writer.WriteVarInt32((int){valueAccess});");
+            return;
+        }
+        
         var simpleType = GetSimpleTypeName(valueType);
         
         // Check if it's an array type
@@ -6400,25 +6425,23 @@ class ObjectTree
                 // For primitive arrays, write as packed
                 sb.AppendIndentedLine($"writer.WriteSingleByte(0x12); // field 2, Len");
                 
-                // Calculate array size first
-                sb.AppendIndentedLine($"var arrayCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
-                
+                // Calculate packed size
+                sb.AppendIndentedLine($"var packedCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
                 sb.AppendIndentedLine($"foreach (var item in {valueAccess})");
                 sb.StartNewBlock();
-                WriteElementSizeCalculation(sb, elementType, "item", "arrayCalc");
+                AddPrimitiveSizeCalculation(sb, elementTypeName, "item", DataFormat.Default, "packedCalc");
                 sb.EndBlock();
+                sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)packedCalc.Length);");
                 
-                sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)arrayCalc.Length);");
-                
-                // Write array elements
+                // Write packed data
                 sb.AppendIndentedLine($"foreach (var item in {valueAccess})");
                 sb.StartNewBlock();
-                WriteElementToWriter(sb, elementType, "item", writeTargetShortName);
+                WritePrimitiveValueWithoutTag(sb, elementTypeName, "item", DataFormat.Default, writeTarget, writeTargetShortName);
                 sb.EndBlock();
             }
             else
             {
-                // For custom type arrays, write each as repeated field
+                // Complex types - write as repeated fields
                 sb.AppendIndentedLine($"foreach (var item in {valueAccess})");
                 sb.StartNewBlock();
                 sb.AppendIndentedLine($"if (item != null)");
@@ -6437,21 +6460,56 @@ class ObjectTree
             return;
         }
         
-        // Check if it's a collection type (HashSet, List, etc.)
+        // Check if it's a generic collection type (List<T>, HashSet<T>, etc.)
         if (simpleType.Contains("<"))
         {
             var genericStart = simpleType.IndexOf('<');
             var genericEnd = simpleType.LastIndexOf('>');
             var baseType = simpleType.Substring(0, genericStart);
             var elementType = simpleType.Substring(genericStart + 1, genericEnd - genericStart - 1);
-            var elementTypeName = GetSimpleTypeName(elementType);
             
             sb.AppendIndentedLine($"if ({valueAccess} != null)");
             sb.StartNewBlock();
             
-            // For string collections, each string needs its own tag
-            if (elementTypeName == "string" || elementTypeName == "System.String")
+            // Check if it's a numeric primitive for packed encoding (NOT string!)
+            bool isNumericPrimitive = elementType switch
             {
+                "int" or "Int32" or "int32" => true,
+                "long" or "Int64" or "int64" => true,
+                "uint" or "UInt32" or "uint32" => true,
+                "ulong" or "UInt64" or "uint64" => true,
+                "float" or "Single" => true,
+                "double" or "Double" => true,
+                "bool" or "Boolean" => true,
+                "byte" or "Byte" => true,
+                "sbyte" or "SByte" => true,
+                "short" or "Int16" => true,
+                "ushort" or "UInt16" => true,
+                _ => false
+            };
+            
+            if (isNumericPrimitive)
+            {
+                // For primitive arrays, write as packed
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x12); // field 2, Len (packed)");
+                
+                // Calculate packed size
+                sb.AppendIndentedLine($"var packedCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+                sb.AppendIndentedLine($"foreach (var item in {valueAccess})");
+                sb.StartNewBlock();
+                AddPrimitiveSizeCalculation(sb, elementType, "item", DataFormat.Default, "packedCalc");
+                sb.EndBlock();
+                sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)packedCalc.Length);");
+                
+                // Write packed data
+                sb.AppendIndentedLine($"foreach (var item in {valueAccess})");
+                sb.StartNewBlock();
+                WritePrimitiveValueWithoutTag(sb, elementType, "item", DataFormat.Default, writeTarget, writeTargetShortName);
+                sb.EndBlock();
+            }
+            else if (elementType == "string" || elementType == "System.String" || elementType == "String")
+            {
+                // For string collections, each string needs its own tag
                 sb.AppendIndentedLine($"foreach (var item in {valueAccess})");
                 sb.StartNewBlock();
                 sb.AppendIndentedLine($"if (item != null)");
@@ -6461,30 +6519,9 @@ class ObjectTree
                 sb.EndBlock();
                 sb.EndBlock();
             }
-            else if (IsPrimitiveType(elementTypeName))
-            {
-                // For primitive collections, write as packed
-                sb.AppendIndentedLine($"writer.WriteSingleByte(0x12); // field 2, Len");
-                
-                // Calculate collection size first
-                sb.AppendIndentedLine($"var collectionCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
-                
-                sb.AppendIndentedLine($"foreach (var item in {valueAccess})");
-                sb.StartNewBlock();
-                WriteElementSizeCalculation(sb, elementType, "item", "collectionCalc");
-                sb.EndBlock();
-                
-                sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)collectionCalc.Length);");
-                
-                // Write collection elements
-                sb.AppendIndentedLine($"foreach (var item in {valueAccess})");
-                sb.StartNewBlock();
-                WriteElementToWriter(sb, elementType, "item", writeTargetShortName);
-                sb.EndBlock();
-            }
             else
             {
-                // For custom type collections (List<CustomNested>, etc.), write each as repeated field - same as arrays
+                // Complex types - write as repeated fields
                 sb.AppendIndentedLine($"foreach (var item in {valueAccess})");
                 sb.StartNewBlock();
                 sb.AppendIndentedLine($"if (item != null)");
@@ -6537,18 +6574,20 @@ class ObjectTree
                 sb.AppendIndentedLine($"writer.WriteVarUInt32((uint){valueAccess});");
                 break;
                 
-            case "float":
-                sb.AppendIndentedLine($"writer.WriteSingleByte(0x15); // field 2, Fixed32b");
-                sb.AppendIndentedLine($"writer.WriteFloat({valueAccess});");
+            case "uint":
+            case "UInt32":
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x10); // field 2, VarInt");
+                sb.AppendIndentedLine($"writer.WriteUInt32({valueAccess});");
                 break;
                 
-            case "double":
-                sb.AppendIndentedLine($"writer.WriteSingleByte(0x11); // field 2, Fixed64b");
-                sb.AppendIndentedLine($"writer.WriteDouble({valueAccess});");
+            case "ulong":
+            case "UInt64":
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x10); // field 2, VarInt");
+                sb.AppendIndentedLine($"writer.WriteUInt64({valueAccess});");
                 break;
                 
             default:
-                // For complex types
+                // For complex types (custom classes)
                 sb.AppendIndentedLine($"if ({valueAccess} != null)");
                 sb.StartNewBlock();
                 sb.AppendIndentedLine($"writer.WriteSingleByte(0x12); // field 2, Len");
