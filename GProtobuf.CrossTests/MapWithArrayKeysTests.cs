@@ -338,6 +338,78 @@ namespace GProtobuf.CrossTests
             result.IntArrayStringMap[resultKey2].Should().Be("large2");
         }
         
+        [Fact]
+        public void Should_serialize_and_deserialize_Dictionary_with_CustomNested_in_lists_and_values()
+        {
+            // Arrange - test List<CustomNested> as value
+            //var model = new MapWithArrayKeysModel
+            //{
+            //    StringCustomNestedListMap = new Dictionary<string, List<CustomNested>>
+            //    {
+            //        { "list1", new List<CustomNested> 
+            //            { 
+            //                new CustomNested { Id = 10, Name = "Item1", Value = 10.5 },
+            //                new CustomNested { Id = 11, Name = "Item2", Value = 11.5 }
+            //            }
+            //        },
+            //        { "list2", new List<CustomNested> 
+            //            { 
+            //                new CustomNested { Id = 20, Name = "Item3", Value = 20.5 }
+            //            }
+            //        },
+            //        { "empty", new List<CustomNested>().ToArray() }
+            //    }
+            //};
+
+            var model = new MapWithArrayKeysModel
+            {
+                StringCustomNestedListMap = new() 
+                {
+                    { "list1", new[]
+                        {
+                            new CustomNested { Id = 10, Name = "Item1", Value = 10.5 },
+                            new CustomNested { Id = 11, Name = "Item2", Value = 11.5 }
+                        }
+                    },
+                    { "list2", new []
+                        {
+                            new CustomNested { Id = 20, Name = "Item3", Value = 20.5 }
+                        }
+                    },
+                    { "empty", new List<CustomNested>().ToArray() }
+                }
+            };
+
+            // Act - Serialize with GProtobuf
+            var gpData = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeMapWithArrayKeysModel);
+            
+            // Act - Serialize with protobuf-net for comparison
+            var pbData = SerializeWithProtobufNet(model);
+            
+            // Debug output
+            Console.WriteLine($"\nGProtobuf bytes: {string.Join(",", gpData.Select(b => b.ToString("X2")))}");
+            Console.WriteLine($"protobuf-net bytes: {string.Join(",", pbData.Select(b => b.ToString("X2")))}");
+            
+            // Act - Deserialize with GProtobuf
+            var result = DeserializeWithGProtobuf(gpData, bytes => TestModel.Serialization.Deserializers.DeserializeMapWithArrayKeysModel(bytes));
+            
+            // Assert - StringCustomNestedListMap
+            result.Should().NotBeNull();
+            result.StringCustomNestedListMap.Should().NotBeNull();
+            result.StringCustomNestedListMap.Should().HaveCount(3);
+            
+            result.StringCustomNestedListMap["list1"].Should().HaveCount(2);
+            result.StringCustomNestedListMap["list1"][0].Id.Should().Be(10);
+            result.StringCustomNestedListMap["list1"][0].Name.Should().Be("Item1");
+            result.StringCustomNestedListMap["list1"][1].Id.Should().Be(11);
+            result.StringCustomNestedListMap["list1"][1].Name.Should().Be("Item2");
+            
+            result.StringCustomNestedListMap["list2"].Should().HaveCount(1);
+            result.StringCustomNestedListMap["list2"][0].Id.Should().Be(20);
+            
+            result.StringCustomNestedListMap["empty"].Should().BeEmpty();
+        }
+        
         // Helper method to assert dictionary contains key-value pair when keys are arrays
         private void AssertDictionaryContainsKey<T, TValue>(Dictionary<T[], TValue> dict, T[] expectedKey, TValue expectedValue)
         {

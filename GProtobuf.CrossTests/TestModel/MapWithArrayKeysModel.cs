@@ -17,6 +17,12 @@ namespace GProtobuf.CrossTests.TestModel
         
         [ProtoMember(4)]
         public Dictionary<byte[], string> ByteArrayStringMap { get; set; }
+        
+        [ProtoMember(5)]
+        public Dictionary<string, CustomNested> StringCustomNestedMap { get; set; }
+        
+        [ProtoMember(6)]
+        public Dictionary<string, CustomNested[]> StringCustomNestedListMap { get; set; }
     }
     
     [ProtoContract]

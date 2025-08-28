@@ -5680,7 +5680,7 @@ class ObjectTree
                 sb.EndBlock();
                 sb.EndBlock();
             }
-            else
+            else if (IsPrimitiveType(elementTypeName))
             {
                 // For primitive arrays, we can pack them
                 sb.AppendIndentedLine($"var arrayCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
@@ -5690,6 +5690,22 @@ class ObjectTree
                 sb.EndBlock();
                 sb.AppendIndentedLine($"{calculator}.WriteVarUInt32((uint)arrayCalc.Length);");
                 sb.AppendIndentedLine($"{calculator}.AddByteLength(arrayCalc.Length);");
+            }
+            else
+            {
+                // For custom type arrays, each needs its own tag and size
+                sb.AppendIndentedLine($"foreach (var item in {valueAccess})");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"if (item != null)");
+                sb.StartNewBlock();
+                // Tag already added in GenerateFieldSizeCalculation
+                sb.AppendIndentedLine($"var itemCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+                var sanitizedElementType = SanitizeTypeNameForMethod(elementType);
+                sb.AppendIndentedLine($"SizeCalculators.Calculate{sanitizedElementType}Size(ref itemCalc, item);");
+                sb.AppendIndentedLine($"{calculator}.WriteVarUInt32((uint)itemCalc.Length);");
+                sb.AppendIndentedLine($"{calculator}.AddByteLength(itemCalc.Length);");
+                sb.EndBlock();
+                sb.EndBlock();
             }
             
             sb.EndBlock();
@@ -5984,7 +6000,7 @@ class ObjectTree
                 sb.EndBlock();
                 sb.EndBlock();
             }
-            else
+            else if (IsPrimitiveType(elementTypeName))
             {
                 // For primitive arrays, write as packed
                 sb.AppendIndentedLine($"writer.WriteSingleByte(0x12); // field 2, Len");
@@ -5992,21 +6008,10 @@ class ObjectTree
                 // Calculate array size first
                 sb.AppendIndentedLine($"var arrayCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
                 
-                if (IsPrimitiveType(elementTypeName))
-                {
-                    sb.AppendIndentedLine($"foreach (var item in {valueAccess})");
-                    sb.StartNewBlock();
-                    WriteElementSizeCalculation(sb, elementType, "item", "arrayCalc");
-                    sb.EndBlock();
-                }
-                else
-                {
-                    sb.AppendIndentedLine($"foreach (var item in {valueAccess})");
-                    sb.StartNewBlock();
-                    var sanitizedElementType = SanitizeTypeNameForMethod(elementType);
-                    sb.AppendIndentedLine($"SizeCalculators.Calculate{sanitizedElementType}Size(ref arrayCalc, item);");
-                    sb.EndBlock();
-                }
+                sb.AppendIndentedLine($"foreach (var item in {valueAccess})");
+                sb.StartNewBlock();
+                WriteElementSizeCalculation(sb, elementType, "item", "arrayCalc");
+                sb.EndBlock();
                 
                 sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)arrayCalc.Length);");
                 
@@ -6014,6 +6019,22 @@ class ObjectTree
                 sb.AppendIndentedLine($"foreach (var item in {valueAccess})");
                 sb.StartNewBlock();
                 WriteElementToWriter(sb, elementType, "item", writeTargetShortName);
+                sb.EndBlock();
+            }
+            else
+            {
+                // For custom type arrays, write each as repeated field
+                sb.AppendIndentedLine($"foreach (var item in {valueAccess})");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"if (item != null)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x12); // field 2, Len");
+                sb.AppendIndentedLine($"var itemCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+                var sanitizedElementType = SanitizeTypeNameForMethod(elementType);
+                sb.AppendIndentedLine($"SizeCalculators.Calculate{sanitizedElementType}Size(ref itemCalc, item);");
+                sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)itemCalc.Length);");
+                sb.AppendIndentedLine($"{writeTargetShortName}Writers.Write{sanitizedElementType}(ref writer, item);");
+                sb.EndBlock();
                 sb.EndBlock();
             }
             
