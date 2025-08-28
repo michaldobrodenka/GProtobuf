@@ -227,6 +227,11 @@ namespace Todos
             Console.WriteLine("\n=== Testing Guid as Dictionary Key ===");
             GuidMapTest.TestGuidLongMap();
             GuidMapTest.TestProtobufNetCompatibility();
+            
+            // Test HashSet<Guid>
+            Console.WriteLine("\n=== Testing HashSet<Guid> ===");
+            HashSetGuidTest.TestHashSetGuid();
+            HashSetGuidTest.TestProtobufNetCompatibility();
         }
     }
 }

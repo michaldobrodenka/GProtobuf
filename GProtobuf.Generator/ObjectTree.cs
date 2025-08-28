@@ -1464,21 +1464,29 @@ class ObjectTree
         if (protoMember.IsMap)
         {
             WriteMapProtoMember(sb, protoMember);
+            sb.EndBlock();
+            sb.AppendNewLine();
             return;
         }
         else if (IsByteCollectionType(protoMember))
         {
             WriteByteCollectionProtoMember(sb, protoMember);
+            sb.EndBlock();
+            sb.AppendNewLine();
             return;
         }
         else if (IsPrimitiveCollectionType(protoMember))
         {
             WritePrimitiveCollectionProtoMember(sb, protoMember);
+            sb.EndBlock();
+            sb.AppendNewLine();
             return;
         }
         else if (IsArrayType(protoMember))
         {
             WriteArrayProtoMember(sb, protoMember);
+            sb.EndBlock();
+            sb.AppendNewLine();
             return;
         }
         else if (protoMember.IsEnum)
@@ -3978,6 +3986,36 @@ class ObjectTree
             // String arrays - direct string reading
             sb.AppendIndentedLine($"resultCollector.Add(reader.ReadString(wireType));");
         }
+        else if (elementTypeName == "Guid" || elementTypeName == "System.Guid")
+        {
+            // Guid arrays - deserialize as message with 2 fixed64 fields
+            sb.AppendIndentedLine($"var length = reader.ReadVarInt32();");
+            sb.AppendIndentedLine($"var guidReader = new SpanReader(reader.GetSlice(length));");
+            sb.AppendIndentedLine($"// Read Guid as protobuf-net format (2 fixed64 fields)");
+            sb.AppendIndentedLine($"ulong lo = 0, hi = 0;");
+            sb.AppendIndentedLine($"while (!guidReader.IsEnd)");
+            sb.StartNewBlock();
+            sb.AppendIndentedLine($"var (guidWireType, guidFieldId) = guidReader.ReadWireTypeAndFieldId();");
+            sb.AppendIndentedLine($"if (guidFieldId == 1 && guidWireType == WireType.Fixed64b)");
+            sb.StartNewBlock();
+            sb.AppendIndentedLine($"lo = guidReader.ReadFixed64();");
+            sb.EndBlock();
+            sb.AppendIndentedLine($"else if (guidFieldId == 2 && guidWireType == WireType.Fixed64b)");
+            sb.StartNewBlock();
+            sb.AppendIndentedLine($"hi = guidReader.ReadFixed64();");
+            sb.EndBlock();
+            sb.AppendIndentedLine($"else");
+            sb.StartNewBlock();
+            sb.AppendIndentedLine($"guidReader.SkipField(guidWireType);");
+            sb.EndBlock();
+            sb.EndBlock();
+            sb.AppendIndentedLine($"// Convert from protobuf-net format to Guid");
+            sb.AppendIndentedLine($"var guidBytes = new byte[16];");
+            sb.AppendIndentedLine($"System.BitConverter.GetBytes(lo).CopyTo(guidBytes, 0);");
+            sb.AppendIndentedLine($"System.BitConverter.GetBytes(hi).CopyTo(guidBytes, 8);");
+            sb.AppendIndentedLine($"var item = new System.Guid(guidBytes);");
+            sb.AppendIndentedLine($"resultCollector.Add(item);");
+        }
         else if (IsPrimitiveArrayType(elementTypeName))
         {
             // This should NOT happen - primitive arrays should use specialized implementation
@@ -4022,29 +4060,28 @@ class ObjectTree
                     {
                         sb.AppendIndentedLine($"key = entryReader.ReadVarInt32();");
                     }
-                    else if (keyTypeName == "char" || keyTypeName == "Char")
-                    {
-                        sb.AppendIndentedLine($"key = (char)entryReader.ReadVarUInt32();");
-                    }
                     else if (keyTypeName == "string" || keyTypeName == "String")
                     {
                         sb.AppendIndentedLine($"key = entryReader.ReadString(entryWireType);");
                     }
+                    else if (keyTypeName == "float" || keyTypeName == "Single")
+                    {
+                        sb.AppendIndentedLine($"key = entryReader.ReadFloat();");
+                    }
+                    else if (keyTypeName == "double" || keyTypeName == "Double")
+                    {
+                        sb.AppendIndentedLine($"key = entryReader.ReadDouble();");
+                    }
+                    else if (keyTypeName == "bool" || keyTypeName == "Boolean")
+                    {
+                        sb.AppendIndentedLine($"key = entryReader.ReadBool();");
+                    }
                     else
                     {
-                        sb.AppendIndentedLine($"var keyLen = entryReader.ReadVarInt32();");
-                        sb.AppendIndentedLine($"var keyReader = new SpanReader(entryReader.GetSlice(keyLen));");
-                        
-                        // Special handling for Tuple types - use current namespace instead of System namespace
-                        var keyTypeSimpleName = GetSimpleTypeName(keyType);
-                        if (keyTypeSimpleName.StartsWith("Tuple<") || keyTypeSimpleName.StartsWith("System.Tuple<"))
-                        {
-                            sb.AppendIndentedLine($"key = SpanReaders.Read{SanitizeTypeNameForMethod(keyType)}(ref keyReader);");
-                        }
-                        else
-                        {
-                            sb.AppendIndentedLine($"key = global::{GetNamespaceFromType(keyType)}.Serialization.SpanReaders.Read{SanitizeTypeNameForMethod(keyType)}(ref keyReader);");
-                        }
+                        // Custom type - need to read with length prefix
+                        sb.AppendIndentedLine($"var keyLength = entryReader.ReadVarInt32();");
+                        sb.AppendIndentedLine($"var keyReader = new SpanReader(entryReader.GetSlice(keyLength));");
+                        sb.AppendIndentedLine($"key = global::{GetNamespaceFromType(keyType)}.Serialization.SpanReaders.Read{SanitizeTypeNameForMethod(keyType)}(ref keyReader);");
                     }
                     
                     sb.AppendIndentedLine($"continue;");
@@ -4064,18 +4101,27 @@ class ObjectTree
                     {
                         sb.AppendIndentedLine($"value = entryReader.ReadVarInt32();");
                     }
-                    else if (valueTypeName == "char" || valueTypeName == "Char")
-                    {
-                        sb.AppendIndentedLine($"value = (char)entryReader.ReadVarUInt32();");
-                    }
                     else if (valueTypeName == "string" || valueTypeName == "String")
                     {
                         sb.AppendIndentedLine($"value = entryReader.ReadString(entryWireType);");
                     }
+                    else if (valueTypeName == "float" || valueTypeName == "Single")
+                    {
+                        sb.AppendIndentedLine($"value = entryReader.ReadFloat();");
+                    }
+                    else if (valueTypeName == "double" || valueTypeName == "Double")
+                    {
+                        sb.AppendIndentedLine($"value = entryReader.ReadDouble();");
+                    }
+                    else if (valueTypeName == "bool" || valueTypeName == "Boolean")
+                    {
+                        sb.AppendIndentedLine($"value = entryReader.ReadBool();");
+                    }
                     else
                     {
-                        sb.AppendIndentedLine($"var valueLen = entryReader.ReadVarInt32();");
-                        sb.AppendIndentedLine($"var valueReader = new SpanReader(entryReader.GetSlice(valueLen));");
+                        // Custom type - need to read with length prefix
+                        sb.AppendIndentedLine($"var valueLength = entryReader.ReadVarInt32();");
+                        sb.AppendIndentedLine($"var valueReader = new SpanReader(entryReader.GetSlice(valueLength));");
                         
                         // Special handling for Tuple types - use current namespace instead of System namespace
                         var valueTypeSimpleName = GetSimpleTypeName(valueType);
@@ -4127,37 +4173,44 @@ class ObjectTree
                 sb.AppendIndentedLine($"result.{protoMember.Name} = resultCollector.ToArray();");
                 break;
             case CollectionKind.InterfaceCollection:
-                // ICollection<T>, IList<T>, IEnumerable<T> → assign List<T>
-                sb.AppendIndentedLine($"result.{protoMember.Name} = resultCollector.ToList();");
-                break;
-            case CollectionKind.ConcreteCollection:
-                // For concrete types like List<T>, HashSet<T> or custom collections
-                var concreteType = protoMember.Type;
-                if (concreteType.StartsWith("List<") || concreteType.StartsWith("System.Collections.Generic.List<") || concreteType == "System.Collections.Generic.List`1")
+                // For ICollection<T>, must create concrete type from metadata
+                var interfaceType = protoMember.Type;
+                if (interfaceType.StartsWith("HashSet<") || interfaceType.StartsWith("System.Collections.Generic.HashSet<"))
                 {
-                    // List<T> → assign directly
-                    sb.AppendIndentedLine($"result.{protoMember.Name} = resultCollector.ToList();");
-                }
-                else if (concreteType.StartsWith("HashSet<") || concreteType.StartsWith("System.Collections.Generic.HashSet<"))
-                {
-                    // HashSet<T> → create HashSet from items
                     sb.AppendIndentedLine($"result.{protoMember.Name} = new global::System.Collections.Generic.HashSet<{elementType}>(resultCollector.ToArray());");
+                }
+                else if (interfaceType.StartsWith("List<") || interfaceType.StartsWith("System.Collections.Generic.List<"))
+                {
+                    sb.AppendIndentedLine($"result.{protoMember.Name} = new global::System.Collections.Generic.List<{elementType}>(resultCollector.ToArray());");
                 }
                 else
                 {
-                    // Custom collection type → create instance and add items via ICollection<T>
-                    sb.AppendIndentedLine($"var customCollection = new {concreteType}();");
-                    sb.AppendIndentedLine($"var iCollection = (global::System.Collections.Generic.ICollection<{elementType}>)customCollection;");
-                    sb.AppendIndentedLine($"var items = resultCollector.ToArray();");
-                    sb.AppendIndentedLine($"foreach (var item in items) iCollection.Add(item);");
-                    sb.AppendIndentedLine($"result.{protoMember.Name} = customCollection;");
+                    // Default to List for ICollection
+                    sb.AppendIndentedLine($"result.{protoMember.Name} = new global::System.Collections.Generic.List<{elementType}>(resultCollector.ToArray());");
                 }
+                break;
+            case CollectionKind.ConcreteCollection:
+                var concreteType = protoMember.Type;
+                if (concreteType.StartsWith("HashSet<") || concreteType.StartsWith("System.Collections.Generic.HashSet<"))
+                {
+                    sb.AppendIndentedLine($"result.{protoMember.Name} = new global::System.Collections.Generic.HashSet<{elementType}>(resultCollector.ToArray());");
+                }
+                else if (concreteType.StartsWith("List<") || concreteType.StartsWith("System.Collections.Generic.List<"))
+                {
+                    sb.AppendIndentedLine($"result.{protoMember.Name} = new global::System.Collections.Generic.List<{elementType}>(resultCollector.ToArray());");
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"result.{protoMember.Name} = resultCollector.ToArray();");
+                }
+                break;
+            default:
+                sb.AppendIndentedLine($"result.{protoMember.Name} = resultCollector.ToArray();");
                 break;
         }
         
+        // Continue to next field in the main deserialization loop
         sb.AppendIndentedLine($"continue;");
-        sb.EndBlock();
-        sb.AppendNewLine();
     }
     
     /// <summary>
@@ -4222,8 +4275,6 @@ class ObjectTree
         }
         
         sb.AppendIndentedLine($"continue;");
-        sb.EndBlock();
-        sb.AppendNewLine();
     }
 
     private static TypeDefinition CreateMapEntryTypeDefinition(string keyType, string valueType, bool keyIsEnum = false, bool valueIsEnum = false)
@@ -5752,6 +5803,23 @@ class ObjectTree
                 loopSb.EndBlock();
             });
         }
+        else if (elementTypeName == "Guid" || elementTypeName == "System.Guid")
+        {
+            // Guid arrays - each Guid gets serialized as a message with 2 fixed64 fields
+            WriteOptimizedLoop(sb, protoMember, objectName, (loopSb) => {
+                WritePrecomputedTag(loopSb, protoMember.FieldId, WireType.Len);
+                loopSb.AppendIndentedLine($"writer.WriteVarUInt32(18u); // Guid: 2 fixed64 fields = (1+8)+(1+8) = 18 bytes");
+                loopSb.AppendIndentedLine($"// Convert Guid to protobuf-net format (2 fixed64 fields)");
+                var guidVarName = $"guidBytes_{protoMember.Name}_{protoMember.FieldId}_item";
+                loopSb.AppendIndentedLine($"var {guidVarName} = item.ToByteArray();");
+                loopSb.AppendIndentedLine($"// Field 1: first 8 bytes (fixed64)");
+                loopSb.AppendIndentedLine($"writer.WriteSingleByte(0x09); // field 1, Fixed64");
+                loopSb.AppendIndentedLine($"writer.WriteFixed64(System.BitConverter.ToUInt64({guidVarName}, 0));");
+                loopSb.AppendIndentedLine($"// Field 2: last 8 bytes (fixed64)");
+                loopSb.AppendIndentedLine($"writer.WriteSingleByte(0x11); // field 2, Fixed64");
+                loopSb.AppendIndentedLine($"writer.WriteFixed64(System.BitConverter.ToUInt64({guidVarName}, 8));");
+            });
+        }
         else if (IsPrimitiveArrayType(elementTypeName))
         {
             // This should NOT happen - primitive arrays should use specialized implementation
@@ -5845,6 +5913,15 @@ class ObjectTree
                 loopSb.StartNewBlock();
                 loopSb.AppendIndentedLine($"throw new System.InvalidOperationException(\"An element of type string was null; this might be as contents in a list/array\");");
                 loopSb.EndBlock();
+            });
+        }
+        else if (elementTypeName == "Guid" || elementTypeName == "System.Guid")
+        {
+            // Guid arrays - each Guid has constant size: tag + length + 18 bytes
+            WriteOptimizedLoop(sb, protoMember, "obj", (loopSb) => {
+                WritePrecomputedTagForCalculator(loopSb, protoMember.FieldId, WireType.Len);
+                loopSb.AppendIndentedLine($"calculator.WriteVarUInt32(18u); // Guid constant size: 2 fixed64 fields");
+                loopSb.AppendIndentedLine($"calculator.AddByteLength(18); // (1+8)+(1+8) = 18 bytes");
             });
         }
         else if (IsPrimitiveArrayType(elementTypeName))
@@ -6131,8 +6208,6 @@ class ObjectTree
         }
         
         sb.AppendIndentedLine($"continue;");
-        sb.EndBlock();
-        sb.AppendNewLine();
     }
 
     /// <summary>
@@ -6244,8 +6319,6 @@ class ObjectTree
         }
         
         sb.AppendIndentedLine($"continue;");
-        sb.EndBlock();
-        sb.AppendNewLine();
     }
 
     /// <summary>
