@@ -91,5 +91,12 @@ namespace Todos.Model
 
         [ProtoMember(16)]
         public Tuple<double, double> DoubleTuple { get; set; }
+
+        [ProtoMember(17)]
+        public Dictionary<int, Tuple<double, double>> ThermostatOutputMap { get; set; }
+
+        // todo: List<Guid>, Dictionary<Guid, string>, HashSet<Guid> etc.
+        // todo: Dictionary<int, Dictionary<int, int>>
+        // Dict<byte, xxx>
     }
 }

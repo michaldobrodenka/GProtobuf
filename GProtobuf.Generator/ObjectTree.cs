@@ -4032,7 +4032,17 @@ class ObjectTree
                     {
                         sb.AppendIndentedLine($"var keyLen = entryReader.ReadVarInt32();");
                         sb.AppendIndentedLine($"var keyReader = new SpanReader(entryReader.GetSlice(keyLen));");
-                        sb.AppendIndentedLine($"key = global::{GetNamespaceFromType(keyType)}.Serialization.SpanReaders.Read{SanitizeTypeNameForMethod(keyType)}(ref keyReader);");
+                        
+                        // Special handling for Tuple types - use current namespace instead of System namespace
+                        var keyTypeSimpleName = GetSimpleTypeName(keyType);
+                        if (keyTypeSimpleName.StartsWith("Tuple<") || keyTypeSimpleName.StartsWith("System.Tuple<"))
+                        {
+                            sb.AppendIndentedLine($"key = SpanReaders.Read{SanitizeTypeNameForMethod(keyType)}(ref keyReader);");
+                        }
+                        else
+                        {
+                            sb.AppendIndentedLine($"key = global::{GetNamespaceFromType(keyType)}.Serialization.SpanReaders.Read{SanitizeTypeNameForMethod(keyType)}(ref keyReader);");
+                        }
                     }
                     
                     sb.AppendIndentedLine($"continue;");
@@ -4064,7 +4074,17 @@ class ObjectTree
                     {
                         sb.AppendIndentedLine($"var valueLen = entryReader.ReadVarInt32();");
                         sb.AppendIndentedLine($"var valueReader = new SpanReader(entryReader.GetSlice(valueLen));");
-                        sb.AppendIndentedLine($"value = global::{GetNamespaceFromType(valueType)}.Serialization.SpanReaders.Read{SanitizeTypeNameForMethod(valueType)}(ref valueReader);");
+                        
+                        // Special handling for Tuple types - use current namespace instead of System namespace
+                        var valueTypeSimpleName = GetSimpleTypeName(valueType);
+                        if (valueTypeSimpleName.StartsWith("Tuple<") || valueTypeSimpleName.StartsWith("System.Tuple<"))
+                        {
+                            sb.AppendIndentedLine($"value = SpanReaders.Read{SanitizeTypeNameForMethod(valueType)}(ref valueReader);");
+                        }
+                        else
+                        {
+                            sb.AppendIndentedLine($"value = global::{GetNamespaceFromType(valueType)}.Serialization.SpanReaders.Read{SanitizeTypeNameForMethod(valueType)}(ref valueReader);");
+                        }
                     }
                     
                     sb.AppendIndentedLine($"continue;");
@@ -4235,8 +4255,9 @@ class ObjectTree
                 keyMember.IsPacked = true;
             }
         }
-        // Handle generic collections as keys (List<>, HashSet<>, etc.)
-        else if (keyType.Contains("List<") || keyType.Contains("HashSet<") || keyType.Contains("<"))
+        // Handle generic collections as keys (List<>, HashSet<>, etc.) - BUT NOT Tuples
+        else if ((keyType.Contains("List<") || keyType.Contains("HashSet<") || keyType.Contains("<")) && 
+                 !keyType.StartsWith("Tuple<") && !keyType.StartsWith("System.Tuple<"))
         {
             keyMember.IsCollection = true;
             var genericStart = keyType.IndexOf('<');
@@ -4442,7 +4463,16 @@ class ObjectTree
                     // Complex type collections
                     sb.AppendIndentedLine($"var len = {readerVar}.ReadVarInt32();");
                     sb.AppendIndentedLine($"var subReader = new SpanReader({readerVar}.GetSlice(len));");
-                    sb.AppendIndentedLine($"keyList.Add(global::{GetNamespaceFromType(elementType)}.Serialization.SpanReaders.Read{SanitizeTypeNameForMethod(elementType)}(ref subReader));");
+                    // Special handling for Tuple types - use current namespace instead of System namespace
+                    var keyElementTypeSimpleName = GetSimpleTypeName(elementType);
+                    if (keyElementTypeSimpleName.StartsWith("Tuple<") || keyElementTypeSimpleName.StartsWith("System.Tuple<"))
+                    {
+                        sb.AppendIndentedLine($"keyList.Add(SpanReaders.Read{SanitizeTypeNameForMethod(elementType)}(ref subReader));");
+                    }
+                    else
+                    {
+                        sb.AppendIndentedLine($"keyList.Add(global::{GetNamespaceFromType(elementType)}.Serialization.SpanReaders.Read{SanitizeTypeNameForMethod(elementType)}(ref subReader));");
+                    }
                 }
             }
             else
@@ -4499,7 +4529,16 @@ class ObjectTree
                     // Complex type collections - read as sub-message
                     sb.AppendIndentedLine($"var len = {readerVar}.ReadVarInt32();");
                     sb.AppendIndentedLine($"var subReader = new SpanReader({readerVar}.GetSlice(len));");
-                    sb.AppendIndentedLine($"valueList.Add(global::{GetNamespaceFromType(elementType)}.Serialization.SpanReaders.Read{SanitizeTypeNameForMethod(elementType)}(ref subReader));");
+                    // Special handling for Tuple types - use current namespace instead of System namespace  
+                    var valueElementTypeSimpleName = GetSimpleTypeName(elementType);
+                    if (valueElementTypeSimpleName.StartsWith("Tuple<") || valueElementTypeSimpleName.StartsWith("System.Tuple<"))
+                    {
+                        sb.AppendIndentedLine($"valueList.Add(SpanReaders.Read{SanitizeTypeNameForMethod(elementType)}(ref subReader));");
+                    }
+                    else
+                    {
+                        sb.AppendIndentedLine($"valueList.Add(global::{GetNamespaceFromType(elementType)}.Serialization.SpanReaders.Read{SanitizeTypeNameForMethod(elementType)}(ref subReader));");
+                    }
                 }
             }
             else
@@ -4710,7 +4749,17 @@ class ObjectTree
                     // For complex types, deserialize as message
                     sb.AppendIndentedLine($"var fieldLength = {readerVar}.ReadVarInt32();");
                     sb.AppendIndentedLine($"var fieldReader{targetVar} = new SpanReader({readerVar}.GetSlice(fieldLength));");
-                    sb.AppendIndentedLine($"{targetVar} = global::{member.Namespace}.Serialization.SpanReaders.Read{typeName}(ref fieldReader{targetVar});");
+                    
+                    // Special handling for Tuple types - use current namespace instead of System namespace
+                    var typeNameSimple = GetSimpleTypeName(typeName);
+                    if (typeNameSimple.StartsWith("Tuple<") || typeNameSimple.StartsWith("System.Tuple<"))
+                    {
+                        sb.AppendIndentedLine($"{targetVar} = SpanReaders.Read{SanitizeTypeNameForMethod(typeName)}(ref fieldReader{targetVar});");
+                    }
+                    else
+                    {
+                        sb.AppendIndentedLine($"{targetVar} = global::{member.Namespace}.Serialization.SpanReaders.Read{SanitizeTypeNameForMethod(typeName)}(ref fieldReader{targetVar});");
+                    }
                 }
                 break;
         }
@@ -4839,7 +4888,17 @@ class ObjectTree
                     // For complex types, deserialize as message
                     sb.AppendIndentedLine($"var fieldLength = {readerVar}.ReadVarInt32();");
                     sb.AppendIndentedLine($"var fieldReader{targetVar} = new SpanReader({readerVar}.GetSlice(fieldLength));");
-                    sb.AppendIndentedLine($"{targetVar} = global::{member.Namespace}.Serialization.SpanReaders.Read{typeName}(ref fieldReader{targetVar});");
+                    
+                    // Special handling for Tuple types - use current namespace instead of System namespace
+                    var typeNameSimple = GetSimpleTypeName(typeName);
+                    if (typeNameSimple.StartsWith("Tuple<") || typeNameSimple.StartsWith("System.Tuple<"))
+                    {
+                        sb.AppendIndentedLine($"{targetVar} = SpanReaders.Read{SanitizeTypeNameForMethod(typeName)}(ref fieldReader{targetVar});");
+                    }
+                    else
+                    {
+                        sb.AppendIndentedLine($"{targetVar} = global::{member.Namespace}.Serialization.SpanReaders.Read{SanitizeTypeNameForMethod(typeName)}(ref fieldReader{targetVar});");
+                    }
                 }
                 break;
         }
@@ -6286,8 +6345,8 @@ class ObjectTree
             return;
         }
         
-        // Check if it's a generic collection type (List<T>, HashSet<T>, etc.)
-        if (simpleType.Contains("<"))
+        // Check if it's a generic collection type (List<T>, HashSet<T>, etc.) - BUT NOT Tuples
+        if (simpleType.Contains("<") && !simpleType.StartsWith("Tuple<") && !simpleType.StartsWith("System.Tuple<"))
         {
             var genericStart = simpleType.IndexOf('<');
             var genericEnd = simpleType.LastIndexOf('>');
@@ -6401,6 +6460,18 @@ class ObjectTree
             case "ulong":
             case "UInt64":
                 sb.AppendIndentedLine($"{calculator}.WriteUInt64({keyAccess});");
+                break;
+                
+            case "double":
+            case "System.Double":
+            case "Double":
+                sb.AppendIndentedLine($"{calculator}.WriteDouble({keyAccess});");
+                break;
+                
+            case "float":
+            case "System.Single":
+            case "Single":
+                sb.AppendIndentedLine($"{calculator}.WriteFloat({keyAccess});");
                 break;
                 
             default:
@@ -6716,8 +6787,8 @@ class ObjectTree
             return;
         }
         
-        // Check if it's a generic collection type (List<T>, HashSet<T>, etc.)
-        if (simpleType.Contains("<"))
+        // Check if it's a generic collection type (List<T>, HashSet<T>, etc.) - BUT NOT Tuples
+        if (simpleType.Contains("<") && !simpleType.StartsWith("Tuple<") && !simpleType.StartsWith("System.Tuple<"))
         {
             var genericStart = simpleType.IndexOf('<');
             var genericEnd = simpleType.LastIndexOf('>');
@@ -6850,6 +6921,20 @@ class ObjectTree
                 sb.AppendIndentedLine($"writer.WriteUInt64({keyAccess});");
                 break;
                 
+            case "double":
+            case "System.Double":
+            case "Double":
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x09); // field 1, Fixed64");
+                sb.AppendIndentedLine($"writer.WriteDouble({keyAccess});");
+                break;
+                
+            case "float":
+            case "System.Single":
+            case "Single":
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x0D); // field 1, Fixed32");
+                sb.AppendIndentedLine($"writer.WriteFloat({keyAccess});");
+                break;
+                
             default:
                 // For complex types (custom classes)
                 sb.AppendIndentedLine($"if ({keyAccess} != null)");
@@ -6938,8 +7023,8 @@ class ObjectTree
             return;
         }
         
-        // Check if it's a generic collection type (List<T>, HashSet<T>, etc.)
-        if (simpleType.Contains("<"))
+        // Check if it's a generic collection type (List<T>, HashSet<T>, etc.) - BUT NOT Tuples
+        if (simpleType.Contains("<") && !simpleType.StartsWith("Tuple<") && !simpleType.StartsWith("System.Tuple<"))
         {
             var genericStart = simpleType.IndexOf('<');
             var genericEnd = simpleType.LastIndexOf('>');
@@ -7062,6 +7147,20 @@ class ObjectTree
             case "UInt64":
                 sb.AppendIndentedLine($"writer.WriteSingleByte(0x10); // field 2, VarInt");
                 sb.AppendIndentedLine($"writer.WriteUInt64({valueAccess});");
+                break;
+                
+            case "double":
+            case "System.Double":
+            case "Double":
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x11); // field 2, Fixed64");
+                sb.AppendIndentedLine($"writer.WriteDouble({valueAccess});");
+                break;
+                
+            case "float":
+            case "System.Single":
+            case "Single":
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x15); // field 2, Fixed32");
+                sb.AppendIndentedLine($"writer.WriteFloat({valueAccess});");
                 break;
                 
             default:
