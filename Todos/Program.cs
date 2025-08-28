@@ -218,6 +218,10 @@ namespace Todos
             }
             
             Console.WriteLine("\n✅ Enum as dictionary value works correctly!");
+            
+            // Test byte as dictionary key
+            Console.WriteLine("\n=== Testing Byte as Dictionary Key ===");
+            ByteMapTest.TestByteDoubleMap();
         }
     }
 }

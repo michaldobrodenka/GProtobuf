@@ -4724,6 +4724,11 @@ class ObjectTree
             case "Boolean":
                 sb.AppendIndentedLine($"{targetVar} = {readerVar}.ReadBool({wireTypeVar});");
                 break;
+            case "byte":
+            case "System.Byte":
+            case "Byte":
+                sb.AppendIndentedLine($"{targetVar} = (byte){readerVar}.ReadVarUInt32();");
+                break;
             case "char":
             case "System.Char":
             case "Char":
@@ -6447,6 +6452,12 @@ class ObjectTree
                 sb.AppendIndentedLine($"{calculator}.WriteBool({keyAccess});");
                 break;
                 
+            case "byte":
+            case "Byte":
+            case "System.Byte":
+                sb.AppendIndentedLine($"{calculator}.WriteVarUInt32((uint){keyAccess});");
+                break;
+                
             case "char":
             case "Char":
                 sb.AppendIndentedLine($"{calculator}.WriteVarUInt32((uint){keyAccess});");
@@ -6623,6 +6634,12 @@ class ObjectTree
                 
             case "bool":
                 sb.AppendIndentedLine($"{calculator}.WriteBool({valueAccess});");
+                break;
+                
+            case "byte":
+            case "Byte":
+            case "System.Byte":
+                sb.AppendIndentedLine($"{calculator}.WriteVarUInt32((uint){valueAccess});");
                 break;
                 
             case "char":
@@ -6903,6 +6920,13 @@ class ObjectTree
                 sb.AppendIndentedLine($"writer.WriteBool({keyAccess});");
                 break;
                 
+            case "byte":
+            case "Byte":
+            case "System.Byte":
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x08); // field 1, VarInt");
+                sb.AppendIndentedLine($"writer.WriteVarUInt32((uint){keyAccess});");
+                break;
+                
             case "char":
             case "Char":
                 sb.AppendIndentedLine($"writer.WriteSingleByte(0x08); // field 1, VarInt");
@@ -7129,6 +7153,13 @@ class ObjectTree
             case "bool":
                 sb.AppendIndentedLine($"writer.WriteSingleByte(0x10); // field 2, VarInt");
                 sb.AppendIndentedLine($"writer.WriteBool({valueAccess});");
+                break;
+                
+            case "byte":
+            case "Byte":
+            case "System.Byte":
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x10); // field 2, VarInt");
+                sb.AppendIndentedLine($"writer.WriteVarUInt32((uint){valueAccess});");
                 break;
                 
             case "char":
