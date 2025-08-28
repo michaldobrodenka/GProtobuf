@@ -22,7 +22,7 @@ namespace GProtobuf.CrossTests.TestModel
         public Dictionary<string, CustomNested> StringCustomNestedMap { get; set; }
         
         [ProtoMember(6)]
-        public Dictionary<string, CustomNested[]> StringCustomNestedListMap { get; set; }
+        public Dictionary<string, List<CustomNested>> StringCustomNestedListMap { get; set; }
     }
     
     [ProtoContract]

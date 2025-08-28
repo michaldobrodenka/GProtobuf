@@ -342,43 +342,43 @@ namespace GProtobuf.CrossTests
         public void Should_serialize_and_deserialize_Dictionary_with_CustomNested_in_lists_and_values()
         {
             // Arrange - test List<CustomNested> as value
+            var model = new MapWithArrayKeysModel
+            {
+                StringCustomNestedListMap = new Dictionary<string, List<CustomNested>>
+                {
+                    { "list1", new List<CustomNested>
+                        {
+                            new CustomNested { Id = 10, Name = "Item1", Value = 10.5 },
+                            new CustomNested { Id = 11, Name = "Item2", Value = 11.5 }
+                        }
+                    },
+                    { "list2", new List<CustomNested>
+                        {
+                            new CustomNested { Id = 20, Name = "Item3", Value = 20.5 }
+                        }
+                    },
+                    { "empty", new List<CustomNested>() }
+                }
+            };
+
             //var model = new MapWithArrayKeysModel
             //{
-            //    StringCustomNestedListMap = new Dictionary<string, List<CustomNested>>
+            //    StringCustomNestedListMap = new() 
             //    {
-            //        { "list1", new List<CustomNested> 
-            //            { 
+            //        { "list1", new[]
+            //            {
             //                new CustomNested { Id = 10, Name = "Item1", Value = 10.5 },
             //                new CustomNested { Id = 11, Name = "Item2", Value = 11.5 }
             //            }
             //        },
-            //        { "list2", new List<CustomNested> 
-            //            { 
+            //        { "list2", new []
+            //            {
             //                new CustomNested { Id = 20, Name = "Item3", Value = 20.5 }
             //            }
             //        },
             //        { "empty", new List<CustomNested>().ToArray() }
             //    }
             //};
-
-            var model = new MapWithArrayKeysModel
-            {
-                StringCustomNestedListMap = new() 
-                {
-                    { "list1", new[]
-                        {
-                            new CustomNested { Id = 10, Name = "Item1", Value = 10.5 },
-                            new CustomNested { Id = 11, Name = "Item2", Value = 11.5 }
-                        }
-                    },
-                    { "list2", new []
-                        {
-                            new CustomNested { Id = 20, Name = "Item3", Value = 20.5 }
-                        }
-                    },
-                    { "empty", new List<CustomNested>().ToArray() }
-                }
-            };
 
             // Act - Serialize with GProtobuf
             var gpData = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeMapWithArrayKeysModel);

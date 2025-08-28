@@ -3621,7 +3621,7 @@ class ObjectTree
             keyMember.CollectionElementType = keyType.Substring(0, keyType.Length - 2);
             keyMember.CollectionKind = CollectionKind.Array;
             
-            // For primitive array keys (except byte[] which uses raw bytes), use packed encoding
+            // For primitive array keys (except byte[] which uses raw bytes and strings), use packed encoding
             var elementType = keyMember.CollectionElementType;
             var simpleType = GetSimpleTypeName(elementType);
             if (IsPrimitiveType(simpleType) && 
@@ -3630,6 +3630,41 @@ class ObjectTree
             {
                 keyMember.IsPacked = true;
             }
+        }
+        // Handle generic collections as keys (List<>, HashSet<>, etc.)
+        else if (keyType.Contains("List<") || keyType.Contains("HashSet<") || keyType.Contains("<"))
+        {
+            keyMember.IsCollection = true;
+            var genericStart = keyType.IndexOf('<');
+            var genericEnd = keyType.LastIndexOf('>');
+            if (genericStart > 0 && genericEnd > genericStart)
+            {
+                keyMember.CollectionElementType = keyType.Substring(genericStart + 1, genericEnd - genericStart - 1);
+                
+                // Check if it's a numeric primitive for packed encoding (NOT string!)
+                var simpleType = GetSimpleTypeName(keyMember.CollectionElementType);
+                bool isNumericPrimitive = simpleType switch
+                {
+                    "int" or "Int32" or "int32" => true,
+                    "long" or "Int64" or "int64" => true,
+                    "uint" or "UInt32" or "uint32" => true,
+                    "ulong" or "UInt64" or "uint64" => true,
+                    "float" or "Single" => true,
+                    "double" or "Double" => true,
+                    "bool" or "Boolean" => true,
+                    "byte" or "Byte" => true,
+                    "sbyte" or "SByte" => true,
+                    "short" or "Int16" => true,
+                    "ushort" or "UInt16" => true,
+                    _ => false
+                };
+                
+                if (isNumericPrimitive)
+                {
+                    keyMember.IsPacked = true;
+                }
+            }
+            keyMember.CollectionKind = CollectionKind.ConcreteCollection;
         }
         
         // Create ProtoMember for value (field 2)
@@ -5606,6 +5641,85 @@ class ObjectTree
             return;
         }
         
+        // Check if it's a generic collection type (List<T>, HashSet<T>, etc.)
+        if (simpleType.Contains("<"))
+        {
+            var genericStart = simpleType.IndexOf('<');
+            var genericEnd = simpleType.LastIndexOf('>');
+            var baseType = simpleType.Substring(0, genericStart);
+            var elementType = simpleType.Substring(genericStart + 1, genericEnd - genericStart - 1);
+            
+            // Check if it's a numeric primitive for packed encoding (NOT string!)
+            bool isNumericPrimitive = elementType switch
+            {
+                "int" or "Int32" or "int32" => true,
+                "long" or "Int64" or "int64" => true,
+                "uint" or "UInt32" or "uint32" => true,
+                "ulong" or "UInt64" or "uint64" => true,
+                "float" or "Single" => true,
+                "double" or "Double" => true,
+                "bool" or "Boolean" => true,
+                "byte" or "Byte" => true,
+                "sbyte" or "SByte" => true,
+                "short" or "Int16" => true,
+                "ushort" or "UInt16" => true,
+                _ => false
+            };
+            
+            // For numeric primitive collections, use packed encoding
+            if (isNumericPrimitive)
+            {
+                sb.AppendIndentedLine($"if ({keyAccess} != null)");
+                sb.StartNewBlock();
+                // Calculate packed size
+                sb.AppendIndentedLine($"var packedCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+                sb.AppendIndentedLine($"foreach (var item in {keyAccess})");
+                sb.StartNewBlock();
+                AddPrimitiveSizeCalculation(sb, elementType, "item", DataFormat.Default, "packedCalc");
+                sb.EndBlock();
+                // Add length varint + packed content
+                sb.AppendIndentedLine($"{calculator}.WriteVarUInt32((uint)packedCalc.Length);");
+                sb.AppendIndentedLine($"{calculator}.AddByteLength(packedCalc.Length);");
+                sb.EndBlock();
+            }
+            else
+            {
+                // For collections with strings or custom types, calculate size of all elements as repeated fields
+                sb.AppendIndentedLine($"if ({keyAccess} != null)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"foreach (var keyItem in {keyAccess})");
+                sb.StartNewBlock();
+                
+                if (elementType == "string" || elementType == "System.String" || elementType == "String")
+                {
+                    // For strings
+                    sb.AppendIndentedLine($"if (keyItem != null)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"{calculator}.AddByteLength(1); // field 1, Len tag");
+                    sb.AppendIndentedLine($"{calculator}.WriteString(keyItem);");
+                    sb.EndBlock();
+                }
+                else
+                {
+                    // For custom types
+                    sb.AppendIndentedLine($"if (keyItem != null)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"{calculator}.AddByteLength(1); // field 1, Len tag");
+                    var sanitizedElementType = SanitizeTypeNameForMethod(elementType);
+                    var keyItemCalcName = $"keyItemCalc{sanitizedElementType}";
+                    sb.AppendIndentedLine($"var {keyItemCalcName} = new global::GProtobuf.Core.WriteSizeCalculator();");
+                    sb.AppendIndentedLine($"SizeCalculators.Calculate{sanitizedElementType}Size(ref {keyItemCalcName}, keyItem);");
+                    sb.AppendIndentedLine($"{calculator}.WriteVarUInt32((uint){keyItemCalcName}.Length);");
+                    sb.AppendIndentedLine($"{calculator}.AddByteLength({keyItemCalcName}.Length);");
+                    sb.EndBlock();
+                }
+                
+                sb.EndBlock();
+                sb.EndBlock();
+            }
+            return;
+        }
+        
         switch (simpleType)
         {
             case "string":
@@ -5735,7 +5849,7 @@ class ObjectTree
                 sb.EndBlock();
                 sb.EndBlock();
             }
-            else
+            else if (IsPrimitiveType(elementTypeName))
             {
                 // For primitive collections, we can pack them
                 sb.AppendIndentedLine($"var collectionCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
@@ -5745,6 +5859,22 @@ class ObjectTree
                 sb.EndBlock();
                 sb.AppendIndentedLine($"{calculator}.WriteVarUInt32((uint)collectionCalc.Length);");
                 sb.AppendIndentedLine($"{calculator}.AddByteLength(collectionCalc.Length);");
+            }
+            else
+            {
+                // For custom type collections (List<CustomNested>, etc.), each needs its own tag and size - same as arrays
+                sb.AppendIndentedLine($"foreach (var item in {valueAccess})");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"if (item != null)");
+                sb.StartNewBlock();
+                // Tag already added in GenerateFieldSizeCalculation
+                sb.AppendIndentedLine($"var itemCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+                var sanitizedElementType = SanitizeTypeNameForMethod(elementType);
+                sb.AppendIndentedLine($"SizeCalculators.Calculate{sanitizedElementType}Size(ref itemCalc, item);");
+                sb.AppendIndentedLine($"{calculator}.WriteVarUInt32((uint)itemCalc.Length);");
+                sb.AppendIndentedLine($"{calculator}.AddByteLength(itemCalc.Length);");
+                sb.EndBlock();
+                sb.EndBlock();
             }
             
             sb.EndBlock();
@@ -5919,6 +6049,93 @@ class ObjectTree
             return;
         }
         
+        // Check if it's a generic collection type (List<T>, HashSet<T>, etc.)
+        if (simpleType.Contains("<"))
+        {
+            var genericStart = simpleType.IndexOf('<');
+            var genericEnd = simpleType.LastIndexOf('>');
+            var baseType = simpleType.Substring(0, genericStart);
+            var elementType = simpleType.Substring(genericStart + 1, genericEnd - genericStart - 1);
+            
+            // Check if it's a numeric primitive for packed encoding (NOT string!)
+            bool isNumericPrimitive = elementType switch
+            {
+                "int" or "Int32" or "int32" => true,
+                "long" or "Int64" or "int64" => true,
+                "uint" or "UInt32" or "uint32" => true,
+                "ulong" or "UInt64" or "uint64" => true,
+                "float" or "Single" => true,
+                "double" or "Double" => true,
+                "bool" or "Boolean" => true,
+                "byte" or "Byte" => true,
+                "sbyte" or "SByte" => true,
+                "short" or "Int16" => true,
+                "ushort" or "UInt16" => true,
+                _ => false
+            };
+            
+            // For numeric primitive collections, use packed encoding
+            if (isNumericPrimitive)
+            {
+                sb.AppendIndentedLine($"if ({keyAccess} != null)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x0A); // field 1, Len (packed)");
+                
+                // Calculate packed size
+                sb.AppendIndentedLine($"var packedCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+                sb.AppendIndentedLine($"foreach (var item in {keyAccess})");
+                sb.StartNewBlock();
+                AddPrimitiveSizeCalculation(sb, elementType, "item", DataFormat.Default, "packedCalc");
+                sb.EndBlock();
+                
+                // Write packed length
+                sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)packedCalc.Length);");
+                
+                // Write packed values
+                sb.AppendIndentedLine($"foreach (var item in {keyAccess})");
+                sb.StartNewBlock();
+                WritePrimitiveValueWithoutTag(sb, elementType, "item", DataFormat.Default, writeTarget, writeTargetShortName);
+                sb.EndBlock();
+                sb.EndBlock();
+            }
+            else
+            {
+                // For collections with strings or custom types, treat them as repeated fields
+                sb.AppendIndentedLine($"if ({keyAccess} != null)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"// Collection key - write as repeated field 1");
+                sb.AppendIndentedLine($"foreach (var keyItem in {keyAccess})");
+                sb.StartNewBlock();
+                
+                if (elementType == "string" || elementType == "System.String" || elementType == "String")
+                {
+                    // For strings
+                    sb.AppendIndentedLine($"if (keyItem != null)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"writer.WriteSingleByte(0x0A); // field 1, Len");
+                    sb.AppendIndentedLine($"writer.WriteString(keyItem);");
+                    sb.EndBlock();
+                }
+                else
+                {
+                    // For custom types
+                    sb.AppendIndentedLine($"if (keyItem != null)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"writer.WriteSingleByte(0x0A); // field 1, Len");
+                    sb.AppendIndentedLine($"var keyItemCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+                    var sanitizedElementType = SanitizeTypeNameForMethod(elementType);
+                    sb.AppendIndentedLine($"SizeCalculators.Calculate{sanitizedElementType}Size(ref keyItemCalc, keyItem);");
+                    sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)keyItemCalc.Length);");
+                    sb.AppendIndentedLine($"{writeTargetShortName}Writers.Write{sanitizedElementType}(ref writer, keyItem);");
+                    sb.EndBlock();
+                }
+                
+                sb.EndBlock();
+                sb.EndBlock();
+            }
+            return;
+        }
+        
         // Key is field 1, wire type depends on the type
         switch (simpleType)
         {
@@ -6066,7 +6283,7 @@ class ObjectTree
                 sb.EndBlock();
                 sb.EndBlock();
             }
-            else
+            else if (IsPrimitiveType(elementTypeName))
             {
                 // For primitive collections, write as packed
                 sb.AppendIndentedLine($"writer.WriteSingleByte(0x12); // field 2, Len");
@@ -6074,21 +6291,10 @@ class ObjectTree
                 // Calculate collection size first
                 sb.AppendIndentedLine($"var collectionCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
                 
-                if (IsPrimitiveType(elementTypeName))
-                {
-                    sb.AppendIndentedLine($"foreach (var item in {valueAccess})");
-                    sb.StartNewBlock();
-                    WriteElementSizeCalculation(sb, elementType, "item", "collectionCalc");
-                    sb.EndBlock();
-                }
-                else
-                {
-                    sb.AppendIndentedLine($"foreach (var item in {valueAccess})");
-                    sb.StartNewBlock();
-                    var sanitizedElementType = SanitizeTypeNameForMethod(elementType);
-                    sb.AppendIndentedLine($"SizeCalculators.Calculate{sanitizedElementType}Size(ref collectionCalc, item);");
-                    sb.EndBlock();
-                }
+                sb.AppendIndentedLine($"foreach (var item in {valueAccess})");
+                sb.StartNewBlock();
+                WriteElementSizeCalculation(sb, elementType, "item", "collectionCalc");
+                sb.EndBlock();
                 
                 sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)collectionCalc.Length);");
                 
@@ -6096,6 +6302,22 @@ class ObjectTree
                 sb.AppendIndentedLine($"foreach (var item in {valueAccess})");
                 sb.StartNewBlock();
                 WriteElementToWriter(sb, elementType, "item", writeTargetShortName);
+                sb.EndBlock();
+            }
+            else
+            {
+                // For custom type collections (List<CustomNested>, etc.), write each as repeated field - same as arrays
+                sb.AppendIndentedLine($"foreach (var item in {valueAccess})");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"if (item != null)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x12); // field 2, Len");
+                sb.AppendIndentedLine($"var itemCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+                var sanitizedElementType = SanitizeTypeNameForMethod(elementType);
+                sb.AppendIndentedLine($"SizeCalculators.Calculate{sanitizedElementType}Size(ref itemCalc, item);");
+                sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)itemCalc.Length);");
+                sb.AppendIndentedLine($"{writeTargetShortName}Writers.Write{sanitizedElementType}(ref writer, item);");
+                sb.EndBlock();
                 sb.EndBlock();
             }
             
