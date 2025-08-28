@@ -56,6 +56,10 @@ namespace GProtobuf.CrossTests.TestModel
         [ProtoMember(14)]
         public Dictionary<Guid, string> EmptyGuidStringMap { get; set; }
         
+        // List<Guid> for testing collection of Guids
+        [ProtoMember(15)]
+        public List<Guid> GuidList { get; set; }
+        
         public override bool Equals(object obj)
         {
             if (obj is not GuidMapTestModel other) return false;
@@ -74,6 +78,7 @@ namespace GProtobuf.CrossTests.TestModel
             if (!CompareDictionaryWithCollection(GuidIntListMap, other.GuidIntListMap)) return false;
             if (!CompareDictionaryWithByteArray(GuidByteArrayMap, other.GuidByteArrayMap)) return false;
             if (!CompareDictionary(EmptyGuidStringMap, other.EmptyGuidStringMap)) return false;
+            if (!CompareList(GuidList, other.GuidList)) return false;
             
             return true;
         }
@@ -137,6 +142,20 @@ namespace GProtobuf.CrossTests.TestModel
                 if (kvp.Value == null && array2 == null) continue;
                 if (kvp.Value == null || array2 == null) return false;
                 if (!kvp.Value.SequenceEqual(array2)) return false;
+            }
+            
+            return true;
+        }
+        
+        private static bool CompareList<T>(List<T> list1, List<T> list2)
+        {
+            if (list1 == null && list2 == null) return true;
+            if (list1 == null || list2 == null) return false;
+            if (list1.Count != list2.Count) return false;
+            
+            for (int i = 0; i < list1.Count; i++)
+            {
+                if (!EqualityComparer<T>.Default.Equals(list1[i], list2[i])) return false;
             }
             
             return true;

@@ -106,6 +106,9 @@ namespace Todos.Model
 
         [ProtoMember(21)]
         public HashSet<Guid> Guids { get; set; }
+
+        [ProtoMember(22)]
+        public List<Guid> GuidList { get; set; }
         // todo: List<Guid>, Dictionary<Guid, string>, HashSet<Guid> etc.
         // todo: Dictionary<int, Dictionary<int, int>>
         // Dict<byte, xxx>

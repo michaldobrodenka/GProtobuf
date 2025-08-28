@@ -6275,46 +6275,116 @@ class ObjectTree
         else
         {
             // Non-packed reading - generate loop-based reading similar to existing array logic
-            var elementReadMethod = GetPrimitiveElementReadMethod(elementTypeName, protoMember.DataFormat);
-            //sb.AppendIndentedLine($"List<{elementType}> resultList = new(1);");
-            sb.AppendIndentedLine($"using UnmanagedCollectionCollector<{elementType}> resultCollector = new(stackalloc {elementType}[256 / sizeof({elementType})], 1024);");
-            sb.AppendIndentedLine($"var wireType1 = wireType;");
-            sb.AppendIndentedLine($"var fieldId1 = fieldId;");
-            sb.AppendIndentedLine($"while (fieldId1 == fieldId && wireType1 == {GetExpectedWireType(elementTypeName, protoMember.DataFormat)})");
-            sb.StartNewBlock();
-            sb.AppendIndentedLine($"resultCollector.Add({elementReadMethod});");
-            sb.AppendIndentedLine($"if (reader.EndOfData) break;");
-            sb.AppendIndentedLine($"var p = reader.Position;");
-            sb.AppendIndentedLine($"(wireType1, fieldId1) = reader.ReadKey();");
-            sb.AppendIndentedLine($"if (fieldId1 != fieldId)");
-            sb.StartNewBlock();
-            sb.AppendIndentedLine($"reader.Position = p; // rewind");
-            sb.AppendIndentedLine($"break;");
-            sb.EndBlock();
-            sb.EndBlock();
-            
-            // Convert resultList to appropriate collection type  
-            switch (protoMember.CollectionKind)
+            if (elementTypeName == "Guid" || elementTypeName == "System.Guid")
             {
-                case CollectionKind.Array:
-                    sb.AppendIndentedLine($"result.{protoMember.Name} = resultCollector.ToArray();");
-                    break;
-                case CollectionKind.InterfaceCollection:
-                    sb.AppendIndentedLine($"result.{protoMember.Name} = resultCollector.ToList();");
-                    break;
-                case CollectionKind.ConcreteCollection:
-                    var concreteType = protoMember.Type;
-                    if (concreteType.StartsWith("HashSet<") || concreteType.StartsWith("System.Collections.Generic.HashSet<"))
-                    {
-                        // HashSet<T> → create HashSet from items
-                        sb.AppendIndentedLine($"result.{protoMember.Name} = new global::System.Collections.Generic.HashSet<{elementType}>(resultCollector.ToArray());");
-                    }
-                    else
-                    {
-                        // Default to List<T> for other concrete collections
+                // Special handling for Guid collections (non-packed)
+                sb.AppendIndentedLine($"var guidList = new List<System.Guid>();");
+                sb.AppendIndentedLine($"var wireType1 = wireType;");
+                sb.AppendIndentedLine($"var fieldId1 = fieldId;");
+                sb.AppendIndentedLine($"while (fieldId1 == fieldId && wireType1 == WireType.Len)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"var length = reader.ReadVarInt32();");
+                sb.AppendIndentedLine($"var guidReader = new SpanReader(reader.GetSlice(length));");
+                sb.AppendIndentedLine($"// Read Guid as protobuf-net format (2 fixed64 fields)");
+                sb.AppendIndentedLine($"ulong lo = 0, hi = 0;");
+                sb.AppendIndentedLine($"while (!guidReader.IsEnd)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"var (guidWireType, guidFieldId) = guidReader.ReadWireTypeAndFieldId();");
+                sb.AppendIndentedLine($"if (guidFieldId == 1 && guidWireType == WireType.Fixed64b)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"lo = guidReader.ReadFixed64();");
+                sb.EndBlock();
+                sb.AppendIndentedLine($"else if (guidFieldId == 2 && guidWireType == WireType.Fixed64b)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"hi = guidReader.ReadFixed64();");
+                sb.EndBlock();
+                sb.AppendIndentedLine($"else");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"guidReader.SkipField(guidWireType);");
+                sb.EndBlock();
+                sb.EndBlock();
+                sb.AppendIndentedLine($"// Convert from protobuf-net format to Guid");
+                sb.AppendIndentedLine($"var guidBytes = new byte[16];");
+                sb.AppendIndentedLine($"System.BitConverter.GetBytes(lo).CopyTo(guidBytes, 0);");
+                sb.AppendIndentedLine($"System.BitConverter.GetBytes(hi).CopyTo(guidBytes, 8);");
+                sb.AppendIndentedLine($"guidList.Add(new System.Guid(guidBytes));");
+                sb.AppendIndentedLine($"if (reader.EndOfData) break;");
+                sb.AppendIndentedLine($"var p = reader.Position;");
+                sb.AppendIndentedLine($"(wireType1, fieldId1) = reader.ReadKey();");
+                sb.AppendIndentedLine($"if (fieldId1 != fieldId)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"reader.Position = p; // rewind");
+                sb.AppendIndentedLine($"break;");
+                sb.EndBlock();
+                sb.EndBlock();
+                
+                // Convert guidList to appropriate collection type  
+                switch (protoMember.CollectionKind)
+                {
+                    case CollectionKind.Array:
+                        sb.AppendIndentedLine($"result.{protoMember.Name} = guidList.ToArray();");
+                        break;
+                    case CollectionKind.InterfaceCollection:
+                        sb.AppendIndentedLine($"result.{protoMember.Name} = guidList;");
+                        break;
+                    case CollectionKind.ConcreteCollection:
+                        var concreteType = protoMember.Type;
+                        if (concreteType.StartsWith("HashSet<") || concreteType.StartsWith("System.Collections.Generic.HashSet<"))
+                        {
+                            // HashSet<T> → create HashSet from items
+                            sb.AppendIndentedLine($"result.{protoMember.Name} = new global::System.Collections.Generic.HashSet<System.Guid>(guidList);");
+                        }
+                        else
+                        {
+                            // Default to List<T> for other concrete collections
+                            sb.AppendIndentedLine($"result.{protoMember.Name} = guidList;");
+                        }
+                        break;
+                }
+            }
+            else
+            {
+                var elementReadMethod = GetPrimitiveElementReadMethod(elementTypeName, protoMember.DataFormat);
+                //sb.AppendIndentedLine($"List<{elementType}> resultList = new(1);");
+                sb.AppendIndentedLine($"using UnmanagedCollectionCollector<{elementType}> resultCollector = new(stackalloc {elementType}[256 / sizeof({elementType})], 1024);");
+                sb.AppendIndentedLine($"var wireType1 = wireType;");
+                sb.AppendIndentedLine($"var fieldId1 = fieldId;");
+                sb.AppendIndentedLine($"while (fieldId1 == fieldId && wireType1 == {GetExpectedWireType(elementTypeName, protoMember.DataFormat)})");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"resultCollector.Add({elementReadMethod});");
+                sb.AppendIndentedLine($"if (reader.EndOfData) break;");
+                sb.AppendIndentedLine($"var p = reader.Position;");
+                sb.AppendIndentedLine($"(wireType1, fieldId1) = reader.ReadKey();");
+                sb.AppendIndentedLine($"if (fieldId1 != fieldId)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"reader.Position = p; // rewind");
+                sb.AppendIndentedLine($"break;");
+                sb.EndBlock();
+                sb.EndBlock();
+                
+                // Convert resultList to appropriate collection type  
+                switch (protoMember.CollectionKind)
+                {
+                    case CollectionKind.Array:
+                        sb.AppendIndentedLine($"result.{protoMember.Name} = resultCollector.ToArray();");
+                        break;
+                    case CollectionKind.InterfaceCollection:
                         sb.AppendIndentedLine($"result.{protoMember.Name} = resultCollector.ToList();");
-                    }
-                    break;
+                        break;
+                    case CollectionKind.ConcreteCollection:
+                        var concreteType = protoMember.Type;
+                        if (concreteType.StartsWith("HashSet<") || concreteType.StartsWith("System.Collections.Generic.HashSet<"))
+                        {
+                            // HashSet<T> → create HashSet from items
+                            sb.AppendIndentedLine($"result.{protoMember.Name} = new global::System.Collections.Generic.HashSet<{elementType}>(resultCollector.ToArray());");
+                        }
+                        else
+                        {
+                            // Default to List<T> for other concrete collections
+                            sb.AppendIndentedLine($"result.{protoMember.Name} = resultCollector.ToList();");
+                        }
+                        break;
+                }
             }
         }
         
