@@ -283,13 +283,10 @@ public sealed class SerializerGenerator : IIncrementalGenerator
             if (namedType.TypeArguments.Length == 2)
             {
                 var keyType = namedType.TypeArguments[0].ToDisplayString();
-                // Check if key type is a collection - not supported as keys
-                if (IsCollectionType(keyType))
-                {
-                    // Skip map types with collections as keys - they're not valid dictionary keys
-                    return (false, null, null);
-                }
-                return (true, keyType, namedType.TypeArguments[1].ToDisplayString());
+                var valueType = namedType.TypeArguments[1].ToDisplayString();
+                // Arrays as keys are supported in Protocol Buffers - they're treated as byte arrays or repeated fields
+                // Remove the check that prevented collections as keys
+                return (true, keyType, valueType);
             }
         }
         
@@ -300,30 +297,9 @@ public sealed class SerializerGenerator : IIncrementalGenerator
         if (dictionaryInterface != null && dictionaryInterface.TypeArguments.Length == 2)
         {
             var keyType = dictionaryInterface.TypeArguments[0].ToDisplayString();
-            // Check if key type is a collection - not supported as keys
-            if (IsCollectionType(keyType))
-            {
-                return (false, null, null);
-            }
-            return (true, keyType, dictionaryInterface.TypeArguments[1].ToDisplayString());
-        }
-        
-        // Check for ICollection<KeyValuePair<TKey, TValue>>
-        var collectionInterface = namedType.AllInterfaces.FirstOrDefault(i =>
-            i.OriginalDefinition?.ToDisplayString() == "System.Collections.Generic.ICollection<T>" &&
-            i.TypeArguments.Length == 1 &&
-            i.TypeArguments[0] is INamedTypeSymbol elementType &&
-            elementType.OriginalDefinition?.ToDisplayString() == "System.Collections.Generic.KeyValuePair<TKey, TValue>");
-        
-        if (collectionInterface?.TypeArguments[0] is INamedTypeSymbol kvpType && kvpType.TypeArguments.Length == 2)
-        {
-            var keyType = kvpType.TypeArguments[0].ToDisplayString();
-            // Check if key type is a collection - not supported as keys
-            if (IsCollectionType(keyType))
-            {
-                return (false, null, null);
-            }
-            return (true, keyType, kvpType.TypeArguments[1].ToDisplayString());
+            var valueType = dictionaryInterface.TypeArguments[1].ToDisplayString();
+            // Arrays as keys are supported
+            return (true, keyType, valueType);
         }
         
         return (false, null, null);

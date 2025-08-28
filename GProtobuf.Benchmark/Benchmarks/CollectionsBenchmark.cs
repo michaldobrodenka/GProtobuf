@@ -29,17 +29,17 @@ namespace GProtobuf.Benchmark.Benchmarks
 
             _testModel = new CollectionsModel
             {
-                IntList = intData,
-                LongList = longData,
-                FloatList = floatData,
-                DoubleList = doubleData,
-                StringList = stringData,
-                IntArray = intData.ToArray(),
-                FloatArray = floatData.ToArray(),
-                DoubleArray = doubleData.ToArray(),
-                StringArray = stringData.ToArray(),
+                //IntList = intData,
+                //LongList = longData,
+                //FloatList = floatData,
+                //DoubleList = doubleData,
+                //StringList = stringData,
+                //IntArray = intData.ToArray(),
+                //FloatArray = floatData.ToArray(),
+                //DoubleArray = doubleData.ToArray(),
+                //StringArray = stringData.ToArray(),
                 PackedFixedIntList = intData.Take(50).ToList(),
-                PackedZigZagIntList = intData.Select(i => i % 2 == 0 ? i : -i).ToList()
+                //PackedZigZagIntList = intData.Select(i => i % 2 == 0 ? i : -i).ToList()
             };
 
             // Pre-serialize for deserialization benchmarks

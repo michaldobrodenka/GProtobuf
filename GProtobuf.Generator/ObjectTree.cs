@@ -3200,6 +3200,20 @@ class ObjectTree
             fullTypeName = fullTypeName.Substring(0, fullTypeName.Length - 1);
         }
 
+        // Handle generic types - don't split inside angle brackets
+        int genericStart = fullTypeName.IndexOf('<');
+        if (genericStart > 0)
+        {
+            // Find the last dot before the generic parameters
+            string beforeGeneric = fullTypeName.Substring(0, genericStart);
+            int lastDot = beforeGeneric.LastIndexOf('.');
+            if (lastDot >= 0)
+            {
+                // Return everything after the last dot (including generic parameters)
+                return fullTypeName.Substring(lastDot + 1);
+            }
+        }
+
         // Rozdelíme podľa bodiek a vezmeme poslednú časť
         string[] parts = fullTypeName.Split('.');
         return parts.Length > 0 ? parts[parts.Length - 1] : string.Empty;
@@ -3338,6 +3352,7 @@ class ObjectTree
         return typeName switch
         {
             "string" or "System.String" => true,
+            "byte" or "System.Byte" or "Byte" => true,  // byte is primitive for map keys
             _ => IsPrimitiveArrayType(typeName) // reuse the logic for numeric primitives
         };
     }
@@ -3369,6 +3384,95 @@ class ObjectTree
         {
             // This should NOT happen - primitive arrays should use specialized implementation
             sb.AppendIndentedLine($"throw new InvalidOperationException(\"Primitive array {elementTypeName}[] should use specialized implementation, not generic array logic\");");
+        }
+        else if (elementType.Contains("KeyValuePair<"))
+        {
+            // Special handling for List<KeyValuePair<K,V>> - deserialize as map entries
+            // Extract key and value types from KeyValuePair<K,V>
+            var genericStart = elementType.IndexOf('<');
+            var genericEnd = elementType.LastIndexOf('>');
+            if (genericStart > 0 && genericEnd > genericStart)
+            {
+                var genericArgs = elementType.Substring(genericStart + 1, genericEnd - genericStart - 1);
+                var commaIndex = FindTopLevelComma(genericArgs);
+                if (commaIndex > 0)
+                {
+                    var keyType = genericArgs.Substring(0, commaIndex).Trim();
+                    var valueType = genericArgs.Substring(commaIndex + 1).Trim();
+                    
+                    // Read as a map entry with key (field 1) and value (field 2)
+                    sb.AppendIndentedLine($"var length = reader.ReadVarInt32();");
+                    sb.AppendIndentedLine($"var entryReader = new SpanReader(reader.GetSlice(length));");
+                    sb.AppendIndentedLine($"{keyType} key = default({keyType});");
+                    sb.AppendIndentedLine($"{valueType} value = default({valueType});");
+                    
+                    sb.AppendIndentedLine($"while (!entryReader.IsEnd)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"var (entryWireType, entryFieldId) = entryReader.ReadWireTypeAndFieldId();");
+                    
+                    // Read key (field 1)
+                    sb.AppendIndentedLine($"if (entryFieldId == 1)");
+                    sb.StartNewBlock();
+                    
+                    // Simple inline deserialization for key
+                    var keyTypeName = GetSimpleTypeName(keyType);
+                    if (keyTypeName == "long" || keyTypeName == "Int64")
+                    {
+                        sb.AppendIndentedLine($"key = entryReader.ReadVarInt64();");
+                    }
+                    else if (keyTypeName == "int" || keyTypeName == "Int32")
+                    {
+                        sb.AppendIndentedLine($"key = entryReader.ReadVarInt32();");
+                    }
+                    else if (keyTypeName == "string" || keyTypeName == "String")
+                    {
+                        sb.AppendIndentedLine($"key = entryReader.ReadString(entryWireType);");
+                    }
+                    else
+                    {
+                        sb.AppendIndentedLine($"var keyLen = entryReader.ReadVarInt32();");
+                        sb.AppendIndentedLine($"var keyReader = new SpanReader(entryReader.GetSlice(keyLen));");
+                        sb.AppendIndentedLine($"key = global::{GetNamespaceFromType(keyType)}.Serialization.SpanReaders.Read{GetClassNameFromFullName(keyType)}(ref keyReader);");
+                    }
+                    
+                    sb.AppendIndentedLine($"continue;");
+                    sb.EndBlock();
+                    
+                    // Read value (field 2)
+                    sb.AppendIndentedLine($"if (entryFieldId == 2)");
+                    sb.StartNewBlock();
+                    
+                    // Simple inline deserialization for value
+                    var valueTypeName = GetSimpleTypeName(valueType);
+                    if (valueTypeName == "long" || valueTypeName == "Int64")
+                    {
+                        sb.AppendIndentedLine($"value = entryReader.ReadVarInt64();");
+                    }
+                    else if (valueTypeName == "int" || valueTypeName == "Int32")
+                    {
+                        sb.AppendIndentedLine($"value = entryReader.ReadVarInt32();");
+                    }
+                    else if (valueTypeName == "string" || valueTypeName == "String")
+                    {
+                        sb.AppendIndentedLine($"value = entryReader.ReadString(entryWireType);");
+                    }
+                    else
+                    {
+                        sb.AppendIndentedLine($"var valueLen = entryReader.ReadVarInt32();");
+                        sb.AppendIndentedLine($"var valueReader = new SpanReader(entryReader.GetSlice(valueLen));");
+                        sb.AppendIndentedLine($"value = global::{GetNamespaceFromType(valueType)}.Serialization.SpanReaders.Read{GetClassNameFromFullName(valueType)}(ref valueReader);");
+                    }
+                    
+                    sb.AppendIndentedLine($"continue;");
+                    sb.EndBlock();
+                    
+                    sb.AppendIndentedLine($"entryReader.SkipField(entryWireType);");
+                    sb.EndBlock();
+                    
+                    sb.AppendIndentedLine($"var item = new global::System.Collections.Generic.KeyValuePair<{keyType}, {valueType}>(key, value);");
+                    sb.AppendIndentedLine($"resultCollector.Add(item);");
+                }
+            }
         }
         else
         {
@@ -3510,6 +3614,24 @@ class ObjectTree
             Namespace = GetNamespaceFromType(keyType)
         };
         
+        // Handle special cases for key collections (arrays)
+        if (keyType.EndsWith("[]"))
+        {
+            keyMember.IsCollection = true;
+            keyMember.CollectionElementType = keyType.Substring(0, keyType.Length - 2);
+            keyMember.CollectionKind = CollectionKind.Array;
+            
+            // For primitive array keys (except byte[] which uses raw bytes), use packed encoding
+            var elementType = keyMember.CollectionElementType;
+            var simpleType = GetSimpleTypeName(elementType);
+            if (IsPrimitiveType(simpleType) && 
+                simpleType != "byte" && simpleType != "Byte" && simpleType != "System.Byte" &&
+                simpleType != "string" && simpleType != "String" && simpleType != "System.String")
+            {
+                keyMember.IsPacked = true;
+            }
+        }
+        
         // Create ProtoMember for value (field 2)
         var valueMember = new ProtoMemberAttribute(2)
         {
@@ -3528,6 +3650,15 @@ class ObjectTree
             valueMember.IsCollection = true;
             valueMember.CollectionElementType = valueType.Substring(0, valueType.Length - 2);
             valueMember.CollectionKind = CollectionKind.Array;
+            
+            // For primitive array values (except string arrays), use packed encoding
+            var elementType = valueMember.CollectionElementType;
+            var simpleType = GetSimpleTypeName(elementType);
+            if (IsPrimitiveType(simpleType) && 
+                simpleType != "string" && simpleType != "String" && simpleType != "System.String")
+            {
+                valueMember.IsPacked = true;
+            }
         }
         else if (valueType.Contains("List<") || valueType.Contains("HashSet<"))
         {
@@ -3537,6 +3668,14 @@ class ObjectTree
             if (genericStart > 0 && genericEnd > genericStart)
             {
                 valueMember.CollectionElementType = valueType.Substring(genericStart + 1, genericEnd - genericStart - 1);
+                
+                // For primitive collections (except strings), use packed encoding
+                var simpleType = GetSimpleTypeName(valueMember.CollectionElementType);
+                if (IsPrimitiveType(simpleType) && 
+                    simpleType != "string" && simpleType != "String" && simpleType != "System.String")
+                {
+                    valueMember.IsPacked = true;
+                }
             }
             valueMember.CollectionKind = CollectionKind.ConcreteCollection;
         }
@@ -3555,6 +3694,29 @@ class ObjectTree
     private static void GenerateMapEntryDeserializer(StringBuilderWithIndent sb, TypeDefinition mapEntryType, 
         string keyVar, string valueVar, string readerVar)
     {
+        // Check if key is a collection (array)
+        var keyMember = mapEntryType.ProtoMembers.FirstOrDefault(m => m.FieldId == 1);
+        bool isKeyCollection = keyMember != null && keyMember.IsCollection;
+        bool isKeyPrimitiveCollection = false;
+        
+        if (isKeyCollection && keyMember.CollectionElementType != null)
+        {
+            var elementTypeName = GetSimpleTypeName(keyMember.CollectionElementType);
+            isKeyPrimitiveCollection = IsPrimitiveType(elementTypeName) && elementTypeName != "string" && elementTypeName != "System.String";
+            
+            // Initialize collector for the key collection
+            if (isKeyPrimitiveCollection)
+            {
+                // For primitive types, need to handle proper type names
+                var managedType = GetManagedTypeName(keyMember.CollectionElementType);
+                sb.AppendIndentedLine($"using UnmanagedCollectionCollector<{managedType}> keyCollector = new(stackalloc {managedType}[256 / sizeof({managedType})], 1024);");
+            }
+            else
+            {
+                sb.AppendIndentedLine($"var keyList = new List<{keyMember.CollectionElementType}>();");
+            }
+        }
+        
         // Check if value is a collection
         var valueMember = mapEntryType.ProtoMembers.FirstOrDefault(m => m.FieldId == 2);
         bool isValueCollection = valueMember != null && valueMember.IsCollection;
@@ -3584,12 +3746,72 @@ class ObjectTree
         sb.AppendIndentedLine($"var (entryWireType, entryFieldId) = {readerVar}.ReadWireTypeAndFieldId();");
         
         // Process field 1 (key)
-        var keyMember = mapEntryType.ProtoMembers.FirstOrDefault(m => m.FieldId == 1);
         if (keyMember != null)
         {
             sb.AppendIndentedLine($"if (entryFieldId == 1)");
             sb.StartNewBlock();
-            GenerateSimpleFieldDeserializer(sb, keyMember, keyVar, readerVar, "entryWireType");
+            
+            if (isKeyCollection)
+            {
+                var elementType = keyMember.CollectionElementType;
+                var elementTypeName = GetSimpleTypeName(elementType);
+                
+                // Special handling for byte arrays - read as single Len field
+                if (elementTypeName == "byte" || elementTypeName == "Byte" || elementTypeName == "System.Byte")
+                {
+                    sb.AppendIndentedLine($"// Read byte array as single Len field");
+                    sb.AppendIndentedLine($"if (entryWireType == WireType.Len)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"var byteLen = {readerVar}.ReadVarInt32();");
+                    sb.AppendIndentedLine($"var bytes = {readerVar}.GetSlice(byteLen).ToArray();");
+                    sb.AppendIndentedLine($"foreach (var b in bytes)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"keyCollector.Add(b);");
+                    sb.EndBlock();
+                    sb.EndBlock();
+                }
+                else if (isKeyPrimitiveCollection)
+                {
+                    // For primitive arrays (except bytes), handle both packed and repeated formats
+                    sb.AppendIndentedLine($"if (entryWireType == WireType.Len)");
+                    sb.StartNewBlock();
+                    // Packed format - read all values from a single length-prefixed field
+                    sb.AppendIndentedLine($"var packedLength = {readerVar}.ReadVarInt32();");
+                    sb.AppendIndentedLine($"var packedReader = new SpanReader({readerVar}.GetSlice(packedLength));");
+                    sb.AppendIndentedLine($"while (!packedReader.IsEnd)");
+                    sb.StartNewBlock();
+                    string readMethod = GetPrimitiveReadMethodWithoutWireType(elementTypeName, keyMember.DataFormat);
+                    sb.AppendIndentedLine($"keyCollector.Add(packedReader.{readMethod});");
+                    sb.EndBlock();
+                    sb.EndBlock();
+                    sb.AppendIndentedLine($"else");
+                    sb.StartNewBlock();
+                    // Repeated format - single value with this field ID
+                    string readMethodRepeated = GetPrimitiveReadMethod(elementTypeName, keyMember.DataFormat, "entryWireType");
+                    sb.AppendIndentedLine($"keyCollector.Add({readerVar}.{readMethodRepeated});");
+                    sb.EndBlock();
+                }
+                else if (elementTypeName == "string" || elementTypeName == "System.String")
+                {
+                    // String collections
+                    sb.AppendIndentedLine($"var strLen = {readerVar}.ReadVarInt32();");
+                    sb.AppendIndentedLine($"var str = System.Text.Encoding.UTF8.GetString({readerVar}.GetSlice(strLen));");
+                    sb.AppendIndentedLine($"keyList.Add(str);");
+                }
+                else
+                {
+                    // Complex type collections
+                    sb.AppendIndentedLine($"var len = {readerVar}.ReadVarInt32();");
+                    sb.AppendIndentedLine($"var subReader = new SpanReader({readerVar}.GetSlice(len));");
+                    sb.AppendIndentedLine($"keyList.Add(global::{GetNamespaceFromType(elementType)}.Serialization.SpanReaders.Read{GetClassNameFromFullName(elementType)}(ref subReader));");
+                }
+            }
+            else
+            {
+                // Non-collection key
+                GenerateSimpleFieldDeserializer(sb, keyMember, keyVar, readerVar, "entryWireType");
+            }
+            
             sb.AppendIndentedLine($"continue;");
             sb.EndBlock();
         }
@@ -3656,6 +3878,44 @@ class ObjectTree
         sb.EndBlock();
         
         // After reading all fields, convert collections to final type
+        if (isKeyCollection)
+        {
+            var elementType = keyMember.CollectionElementType;
+            
+            if (isKeyPrimitiveCollection)
+            {
+                // Convert from collector to final collection type
+                if (keyMember.CollectionKind == CollectionKind.Array)
+                {
+                    sb.AppendIndentedLine($"{keyVar} = keyCollector.ToArray();");
+                }
+                else if (keyMember.Type.Contains("HashSet<"))
+                {
+                    sb.AppendIndentedLine($"{keyVar} = new HashSet<{elementType}>(keyCollector.ToArray());");
+                }
+                else if (keyMember.Type.Contains("List<"))
+                {
+                    sb.AppendIndentedLine($"{keyVar} = new List<{elementType}>(keyCollector.ToArray());");
+                }
+            }
+            else
+            {
+                // Convert from List to final collection type
+                if (keyMember.CollectionKind == CollectionKind.Array)
+                {
+                    sb.AppendIndentedLine($"{keyVar} = keyList.ToArray();");
+                }
+                else if (keyMember.Type.Contains("HashSet<"))
+                {
+                    sb.AppendIndentedLine($"{keyVar} = new HashSet<{elementType}>(keyList);");
+                }
+                else
+                {
+                    sb.AppendIndentedLine($"{keyVar} = keyList;");
+                }
+            }
+        }
+        
         if (isValueCollection)
         {
             var elementType = valueMember.CollectionElementType;
@@ -3842,6 +4102,10 @@ class ObjectTree
             case "System.Double":
             case "Double":
                 return $"ReadDouble({wireTypeVar})";
+            case "byte":
+            case "System.Byte":
+            case "Byte":
+                return $"ReadByte({wireTypeVar})";
             default:
                 return $"ReadVarInt32()";
         }
@@ -3931,14 +4195,7 @@ class ObjectTree
         // Check if value is a collection that needs packed encoding
         var valueMember = mapEntryType.ProtoMembers.FirstOrDefault(m => m.FieldId == 2);
         bool isValueCollection = valueMember != null && valueMember.IsCollection;
-        bool usePacked = false;
-        
-        if (isValueCollection && valueMember.CollectionElementType != null)
-        {
-            var elementTypeName = GetSimpleTypeName(valueMember.CollectionElementType);
-            // Use packed encoding for primitive collections (except strings)
-            usePacked = IsPrimitiveType(elementTypeName) && elementTypeName != "string" && elementTypeName != "System.String";
-        }
+        bool usePacked = valueMember != null && valueMember.IsPacked;
         
         if (isSizeCalculation)
         {
@@ -3951,31 +4208,7 @@ class ObjectTree
             
             if (valueMember != null)
             {
-                if (usePacked)
-                {
-                    // For packed primitive collections, calculate packed size
-                    var elementType = valueMember.CollectionElementType;
-                    var elementTypeName = GetSimpleTypeName(elementType);
-                    
-                    // Add field 2 tag
-                    sb.AppendIndentedLine($"{calculatorVar}.WriteVarUInt32(18u); // Field 2 tag (packed)");
-                    
-                    // Calculate packed data size
-                    sb.AppendIndentedLine($"var packedSize = new WriteSizeCalculator();");
-                    sb.AppendIndentedLine($"foreach (var item in {valueVar})");
-                    sb.StartNewBlock();
-                    AddPrimitiveSizeCalculation(sb, elementTypeName, "item", valueMember.DataFormat, "packedSize");
-                    sb.EndBlock();
-                    
-                    // Add length prefix and packed data size
-                    sb.AppendIndentedLine($"{calculatorVar}.WriteVarUInt32((uint)packedSize.Length);");
-                    sb.AppendIndentedLine($"{calculatorVar}.AddByteLength(packedSize.Length);");
-                }
-                else
-                {
-                    // Non-packed collections or non-collections
-                    GenerateFieldSizeCalculation(sb, valueMember, valueVar, calculatorVar);
-                }
+                GenerateFieldSizeCalculation(sb, valueMember, valueVar, calculatorVar);
             }
         }
         else
@@ -3993,7 +4226,7 @@ class ObjectTree
             
             if (valueMember != null)
             {
-                if (usePacked)
+                if (usePacked && valueMember.CollectionElementType != null)
                 {
                     // Write packed primitive collection
                     var elementType = valueMember.CollectionElementType;
@@ -4018,8 +4251,8 @@ class ObjectTree
                 }
                 else
                 {
-                    // Non-packed - use regular field serialization
-                    GenerateFieldSerializer(sb, valueMember, valueVar, writeTarget, writeTargetShortName);
+                    // Note: WriteMapValue already writes the tag
+                    WriteMapValue(sb, valueMember.Type, valueVar, writeTarget, writeTargetShortName);
                 }
             }
         }
@@ -4068,6 +4301,11 @@ class ObjectTree
             case "Double":
                 sb.AppendIndentedLine($"{writerVar}.WriteFixed64(BitConverter.DoubleToUInt64Bits({varName}));");
                 break;
+            case "byte":
+            case "System.Byte":
+            case "Byte":
+                sb.AppendIndentedLine($"{writerVar}.WriteSingleByte({varName});");
+                break;
             default:
                 sb.AppendIndentedLine($"{writerVar}.WriteVarUInt32((uint){varName});");
                 break;
@@ -4079,12 +4317,58 @@ class ObjectTree
     {
         var typeName = GetClassNameFromFullName(member.Type);
         
-        // Handle collections - each element gets its own tag
+        // Handle collections
         if (member.IsCollection && member.CollectionElementType != null)
         {
             var elementType = member.CollectionElementType;
             var elementTypeName = GetSimpleTypeName(elementType);
             
+            // Special case for byte arrays - treat as single Len field with raw bytes
+            if ((elementTypeName == "byte" || elementTypeName == "Byte" || elementTypeName == "System.Byte") && 
+                member.Type.EndsWith("[]"))
+            {
+                sb.AppendIndentedLine($"if ({sourceVar} != null)");
+                sb.StartNewBlock();
+                
+                // Add field tag for Len wire type
+                var byteArrayTagValue = (member.FieldId << 3) | GetWireTypeValue(WireType.Len);
+                sb.AppendIndentedLine($"{calculator}.WriteVarUInt32({byteArrayTagValue}u); // Field {member.FieldId} tag");
+                
+                // Add length and raw bytes
+                sb.AppendIndentedLine($"{calculator}.WriteVarUInt32((uint){sourceVar}.Length);");
+                sb.AppendIndentedLine($"{calculator}.AddByteLength({sourceVar}.Length);");
+                
+                sb.EndBlock();
+                return;
+            }
+            
+            // Check if we should use packed encoding
+            if (member.IsPacked && IsPrimitiveType(elementTypeName))
+            {
+                // Use packed encoding for primitive arrays
+                sb.AppendIndentedLine($"if ({sourceVar} != null)");
+                sb.StartNewBlock();
+                
+                // Add field tag for packed data
+                var packedTagValue = (member.FieldId << 3) | GetWireTypeValue(WireType.Len);
+                sb.AppendIndentedLine($"{calculator}.WriteVarUInt32({packedTagValue}u); // Field {member.FieldId} tag (packed)");
+                
+                // Calculate packed size
+                sb.AppendIndentedLine($"var packedCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+                sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
+                sb.StartNewBlock();
+                AddPrimitiveSizeCalculation(sb, elementTypeName, "item", member.DataFormat, "packedCalc");
+                sb.EndBlock();
+                
+                // Add packed length and data size
+                sb.AppendIndentedLine($"{calculator}.WriteVarUInt32((uint)packedCalc.Length);");
+                sb.AppendIndentedLine($"{calculator}.AddByteLength(packedCalc.Length);");
+                
+                sb.EndBlock();
+                return;
+            }
+            
+            // For non-packed collections, use repeated fields
             sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
             sb.StartNewBlock();
             
@@ -4108,7 +4392,8 @@ class ObjectTree
                 var complexTagValue = (member.FieldId << 3) | GetWireTypeValue(WireType.Len);
                 sb.AppendIndentedLine($"{calculator}.WriteVarUInt32({complexTagValue}u); // Field {member.FieldId} tag");
                 sb.AppendIndentedLine($"var itemCalc = new WriteSizeCalculator();");
-                sb.AppendIndentedLine($"global::{GetNamespaceFromType(elementType)}.Serialization.Serializers.Serialize{GetClassNameFromFullName(elementType)}(item, ref itemCalc);");
+                var sanitizedType = SanitizeTypeNameForMethod(elementType);
+                sb.AppendIndentedLine($"SizeCalculators.Calculate{sanitizedType}Size(ref itemCalc, item);");
                 sb.AppendIndentedLine($"{calculator}.WriteVarUInt32((uint)itemCalc.Length);");
                 sb.AppendIndentedLine($"{calculator}.AddByteLength(itemCalc.Length);");
             }
@@ -4177,6 +4462,11 @@ class ObjectTree
             case "System.Double":
             case "Double":
                 sb.AppendIndentedLine($"{calculator}.AddByteLength(8);");
+                break;
+            case "byte":
+            case "System.Byte":
+            case "Byte":
+                sb.AppendIndentedLine($"{calculator}.AddByteLength(1);");
                 break;
             default:
                 sb.AppendIndentedLine($"{calculator}.WriteVarUInt32((uint){varName});");
@@ -4621,6 +4911,46 @@ class ObjectTree
             // This should NOT happen - primitive arrays should use specialized implementation
             sb.AppendIndentedLine($"throw new InvalidOperationException(\"Primitive array {elementTypeName}[] should use specialized implementation, not generic array logic\");");
         }
+        else if (elementType.Contains("KeyValuePair<"))
+        {
+            // Special handling for List<KeyValuePair<K,V>> - treat as map entries
+            WriteOptimizedLoop(sb, protoMember, objectName, (loopSb) => {
+                // Extract key and value types from KeyValuePair<K,V>
+                var genericStart = elementType.IndexOf('<');
+                var genericEnd = elementType.LastIndexOf('>');
+                if (genericStart > 0 && genericEnd > genericStart)
+                {
+                    var genericArgs = elementType.Substring(genericStart + 1, genericEnd - genericStart - 1);
+                    var commaIndex = FindTopLevelComma(genericArgs);
+                    if (commaIndex > 0)
+                    {
+                        var keyType = genericArgs.Substring(0, commaIndex).Trim();
+                        var valueType = genericArgs.Substring(commaIndex + 1).Trim();
+                        
+                        // Write as a map entry with key (field 1) and value (field 2)
+                        loopSb.AppendIndentedLine($"var entryCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+                        
+                        // Calculate key size with field tag
+                        loopSb.AppendIndentedLine($"entryCalc.WriteVarUInt32(10u); // Field 1 tag");
+                        WriteMapKeySize(loopSb, keyType, "item.Key", "entryCalc");
+                        
+                        // Calculate value size with field tag
+                        loopSb.AppendIndentedLine($"entryCalc.WriteVarUInt32(18u); // Field 2 tag");
+                        WriteMapValueSize(loopSb, valueType, "item.Value", "entryCalc");
+                        
+                        // Write the entry
+                        WritePrecomputedTag(loopSb, protoMember.FieldId, WireType.Len);
+                        loopSb.AppendIndentedLine($"writer.WriteVarUInt32((uint)entryCalc.Length);");
+                        
+                        // Write key
+                        WriteMapKey(loopSb, keyType, "item.Key", writeTarget, writeTargetShortName);
+                        
+                        // Write value
+                        WriteMapValue(loopSb, valueType, "item.Value", writeTarget, writeTargetShortName);
+                    }
+                }
+            });
+        }
         else
         {
             // Custom message types - each message gets its own tag + length + serialized content
@@ -4628,14 +4958,15 @@ class ObjectTree
                 loopSb.AppendIndentedLine($"if (item != null)");
                 loopSb.StartNewBlock();
                 loopSb.AppendIndentedLine($"var calculator = new global::GProtobuf.Core.WriteSizeCalculator();");
-                loopSb.AppendIndentedLine($"SizeCalculators.Calculate{GetClassNameFromFullName(elementType)}Size(ref calculator, item);");
+                var sanitizedElementType = SanitizeTypeNameForMethod(elementType);
+                loopSb.AppendIndentedLine($"SizeCalculators.Calculate{sanitizedElementType}Size(ref calculator, item);");
                 WritePrecomputedTag(loopSb, protoMember.FieldId, WireType.Len);
                 loopSb.AppendIndentedLine($"writer.WriteVarUInt32((uint)calculator.Length);");
-                loopSb.AppendIndentedLine($"{writeTargetShortName}Writers.Write{GetClassNameFromFullName(elementType)}(ref writer, item);");
+                loopSb.AppendIndentedLine($"{writeTargetShortName}Writers.Write{sanitizedElementType}(ref writer, item);");
                 loopSb.EndBlock();
                 loopSb.AppendIndentedLine($"else");
                 loopSb.StartNewBlock();
-                loopSb.AppendIndentedLine($"throw new System.InvalidOperationException(\"An element of type {GetClassNameFromFullName(elementType)} was null; this might be as contents in a list/array\");");
+                loopSb.AppendIndentedLine($"throw new System.InvalidOperationException(\"An element of type {sanitizedElementType} was null; this might be as contents in a list/array\");");
                 loopSb.EndBlock();
             });
         }
@@ -4675,6 +5006,40 @@ class ObjectTree
             // This should NOT happen - primitive arrays should use specialized implementation
             sb.AppendIndentedLine($"throw new InvalidOperationException(\"Primitive array {elementTypeName}[] should use specialized implementation, not generic array logic\");");
         }
+        else if (elementType.Contains("KeyValuePair<"))
+        {
+            // Special handling for List<KeyValuePair<K,V>> - treat as map entries
+            WriteOptimizedLoop(sb, protoMember, "obj", (loopSb) => {
+                // Extract key and value types from KeyValuePair<K,V>
+                var genericStart = elementType.IndexOf('<');
+                var genericEnd = elementType.LastIndexOf('>');
+                if (genericStart > 0 && genericEnd > genericStart)
+                {
+                    var genericArgs = elementType.Substring(genericStart + 1, genericEnd - genericStart - 1);
+                    var commaIndex = FindTopLevelComma(genericArgs);
+                    if (commaIndex > 0)
+                    {
+                        var keyType = genericArgs.Substring(0, commaIndex).Trim();
+                        var valueType = genericArgs.Substring(commaIndex + 1).Trim();
+                        
+                        // Calculate size as a map entry with key (field 1) and value (field 2)
+                        WritePrecomputedTagForCalculator(loopSb, protoMember.FieldId, WireType.Len);
+                        loopSb.AppendIndentedLine($"var entryCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+                        
+                        // Calculate key size
+                        loopSb.AppendIndentedLine($"entryCalc.WriteVarUInt32(10u); // Field 1 tag");
+                        WriteMapKeySize(loopSb, keyType, "item.Key", "entryCalc");
+                        
+                        // Calculate value size
+                        loopSb.AppendIndentedLine($"entryCalc.WriteVarUInt32(18u); // Field 2 tag");
+                        WriteMapValueSize(loopSb, valueType, "item.Value", "entryCalc");
+                        
+                        loopSb.AppendIndentedLine($"calculator.WriteVarUInt32((uint)entryCalc.Length);");
+                        loopSb.AppendIndentedLine($"calculator.AddByteLength(entryCalc.Length);");
+                    }
+                }
+            });
+        }
         else
         {
             // Custom message types - each message gets tag + length + content
@@ -4683,13 +5048,14 @@ class ObjectTree
                 loopSb.StartNewBlock();
                 WritePrecomputedTagForCalculator(loopSb, protoMember.FieldId, WireType.Len);
                 loopSb.AppendIndentedLine($"var itemCalculator = new global::GProtobuf.Core.WriteSizeCalculator();");
-                loopSb.AppendIndentedLine($"SizeCalculators.Calculate{GetClassNameFromFullName(elementType)}Size(ref itemCalculator, item);");
+                var sanitizedElementType = SanitizeTypeNameForMethod(elementType);
+                loopSb.AppendIndentedLine($"SizeCalculators.Calculate{sanitizedElementType}Size(ref itemCalculator, item);");
                 loopSb.AppendIndentedLine($"calculator.WriteVarUInt32((uint)itemCalculator.Length);");
                 loopSb.AppendIndentedLine($"calculator.AddByteLength(itemCalculator.Length);");
                 loopSb.EndBlock();
                 loopSb.AppendIndentedLine($"else");
                 loopSb.StartNewBlock();
-                loopSb.AppendIndentedLine($"throw new System.InvalidOperationException(\"An element of type {GetClassNameFromFullName(elementType)} was null; this might be as contents in a list/array\");");
+                loopSb.AppendIndentedLine($"throw new System.InvalidOperationException(\"An element of type {sanitizedElementType} was null; this might be as contents in a list/array\");");
                 loopSb.EndBlock();
             });
         }
@@ -5167,6 +5533,79 @@ class ObjectTree
         // Key is always field 1
         var simpleType = GetSimpleTypeName(keyType);
         
+        // Check if it's an array type
+        if (simpleType.EndsWith("[]"))
+        {
+            var elementType = simpleType.Substring(0, simpleType.Length - 2);
+            
+            // Special case for byte arrays - single Len field with raw bytes (no tag, already added by caller)
+            if (elementType == "byte" || elementType == "System.Byte" || elementType == "Byte")
+            {
+                sb.AppendIndentedLine($"if ({keyAccess} != null)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"{calculator}.WriteVarUInt32((uint){keyAccess}.Length);");
+                sb.AppendIndentedLine($"{calculator}.AddByteLength({keyAccess}.Length);");
+                sb.EndBlock();
+                return;
+            }
+            
+            // For int arrays, use packed encoding size calculation
+            if (elementType == "int" || elementType == "Int32" || elementType == "int32" || 
+                elementType == "long" || elementType == "Int64" || elementType == "int64" ||
+                elementType == "uint" || elementType == "UInt32" || elementType == "uint32" ||
+                elementType == "ulong" || elementType == "UInt64" || elementType == "uint64")
+            {
+                sb.AppendIndentedLine($"if ({keyAccess} != null)");
+                sb.StartNewBlock();
+                // Calculate packed size
+                sb.AppendIndentedLine($"var packedCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+                sb.AppendIndentedLine($"foreach (var item in {keyAccess})");
+                sb.StartNewBlock();
+                AddPrimitiveSizeCalculation(sb, elementType, "item", DataFormat.Default, "packedCalc");
+                sb.EndBlock();
+                // Add length varint + packed content
+                sb.AppendIndentedLine($"{calculator}.WriteVarUInt32((uint)packedCalc.Length);");
+                sb.AppendIndentedLine($"{calculator}.AddByteLength(packedCalc.Length);");
+                sb.EndBlock();
+                return;
+            }
+            
+            // For other array keys (strings, custom types), calculate size of all elements as repeated fields
+            sb.AppendIndentedLine($"if ({keyAccess} != null)");
+            sb.StartNewBlock();
+            sb.AppendIndentedLine($"foreach (var keyItem in {keyAccess})");
+            sb.StartNewBlock();
+            
+            // Check if element is string
+            if (elementType == "string" || elementType == "System.String" || elementType == "String")
+            {
+                // For strings
+                sb.AppendIndentedLine($"if (keyItem != null)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"{calculator}.AddByteLength(1); // field 1, Len tag");
+                sb.AppendIndentedLine($"{calculator}.WriteString(keyItem);");
+                sb.EndBlock();
+            }
+            else
+            {
+                // For custom types
+                sb.AppendIndentedLine($"if (keyItem != null)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"{calculator}.AddByteLength(1); // field 1, Len tag");
+                var sanitizedElementType = SanitizeTypeNameForMethod(elementType);
+                var keyItemCalcName = $"keyItemCalc{sanitizedElementType}";
+                sb.AppendIndentedLine($"var {keyItemCalcName} = new global::GProtobuf.Core.WriteSizeCalculator();");
+                sb.AppendIndentedLine($"SizeCalculators.Calculate{sanitizedElementType}Size(ref {keyItemCalcName}, keyItem);");
+                sb.AppendIndentedLine($"{calculator}.WriteVarUInt32((uint){keyItemCalcName}.Length);");
+                sb.AppendIndentedLine($"{calculator}.AddByteLength({keyItemCalcName}.Length);");
+                sb.EndBlock();
+            }
+            
+            sb.EndBlock();
+            sb.EndBlock();
+            return;
+        }
+        
         switch (simpleType)
         {
             case "string":
@@ -5381,6 +5820,88 @@ class ObjectTree
     private static void WriteMapKey(StringBuilderWithIndent sb, string keyType, string keyAccess, WriteTarget writeTarget, string writeTargetShortName)
     {
         var simpleType = GetSimpleTypeName(keyType);
+        
+        // Check if it's an array type
+        if (simpleType.EndsWith("[]"))
+        {
+            var elementType = simpleType.Substring(0, simpleType.Length - 2);
+            
+            // Special case for byte arrays - write as single Len field with raw bytes
+            if (elementType == "byte" || elementType == "System.Byte" || elementType == "Byte")
+            {
+                sb.AppendIndentedLine($"if ({keyAccess} != null)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x0A); // field 1, Len");
+                sb.AppendIndentedLine($"writer.WriteVarUInt32((uint){keyAccess}.Length);");
+                sb.AppendIndentedLine($"writer.WriteBytes({keyAccess});");
+                sb.EndBlock();
+                return;
+            }
+            
+            // For int arrays, use packed encoding for protobuf-net compatibility
+            if (elementType == "int" || elementType == "Int32" || elementType == "int32" || 
+                elementType == "long" || elementType == "Int64" || elementType == "int64" ||
+                elementType == "uint" || elementType == "UInt32" || elementType == "uint32" ||
+                elementType == "ulong" || elementType == "UInt64" || elementType == "uint64")
+            {
+                sb.AppendIndentedLine($"if ({keyAccess} != null)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x0A); // field 1, Len (packed)");
+                
+                // Calculate packed size
+                sb.AppendIndentedLine($"var packedCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+                sb.AppendIndentedLine($"foreach (var item in {keyAccess})");
+                sb.StartNewBlock();
+                AddPrimitiveSizeCalculation(sb, elementType, "item", DataFormat.Default, "packedCalc");
+                sb.EndBlock();
+                
+                // Write packed length
+                sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)packedCalc.Length);");
+                
+                // Write packed values
+                sb.AppendIndentedLine($"foreach (var item in {keyAccess})");
+                sb.StartNewBlock();
+                WritePrimitiveValueWithoutTag(sb, elementType, "item", DataFormat.Default, writeTarget, writeTargetShortName);
+                sb.EndBlock();
+                sb.EndBlock();
+                return;
+            }
+            
+            // For other array keys (strings, custom types), treat them as repeated fields within the map entry
+            sb.AppendIndentedLine($"if ({keyAccess} != null)");
+            sb.StartNewBlock();
+            sb.AppendIndentedLine($"// Array key - write as repeated field 1");
+            sb.AppendIndentedLine($"foreach (var keyItem in {keyAccess})");
+            sb.StartNewBlock();
+            
+            // Check if element is string
+            if (elementType == "string" || elementType == "System.String" || elementType == "String")
+            {
+                // For strings
+                sb.AppendIndentedLine($"if (keyItem != null)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x0A); // field 1, Len");
+                sb.AppendIndentedLine($"writer.WriteString(keyItem);");
+                sb.EndBlock();
+            }
+            else
+            {
+                // For custom types
+                sb.AppendIndentedLine($"if (keyItem != null)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x0A); // field 1, Len");
+                sb.AppendIndentedLine($"var keyItemCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+                var sanitizedElementType = SanitizeTypeNameForMethod(elementType);
+                sb.AppendIndentedLine($"SizeCalculators.Calculate{sanitizedElementType}Size(ref keyItemCalc, keyItem);");
+                sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)keyItemCalc.Length);");
+                sb.AppendIndentedLine($"{writeTargetShortName}Writers.Write{sanitizedElementType}(ref writer, keyItem);");
+                sb.EndBlock();
+            }
+            
+            sb.EndBlock();
+            sb.EndBlock();
+            return;
+        }
         
         // Key is field 1, wire type depends on the type
         switch (simpleType)
@@ -5651,11 +6172,73 @@ class ObjectTree
         }
     }
     
+    /// <summary>
+    /// Finds the position of the top-level comma in a generic type argument list
+    /// </summary>
+    private static int FindTopLevelComma(string genericArgs)
+    {
+        int depth = 0;
+        for (int i = 0; i < genericArgs.Length; i++)
+        {
+            char c = genericArgs[i];
+            if (c == '<')
+                depth++;
+            else if (c == '>')
+                depth--;
+            else if (c == ',' && depth == 0)
+                return i;
+        }
+        return -1;
+    }
+
     private static string GetSimpleTypeName(string fullTypeName)
     {
-        // Remove namespace and get just the type name
-        var lastDot = fullTypeName.LastIndexOf('.');
-        return lastDot >= 0 ? fullTypeName.Substring(lastDot + 1) : fullTypeName;
+        // Handle generic types - don't split inside angle brackets
+        int genericStart = fullTypeName.IndexOf('<');
+        if (genericStart > 0)
+        {
+            // Find the last dot before the generic part
+            string beforeGeneric = fullTypeName.Substring(0, genericStart);
+            int lastDot = beforeGeneric.LastIndexOf('.');
+            if (lastDot >= 0)
+            {
+                // Return everything after the last dot (including the generic part)
+                return fullTypeName.Substring(lastDot + 1);
+            }
+        }
+        else
+        {
+            // Non-generic type - find the last dot
+            var lastDot = fullTypeName.LastIndexOf('.');
+            if (lastDot >= 0)
+                return fullTypeName.Substring(lastDot + 1);
+        }
+        
+        return fullTypeName;
+    }
+
+    /// <summary>
+    /// Gets the managed type name for primitive types (e.g., "int" -> "int", "Int32" -> "int")
+    /// </summary>
+    private static string GetManagedTypeName(string typeName)
+    {
+        var simpleType = GetSimpleTypeName(typeName);
+        return simpleType switch
+        {
+            "Int32" or "System.Int32" => "int",
+            "Int64" or "System.Int64" => "long",
+            "Int16" or "System.Int16" => "short",
+            "Byte" or "System.Byte" => "byte",
+            "SByte" or "System.SByte" => "sbyte",
+            "UInt32" or "System.UInt32" => "uint",
+            "UInt64" or "System.UInt64" => "ulong",
+            "UInt16" or "System.UInt16" => "ushort",
+            "Single" or "System.Single" => "float",
+            "Double" or "System.Double" => "double",
+            "Boolean" or "System.Boolean" => "bool",
+            "String" or "System.String" => "string",
+            _ => simpleType // Return as-is for non-primitive types
+        };
     }
 
     /// <summary>
@@ -5726,16 +6309,21 @@ class ObjectTree
             }
         }
         
-        // Handle primitive type aliases
+        // Handle primitive type aliases - ensure proper casing for method names
         return simpleName switch
         {
-            "System.String" => "String",
-            "System.Int32" => "Int",
-            "System.Int64" => "Long",
-            "System.Single" => "Float",
-            "System.Double" => "Double",
-            "System.Boolean" => "Bool",
-            "System.Byte" => "Byte",
+            "string" or "System.String" => "String",
+            "int" or "System.Int32" => "Int",
+            "long" or "System.Int64" => "Long",
+            "float" or "System.Single" => "Float",
+            "double" or "System.Double" => "Double",
+            "bool" or "System.Boolean" => "Bool",
+            "byte" or "System.Byte" => "Byte",
+            "sbyte" or "System.SByte" => "SByte",
+            "short" or "System.Int16" => "Short",
+            "ushort" or "System.UInt16" => "UShort",
+            "uint" or "System.UInt32" => "UInt",
+            "ulong" or "System.UInt64" => "ULong",
             _ => simpleName
         };
     }

@@ -135,6 +135,40 @@ public sealed class DictionaryModelTests : BaseSerializationTest
     
     #endregion
     
+    private string GetHexDump(byte[] data, string label)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"\n{label} ({data.Length} bytes):");
+        for (int i = 0; i < data.Length; i += 16)
+        {
+            sb.Append($"{i:X4}: ");
+            
+            // Hex bytes
+            for (int j = 0; j < 16; j++)
+            {
+                if (i + j < data.Length)
+                    sb.Append($"{data[i + j]:X2} ");
+                else
+                    sb.Append("   ");
+            }
+            
+            sb.Append("  ");
+            
+            // ASCII representation
+            for (int j = 0; j < 16 && i + j < data.Length; j++)
+            {
+                byte b = data[i + j];
+                if (b >= 32 && b < 127)
+                    sb.Append((char)b);
+                else
+                    sb.Append('.');
+            }
+            
+            sb.AppendLine();
+        }
+        return sb.ToString();
+    }
+    
     #region PG Tests (Protobuf-net to GProtobuf)
     
     [Fact]
@@ -401,10 +435,15 @@ public sealed class DictionaryModelTests : BaseSerializationTest
     {
         var model = CreateSimpleDictionaryModel();
 
-        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeDictionaryModel);
-        var data1 = SerializeWithProtobufNet(model);
-        var deserialized = DeserializeWithProtobufNet<DictionaryModel>(data);
-        var deserialized1 = DeserializeWithGProtobuf(data1, bytes => TestModel.Serialization.Deserializers.DeserializeDictionaryModel(bytes));
+        var gpData = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeDictionaryModel);
+        var pbData = SerializeWithProtobufNet(model);
+        
+        // Debug output
+        _outputHelper.WriteLine(GetHexDump(gpData, "GProtobuf serialization"));
+        _outputHelper.WriteLine(GetHexDump(pbData, "protobuf-net serialization"));
+        
+        var deserialized = DeserializeWithProtobufNet<DictionaryModel>(gpData);
+        var deserialized1 = DeserializeWithGProtobuf(pbData, bytes => TestModel.Serialization.Deserializers.DeserializeDictionaryModel(bytes));
 
         // Compare with custom equivalency that treats null and empty string as equivalent
         deserialized.Should().BeEquivalentTo(model, options => options

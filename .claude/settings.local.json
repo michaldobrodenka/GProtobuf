@@ -24,9 +24,24 @@
       "Read(E:\\work\\GProtobuf\\GProtobuf.Generator/**)",
       "mcp__serena__insert_before_symbol",
       "Read(E:\\work\\GProtobuf\\GProtobuf.CrossTests\\obj\\Generated\\GProtobuf.Generator\\GProtobuf.Generator.SerializerGenerator/**)",
+      "Read(E:\\work\\GProtobuf\\GProtobuf.CrossTests\\obj\\Generated\\GProtobuf.Generator\\GProtobuf.Generator.SerializerGenerator/**)",
+      "Bash(sed:*)",
+      "Bash(grep:*)",
+      "Read(E:\\work\\GProtobuf\\GProtobuf.CrossTests\\obj\\Generated/**)",
+      "Read(E:\\work\\GProtobuf\\GProtobuf.CrossTests\\obj\\Generated/**)",
+      "Read(E:\\work\\GProtobuf\\GProtobuf.CrossTests\\obj\\Generated/**)",
+      "Read(E:\\work\\GProtobuf\\GProtobuf.CrossTests\\obj\\Generated\\GProtobuf.Generator\\GProtobuf.Generator.SerializerGenerator/**)",
+      "Read(E:\\work\\GProtobuf\\GProtobuf.CrossTests\\obj\\Generated\\GProtobuf.Generator\\GProtobuf.Generator.SerializerGenerator/**)",
+      "Read(E:\\work\\GProtobuf\\GProtobuf.CrossTests\\obj\\Generated\\GProtobuf.Generator\\GProtobuf.Generator.SerializerGenerator/**)",
+      "Read(E:\\work\\GProtobuf\\GProtobuf.CrossTests\\obj\\Generated\\GProtobuf.Generator\\GProtobuf.Generator.SerializerGenerator/**)",
+      "Read(E:\\work\\GProtobuf\\GProtobuf.CrossTests\\obj\\Generated\\GProtobuf.Generator\\GProtobuf.Generator.SerializerGenerator/**)",
+      "Read(E:\\work\\GProtobuf\\GProtobuf.CrossTests\\obj\\Generated\\GProtobuf.Generator\\GProtobuf.Generator.SerializerGenerator/**)",
       "Read(E:\\work\\GProtobuf\\GProtobuf.CrossTests\\obj\\Generated\\GProtobuf.Generator\\GProtobuf.Generator.SerializerGenerator/**)"
     ],
     "deny": [],
-    "ask": []
+    "ask": [],
+    "additionalDirectories": [
+      "E:\\work\\GProtobuf"
+    ]
   }
 }
