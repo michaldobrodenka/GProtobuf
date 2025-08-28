@@ -98,6 +98,14 @@ namespace Todos.Model
         [ProtoMember(18)]
         public Dictionary<byte, double> ByteDoubleMap { get; set; }
 
+        [ProtoMember(19)]
+        public Dictionary<float, long> FloatDoubleMap { get; set; }
+
+        [ProtoMember(20)]
+        public Dictionary<Guid, long> GuidLongMap { get; set; }
+
+        [ProtoMember(21)]
+        public HashSet<Guid> Guids { get; set; }
         // todo: List<Guid>, Dictionary<Guid, string>, HashSet<Guid> etc.
         // todo: Dictionary<int, Dictionary<int, int>>
         // Dict<byte, xxx>

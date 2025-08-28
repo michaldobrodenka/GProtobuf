@@ -222,6 +222,11 @@ namespace Todos
             // Test byte as dictionary key
             Console.WriteLine("\n=== Testing Byte as Dictionary Key ===");
             ByteMapTest.TestByteDoubleMap();
+            
+            // Test Guid as dictionary key
+            Console.WriteLine("\n=== Testing Guid as Dictionary Key ===");
+            GuidMapTest.TestGuidLongMap();
+            GuidMapTest.TestProtobufNetCompatibility();
         }
     }
 }

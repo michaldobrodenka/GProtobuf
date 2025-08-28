@@ -2492,9 +2492,10 @@ class ObjectTree
                     WritePrecomputedTag(sb, protoMember.FieldId, WireType.Len);
                     sb.AppendIndentedLine($"writer.WriteVarUInt32(18u); // BCL Guid format: 2 fixed64 fields = 2*(1+8) = 18 bytes");
                     sb.AppendIndentedLine($"// Convert Guid to BCL format (2 fixed64 fields)");
-                    sb.AppendIndentedLine($"var guidBytes = {objectName}.{protoMember.Name}.Value.ToByteArray();");
-                    sb.AppendIndentedLine($"var low = System.BitConverter.ToUInt64(guidBytes, 0);");
-                    sb.AppendIndentedLine($"var high = System.BitConverter.ToUInt64(guidBytes, 8);");
+                    var guidVarName = $"guidBytes_{protoMember.Name}_{protoMember.FieldId}";
+                    sb.AppendIndentedLine($"var {guidVarName} = {objectName}.{protoMember.Name}.Value.ToByteArray();");
+                    sb.AppendIndentedLine($"var low = System.BitConverter.ToUInt64({guidVarName}, 0);");
+                    sb.AppendIndentedLine($"var high = System.BitConverter.ToUInt64({guidVarName}, 8);");
                     sb.AppendIndentedLine($"// Field 1: low (fixed64)");
                     WritePrecomputedTag(sb, 1, WireType.Fixed64b);
                     sb.AppendIndentedLine($"writer.WriteFixed64(low);");
@@ -2510,9 +2511,10 @@ class ObjectTree
                     WritePrecomputedTag(sb, protoMember.FieldId, WireType.Len);
                     sb.AppendIndentedLine($"writer.WriteVarUInt32(18u); // BCL Guid format: 2 fixed64 fields = 2*(1+8) = 18 bytes");
                     sb.AppendIndentedLine($"// Convert Guid to BCL format (2 fixed64 fields)");
-                    sb.AppendIndentedLine($"var guidBytes = {objectName}.{protoMember.Name}.ToByteArray();");
-                    sb.AppendIndentedLine($"var low = System.BitConverter.ToUInt64(guidBytes, 0);");
-                    sb.AppendIndentedLine($"var high = System.BitConverter.ToUInt64(guidBytes, 8);");
+                    var guidVarName = $"guidBytes_{protoMember.Name}_{protoMember.FieldId}";
+                    sb.AppendIndentedLine($"var {guidVarName} = {objectName}.{protoMember.Name}.ToByteArray();");
+                    sb.AppendIndentedLine($"var low = System.BitConverter.ToUInt64({guidVarName}, 0);");
+                    sb.AppendIndentedLine($"var high = System.BitConverter.ToUInt64({guidVarName}, 8);");
                     sb.AppendIndentedLine($"// Field 1: low (fixed64)");
                     WritePrecomputedTag(sb, 1, WireType.Fixed64b);
                     sb.AppendIndentedLine($"writer.WriteFixed64(low);");
@@ -4507,7 +4509,37 @@ class ObjectTree
                     sb.AppendIndentedLine($"while (!packedReader.IsEnd)");
                     sb.StartNewBlock();
                     string readMethod = GetPrimitiveReadMethodWithoutWireType(elementTypeName, valueMember.DataFormat);
-                    sb.AppendIndentedLine($"valueCollector.Add(packedReader.{readMethod});");
+                    // Special handling for types that need casting
+                    if (elementTypeName == "byte" || elementTypeName == "System.Byte" || elementTypeName == "Byte")
+                    {
+                        sb.AppendIndentedLine($"valueCollector.Add((byte)packedReader.ReadVarUInt32());");
+                    }
+                    else if (elementTypeName == "sbyte" || elementTypeName == "System.SByte" || elementTypeName == "SByte")
+                    {
+                        if (valueMember.DataFormat == DataFormat.ZigZag)
+                            sb.AppendIndentedLine($"valueCollector.Add((sbyte)packedReader.ReadZigZagVarInt32());");
+                        else
+                            sb.AppendIndentedLine($"valueCollector.Add((sbyte)packedReader.ReadVarInt32());");
+                    }
+                    else if (elementTypeName == "short" || elementTypeName == "System.Int16" || elementTypeName == "Int16")
+                    {
+                        if (valueMember.DataFormat == DataFormat.ZigZag)
+                            sb.AppendIndentedLine($"valueCollector.Add((short)packedReader.ReadZigZagVarInt32());");
+                        else
+                            sb.AppendIndentedLine($"valueCollector.Add((short)packedReader.ReadVarInt32());");
+                    }
+                    else if (elementTypeName == "ushort" || elementTypeName == "System.UInt16" || elementTypeName == "UInt16")
+                    {
+                        sb.AppendIndentedLine($"valueCollector.Add((ushort)packedReader.ReadVarUInt32());");
+                    }
+                    else if (elementTypeName == "char" || elementTypeName == "System.Char" || elementTypeName == "Char")
+                    {
+                        sb.AppendIndentedLine($"valueCollector.Add((char)packedReader.ReadVarUInt32());");
+                    }
+                    else
+                    {
+                        sb.AppendIndentedLine($"valueCollector.Add(packedReader.{readMethod});");
+                    }
                     sb.EndBlock();
                     sb.EndBlock();
                     sb.AppendIndentedLine($"else");
@@ -4671,6 +4703,36 @@ class ObjectTree
             case "System.Boolean":
             case "Boolean":
                 return "ReadBool(WireType.VarInt)";
+            case "byte":
+            case "System.Byte":
+            case "Byte":
+                return "(byte)ReadVarUInt32()";
+            case "sbyte":
+            case "System.SByte":
+            case "SByte":
+                if (dataFormat == DataFormat.ZigZag)
+                    return "(sbyte)ReadZigZagVarInt32()";
+                else
+                    return "(sbyte)ReadVarInt32()";
+            case "short":
+            case "System.Int16":
+            case "Int16":
+                if (dataFormat == DataFormat.ZigZag)
+                    return "(short)ReadZigZagVarInt32()";
+                else
+                    return "(short)ReadVarInt32()";
+            case "ushort":
+            case "System.UInt16":
+            case "UInt16":
+                return "(ushort)ReadVarUInt32()";
+            case "uint":
+            case "System.UInt32":
+            case "UInt32":
+                return "ReadVarUInt32()";
+            case "ulong":
+            case "System.UInt64":
+            case "UInt64":
+                return "ReadVarUInt64()";
             case "char":
             case "System.Char":
             case "Char":
@@ -4743,6 +4805,28 @@ class ObjectTree
             case "System.Double":
             case "Double":
                 sb.AppendIndentedLine($"{targetVar} = {readerVar}.ReadDouble({wireTypeVar});");
+                break;
+            case "Guid":
+            case "System.Guid":
+                // Read Guid as BCL format (2 fixed64 fields)
+                sb.AppendIndentedLine($"var guidLength = {readerVar}.ReadVarInt32();");
+                sb.AppendIndentedLine($"var guidReader = new SpanReader({readerVar}.GetSlice(guidLength));");
+                sb.AppendIndentedLine($"ulong guidLow = 0, guidHigh = 0;");
+                sb.AppendIndentedLine($"while (!guidReader.IsEnd)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"var guidFieldInfo = guidReader.ReadWireTypeAndFieldId();");
+                sb.AppendIndentedLine($"switch (guidFieldInfo.fieldId)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"case 1: guidLow = guidReader.ReadFixed64(); break;");
+                sb.AppendIndentedLine($"case 2: guidHigh = guidReader.ReadFixed64(); break;");
+                sb.AppendIndentedLine($"default: guidReader.SkipField(guidFieldInfo.wireType); break;");
+                sb.EndBlock();
+                sb.EndBlock();
+                sb.AppendIndentedLine($"// Convert back to Guid");
+                sb.AppendIndentedLine($"Span<byte> guidBytes = stackalloc byte[16];");
+                sb.AppendIndentedLine($"System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(guidBytes, guidLow);");
+                sb.AppendIndentedLine($"System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(guidBytes.Slice(8), guidHigh);");
+                sb.AppendIndentedLine($"{targetVar} = new Guid(guidBytes);");
                 break;
             default:
                 if (member.IsEnum)
@@ -4882,6 +4966,33 @@ class ObjectTree
             case "System.Double":
             case "Double":
                 sb.AppendIndentedLine($"{targetVar} = {readerVar}.ReadDouble(entryWireType);");
+                break;
+            case "byte":
+            case "System.Byte":
+            case "Byte":
+                sb.AppendIndentedLine($"{targetVar} = (byte){readerVar}.ReadVarUInt32();");
+                break;
+            case "Guid":
+            case "System.Guid":
+                // Read Guid as protobuf-net format (2 fixed64 fields)
+                sb.AppendIndentedLine($"var guidLength = {readerVar}.ReadVarInt32();");
+                sb.AppendIndentedLine($"var guidReader = new SpanReader({readerVar}.GetSlice(guidLength));");
+                sb.AppendIndentedLine($"ulong guidLow = 0, guidHigh = 0;");
+                sb.AppendIndentedLine($"while (!guidReader.IsEnd)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"var guidFieldInfo = guidReader.ReadWireTypeAndFieldId();");
+                sb.AppendIndentedLine($"switch (guidFieldInfo.fieldId)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"case 1: guidLow = guidReader.ReadFixed64(); break;");
+                sb.AppendIndentedLine($"case 2: guidHigh = guidReader.ReadFixed64(); break;");
+                sb.AppendIndentedLine($"default: guidReader.SkipField(guidFieldInfo.wireType); break;");
+                sb.EndBlock();
+                sb.EndBlock();
+                sb.AppendIndentedLine($"// Convert back to Guid");
+                sb.AppendIndentedLine($"Span<byte> guidBytes = stackalloc byte[16];");
+                sb.AppendIndentedLine($"System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(guidBytes, guidLow);");
+                sb.AppendIndentedLine($"System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(guidBytes.Slice(8), guidHigh);");
+                sb.AppendIndentedLine($"{targetVar} = new Guid(guidBytes);");
                 break;
             default:
                 if (member.IsEnum)
@@ -6485,6 +6596,13 @@ class ObjectTree
                 sb.AppendIndentedLine($"{calculator}.WriteFloat({keyAccess});");
                 break;
                 
+            case "Guid":
+            case "System.Guid":
+                // BCL Guid format: 2 fixed64 fields = 2*(1+8) = 18 bytes
+                sb.AppendIndentedLine($"{calculator}.WriteVarUInt32(18u);");
+                sb.AppendIndentedLine($"{calculator}.AddByteLength(18);");
+                break;
+                
             default:
                 // For complex types (custom classes)
                 sb.AppendIndentedLine($"if ({keyAccess} != null)");
@@ -6653,6 +6771,13 @@ class ObjectTree
                 
             case "double":
                 sb.AppendIndentedLine($"{calculator}.WriteDouble({valueAccess});");
+                break;
+                
+            case "Guid":
+            case "System.Guid":
+                // Guid: 2 fixed64 fields = (1+8)+(1+8) = 18 bytes
+                sb.AppendIndentedLine($"{calculator}.WriteVarUInt32(18u);");
+                sb.AppendIndentedLine($"{calculator}.AddByteLength(18);");
                 break;
                 
             default:
@@ -6959,6 +7084,23 @@ class ObjectTree
                 sb.AppendIndentedLine($"writer.WriteFloat({keyAccess});");
                 break;
                 
+            case "Guid":
+            case "System.Guid":
+                // Guid is written as message with 2 fixed64 fields (protobuf-net format)
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x0A); // field 1, Len");
+                sb.AppendIndentedLine($"writer.WriteVarUInt32(18u); // Guid: 2 fixed64 fields = (1+8)+(1+8) = 18 bytes");
+                sb.AppendIndentedLine($"// Convert Guid to protobuf-net format (2 fixed64 fields)");
+                // Create unique variable name based on keyAccess
+                var guidVarName = keyAccess.Replace(".", "_").Replace("[", "_").Replace("]", "_").Replace("(", "_").Replace(")", "_") + "_guidBytes";
+                sb.AppendIndentedLine($"var {guidVarName} = {keyAccess}.ToByteArray();");
+                sb.AppendIndentedLine($"// Field 1: first 8 bytes (fixed64)");
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x09); // field 1, Fixed64");
+                sb.AppendIndentedLine($"writer.WriteFixed64(System.BitConverter.ToUInt64({guidVarName}, 0));");
+                sb.AppendIndentedLine($"// Field 2: last 8 bytes (fixed64)");
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x11); // field 2, Fixed64");
+                sb.AppendIndentedLine($"writer.WriteFixed64(System.BitConverter.ToUInt64({guidVarName}, 8));");
+                break;
+                
             default:
                 // For complex types (custom classes)
                 sb.AppendIndentedLine($"if ({keyAccess} != null)");
@@ -7192,6 +7334,23 @@ class ObjectTree
             case "Single":
                 sb.AppendIndentedLine($"writer.WriteSingleByte(0x15); // field 2, Fixed32");
                 sb.AppendIndentedLine($"writer.WriteFloat({valueAccess});");
+                break;
+                
+            case "Guid":
+            case "System.Guid":
+                // Guid is written as message with 2 fixed64 fields (protobuf-net format)
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x12); // field 2, Len");
+                sb.AppendIndentedLine($"writer.WriteVarUInt32(18u); // Guid: 2 fixed64 fields = (1+8)+(1+8) = 18 bytes");
+                sb.AppendIndentedLine($"// Convert Guid to protobuf-net format (2 fixed64 fields)");
+                // Create unique variable name based on valueAccess
+                var guidVarName = valueAccess.Replace(".", "_").Replace("[", "_").Replace("]", "_").Replace("(", "_").Replace(")", "_") + "_guidBytes";
+                sb.AppendIndentedLine($"var {guidVarName} = {valueAccess}.ToByteArray();");
+                sb.AppendIndentedLine($"// Field 1: first 8 bytes (fixed64)");
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x09); // field 1, Fixed64");
+                sb.AppendIndentedLine($"writer.WriteFixed64(System.BitConverter.ToUInt64({guidVarName}, 0));");
+                sb.AppendIndentedLine($"// Field 2: last 8 bytes (fixed64)");
+                sb.AppendIndentedLine($"writer.WriteSingleByte(0x11); // field 2, Fixed64");
+                sb.AppendIndentedLine($"writer.WriteFixed64(System.BitConverter.ToUInt64({guidVarName}, 8));");
                 break;
                 
             default:

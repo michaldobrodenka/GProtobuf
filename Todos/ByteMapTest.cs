@@ -24,12 +24,10 @@ namespace Todos
             Console.WriteLine($"Basic object ByteDoubleMap is null: {basic.ByteDoubleMap == null}");
             Console.WriteLine($"Basic object ByteDoubleMap count: {basic.ByteDoubleMap?.Count ?? 0}");
 
-            // Serialize using StreamWriter
-            var buffer = new byte[1024];
-            var stream = new System.IO.MemoryStream(buffer);
-            var writer = new GProtobuf.Core.StreamWriter(stream, buffer);
-            Model.Serialization.StreamWriters.WriteBasic(ref writer, basic);
-            var serialized = buffer.AsSpan(0, (int)stream.Position);
+            // Serialize using Serializers
+            var stream = new System.IO.MemoryStream();
+            Model.Serialization.Serializers.SerializeBasic(stream, basic);
+            var serialized = stream.ToArray();
 
             // Deserialize
             var deserialized = Model.Serialization.Deserializers.DeserializeBasic(serialized);
