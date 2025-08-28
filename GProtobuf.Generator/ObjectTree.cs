@@ -534,6 +534,143 @@ class ObjectTree
             sb.AppendNewLine();
         }
 
+        // Generate Tuple methods for SpanReaders
+        var tupleTypes = new HashSet<string>();
+        foreach (var obj in objects)
+        {
+            if (obj.ProtoMembers != null)
+            {
+                foreach (var member in obj.ProtoMembers)
+                {
+                    if (IsTupleType(member.Type))
+                    {
+                        tupleTypes.Add(member.Type);
+                    }
+                }
+            }
+        }
+
+        foreach (var tupleType in tupleTypes)
+        {
+            var (item1Type, item2Type) = GetTupleTypeArguments(tupleType);
+            if (item1Type != null && item2Type != null)
+            {
+                var methodName = SanitizeTypeNameForMethod(tupleType);
+                
+                // Generate ReadTuple method
+                sb.AppendIndentedLine($"public static {tupleType} Read{methodName}(ref SpanReader reader)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"{item1Type} item1 = default({item1Type});");
+                sb.AppendIndentedLine($"{item2Type} item2 = default({item2Type});");
+                sb.AppendIndentedLine("");
+                sb.AppendIndentedLine("while (!reader.IsEnd)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine("var (wireType, fieldId) = reader.ReadWireTypeAndFieldId();");
+                sb.AppendIndentedLine("");
+                sb.AppendIndentedLine("if (fieldId == 1)");
+                sb.StartNewBlock();
+                
+                // Read Item1 based on type
+                if (item1Type == "System.Double" || item1Type == "double")
+                {
+                    sb.AppendIndentedLine("item1 = reader.ReadDouble(wireType);");
+                }
+                else if (item1Type == "System.Single" || item1Type == "float")
+                {
+                    sb.AppendIndentedLine("item1 = reader.ReadFloat(wireType);");
+                }
+                else if (item1Type == "System.Int32" || item1Type == "int")
+                {
+                    sb.AppendIndentedLine("item1 = reader.ReadVarInt32();");
+                }
+                else if (item1Type == "System.Int64" || item1Type == "long")
+                {
+                    sb.AppendIndentedLine("item1 = reader.ReadVarInt64();");
+                }
+                else if (item1Type == "System.String" || item1Type == "string")
+                {
+                    sb.AppendIndentedLine("item1 = reader.ReadString(wireType);");
+                }
+                else if (item1Type == "System.Boolean" || item1Type == "bool")
+                {
+                    sb.AppendIndentedLine("item1 = reader.ReadBool();");
+                }
+                else if (item1Type == "System.Char" || item1Type == "char")
+                {
+                    sb.AppendIndentedLine("item1 = (char)reader.ReadVarInt32();");
+                }
+                else if (item1Type.Contains("Enum")) // Simple check for enum types
+                {
+                    sb.AppendIndentedLine($"item1 = ({item1Type})reader.ReadVarInt32();");
+                }
+                else
+                {
+                    // Complex type
+                    sb.AppendIndentedLine("var length1 = reader.ReadVarInt32();");
+                    sb.AppendIndentedLine("var reader1 = new SpanReader(reader.GetSlice(length1));");
+                    sb.AppendIndentedLine($"item1 = Read{SanitizeTypeNameForMethod(item1Type)}(ref reader1);");
+                }
+                
+                sb.AppendIndentedLine("continue;");
+                sb.EndBlock();
+                sb.AppendIndentedLine("");
+                sb.AppendIndentedLine("if (fieldId == 2)");
+                sb.StartNewBlock();
+                
+                // Read Item2 based on type
+                if (item2Type == "System.Double" || item2Type == "double")
+                {
+                    sb.AppendIndentedLine("item2 = reader.ReadDouble(wireType);");
+                }
+                else if (item2Type == "System.Single" || item2Type == "float")
+                {
+                    sb.AppendIndentedLine("item2 = reader.ReadFloat(wireType);");
+                }
+                else if (item2Type == "System.Int32" || item2Type == "int")
+                {
+                    sb.AppendIndentedLine("item2 = reader.ReadVarInt32();");
+                }
+                else if (item2Type == "System.Int64" || item2Type == "long")
+                {
+                    sb.AppendIndentedLine("item2 = reader.ReadVarInt64();");
+                }
+                else if (item2Type == "System.String" || item2Type == "string")
+                {
+                    sb.AppendIndentedLine("item2 = reader.ReadString(wireType);");
+                }
+                else if (item2Type == "System.Boolean" || item2Type == "bool")
+                {
+                    sb.AppendIndentedLine("item2 = reader.ReadBool();");
+                }
+                else if (item2Type == "System.Char" || item2Type == "char")
+                {
+                    sb.AppendIndentedLine("item2 = (char)reader.ReadVarInt32();");
+                }
+                else if (item2Type.Contains("Enum")) // Simple check for enum types
+                {
+                    sb.AppendIndentedLine($"item2 = ({item2Type})reader.ReadVarInt32();");
+                }
+                else
+                {
+                    // Complex type
+                    sb.AppendIndentedLine("var length2 = reader.ReadVarInt32();");
+                    sb.AppendIndentedLine("var reader2 = new SpanReader(reader.GetSlice(length2));");
+                    sb.AppendIndentedLine($"item2 = Read{SanitizeTypeNameForMethod(item2Type)}(ref reader2);");
+                }
+                
+                sb.AppendIndentedLine("continue;");
+                sb.EndBlock();
+                sb.AppendIndentedLine("");
+                sb.AppendIndentedLine("// default");
+                sb.AppendIndentedLine("reader.SkipField(wireType);");
+                sb.EndBlock();
+                sb.AppendIndentedLine("");
+                sb.AppendIndentedLine($"return new {tupleType}(item1, item2);");
+                sb.EndBlock();
+                sb.AppendNewLine();
+            }
+        }
+
         sb.EndBlock();
 
         sb.AppendNewLine();
@@ -712,8 +849,158 @@ class ObjectTree
             sb.AppendNewLine();
         }
 
+        // Generate Tuple size calculation methods
+        var tupleTypesForSize = new HashSet<string>();
+        foreach (var obj in objects)
+        {
+            if (obj.ProtoMembers != null)
+            {
+                foreach (var member in obj.ProtoMembers)
+                {
+                    if (IsTupleType(member.Type))
+                    {
+                        tupleTypesForSize.Add(member.Type);
+                    }
+                }
+            }
+        }
 
-        sb.EndBlock();
+        foreach (var tupleType in tupleTypesForSize)
+        {
+            var (item1Type, item2Type) = GetTupleTypeArguments(tupleType);
+            if (item1Type != null && item2Type != null)
+            {
+                var methodName = SanitizeTypeNameForMethod(tupleType);
+                
+                sb.AppendIndentedLine($"public static void Calculate{methodName}Size(ref global::GProtobuf.Core.WriteSizeCalculator calculator, {tupleType} tuple)");
+                sb.StartNewBlock();
+                
+                // Calculate Item1 size (field 1)
+                if (item1Type == "System.Double" || item1Type == "double")
+                {
+                    WritePrecomputedTagForCalculator(sb, 1, WireType.Fixed64b);
+                    sb.AppendIndentedLine("calculator.WriteDouble(tuple.Item1);");
+                }
+                else if (item1Type == "System.Single" || item1Type == "float")
+                {
+                    WritePrecomputedTagForCalculator(sb, 1, WireType.Fixed32b);
+                    sb.AppendIndentedLine("calculator.WriteFloat(tuple.Item1);");
+                }
+                else if (item1Type == "System.Int32" || item1Type == "int")
+                {
+                    WritePrecomputedTagForCalculator(sb, 1, WireType.VarInt);
+                    sb.AppendIndentedLine("calculator.WriteVarInt32(tuple.Item1);");
+                }
+                else if (item1Type == "System.Int64" || item1Type == "long")
+                {
+                    WritePrecomputedTagForCalculator(sb, 1, WireType.VarInt);
+                    sb.AppendIndentedLine("calculator.WriteVarInt64(tuple.Item1);");
+                }
+                else if (item1Type == "System.String" || item1Type == "string")
+                {
+                    if (sb != null)
+                    {
+                        sb.AppendIndentedLine("if (tuple.Item1 != null)");
+                        sb.StartNewBlock();
+                        WritePrecomputedTagForCalculator(sb, 1, WireType.Len);
+                        sb.AppendIndentedLine("calculator.WriteString(tuple.Item1);");
+                        sb.EndBlock();
+                    }
+                }
+                else if (item1Type == "System.Boolean" || item1Type == "bool")
+                {
+                    WritePrecomputedTagForCalculator(sb, 1, WireType.VarInt);
+                    sb.AppendIndentedLine("calculator.WriteBool(tuple.Item1);");
+                }
+                else if (item1Type == "System.Char" || item1Type == "char")
+                {
+                    WritePrecomputedTagForCalculator(sb, 1, WireType.VarInt);
+                    sb.AppendIndentedLine("calculator.WriteVarInt32((int)tuple.Item1);");
+                }
+                else if (item1Type.Contains("Enum")) // Simple check for enum types
+                {
+                    WritePrecomputedTagForCalculator(sb, 1, WireType.VarInt);
+                    sb.AppendIndentedLine("calculator.WriteVarInt32((int)tuple.Item1);");
+                }
+                else
+                {
+                    // Complex type
+                    sb.AppendIndentedLine("if (tuple.Item1 != null)");
+                    sb.StartNewBlock();
+                    WritePrecomputedTagForCalculator(sb, 1, WireType.Len);
+                    sb.AppendIndentedLine("var lengthBefore1 = calculator.Length;");
+                    sb.AppendIndentedLine($"Calculate{SanitizeTypeNameForMethod(item1Type)}Size(ref calculator, tuple.Item1);");
+                    sb.AppendIndentedLine("var contentLength1 = calculator.Length - lengthBefore1;");
+                    sb.AppendIndentedLine("calculator.WriteVarUInt32((uint)contentLength1);");
+                    sb.EndBlock();
+                }
+                
+                // Calculate Item2 size (field 2)
+                if (item2Type == "System.Double" || item2Type == "double")
+                {
+                    WritePrecomputedTagForCalculator(sb, 2, WireType.Fixed64b);
+                    sb.AppendIndentedLine("calculator.WriteDouble(tuple.Item2);");
+                }
+                else if (item2Type == "System.Single" || item2Type == "float")
+                {
+                    WritePrecomputedTagForCalculator(sb, 2, WireType.Fixed32b);
+                    sb.AppendIndentedLine("calculator.WriteFloat(tuple.Item2);");
+                }
+                else if (item2Type == "System.Int32" || item2Type == "int")
+                {
+                    WritePrecomputedTagForCalculator(sb, 2, WireType.VarInt);
+                    sb.AppendIndentedLine("calculator.WriteVarInt32(tuple.Item2);");
+                }
+                else if (item2Type == "System.Int64" || item2Type == "long")
+                {
+                    WritePrecomputedTagForCalculator(sb, 2, WireType.VarInt);
+                    sb.AppendIndentedLine("calculator.WriteVarInt64(tuple.Item2);");
+                }
+                else if (item2Type == "System.String" || item2Type == "string")
+                {
+                    if (sb != null)
+                    {
+                        sb.AppendIndentedLine("if (tuple.Item2 != null)");
+                        sb.StartNewBlock();
+                        WritePrecomputedTagForCalculator(sb, 2, WireType.Len);
+                        sb.AppendIndentedLine("calculator.WriteString(tuple.Item2);");
+                        sb.EndBlock();
+                    }
+                }
+                else if (item2Type == "System.Boolean" || item2Type == "bool")
+                {
+                    WritePrecomputedTagForCalculator(sb, 2, WireType.VarInt);
+                    sb.AppendIndentedLine("calculator.WriteBool(tuple.Item2);");
+                }
+                else if (item2Type == "System.Char" || item2Type == "char")
+                {
+                    WritePrecomputedTagForCalculator(sb, 2, WireType.VarInt);
+                    sb.AppendIndentedLine("calculator.WriteVarInt32((int)tuple.Item2);");
+                }
+                else if (item2Type.Contains("Enum")) // Simple check for enum types
+                {
+                    WritePrecomputedTagForCalculator(sb, 2, WireType.VarInt);
+                    sb.AppendIndentedLine("calculator.WriteVarInt32((int)tuple.Item2);");
+                }
+                else
+                {
+                    // Complex type
+                    sb.AppendIndentedLine("if (tuple.Item2 != null)");
+                    sb.StartNewBlock();
+                    WritePrecomputedTagForCalculator(sb, 2, WireType.Len);
+                    sb.AppendIndentedLine("var lengthBefore2 = calculator.Length;");
+                    sb.AppendIndentedLine($"Calculate{SanitizeTypeNameForMethod(item2Type)}Size(ref calculator, tuple.Item2);");
+                    sb.AppendIndentedLine("var contentLength2 = calculator.Length - lengthBefore2;");
+                    sb.AppendIndentedLine("calculator.WriteVarUInt32((uint)contentLength2);");
+                    sb.EndBlock();
+                }
+                
+                sb.EndBlock();
+                sb.AppendNewLine();
+            }
+        }
+
+        sb.EndBlock(); // Close SizeCalculators
         sb.EndBlock(); // Close namespace
     }
 
@@ -987,6 +1274,138 @@ class ObjectTree
             sb.AppendNewLine();
         }
 
+        // Generate Tuple write methods
+        var tupleTypes = new HashSet<string>();
+        foreach (var obj in objects)
+        {
+            if (obj.ProtoMembers != null)
+            {
+                foreach (var member in obj.ProtoMembers)
+                {
+                    if (IsTupleType(member.Type))
+                    {
+                        tupleTypes.Add(member.Type);
+                    }
+                }
+            }
+        }
+
+        foreach (var tupleType in tupleTypes)
+        {
+            var (item1Type, item2Type) = GetTupleTypeArguments(tupleType);
+            if (item1Type != null && item2Type != null)
+            {
+                var methodName = SanitizeTypeNameForMethod(tupleType);
+                
+                sb.AppendIndentedLine($"public static void Write{methodName}(ref global::GProtobuf.Core.{shortName}Writer writer, {tupleType} tuple)");
+                sb.StartNewBlock();
+                
+                // Write Item1 (field 1)
+                if (item1Type == "System.Double" || item1Type == "double")
+                {
+                    WritePrecomputedTag(sb, 1, WireType.Fixed64b);
+                    sb.AppendIndentedLine("writer.WriteDouble(tuple.Item1);");
+                }
+                else if (item1Type == "System.Single" || item1Type == "float")
+                {
+                    WritePrecomputedTag(sb, 1, WireType.Fixed32b);
+                    sb.AppendIndentedLine("writer.WriteFloat(tuple.Item1);");
+                }
+                else if (item1Type == "System.Int32" || item1Type == "int")
+                {
+                    WritePrecomputedTag(sb, 1, WireType.VarInt);
+                    sb.AppendIndentedLine("writer.WriteVarInt32(tuple.Item1);");
+                }
+                else if (item1Type == "System.Int64" || item1Type == "long")
+                {
+                    WritePrecomputedTag(sb, 1, WireType.VarInt);
+                    sb.AppendIndentedLine("writer.WriteVarInt64(tuple.Item1);");
+                }
+                else if (item1Type == "System.String" || item1Type == "string")
+                {
+                    WritePrecomputedTag(sb, 1, WireType.Len);
+                    sb.AppendIndentedLine("writer.WriteString(tuple.Item1);");
+                }
+                else if (item1Type == "System.Boolean" || item1Type == "bool")
+                {
+                    WritePrecomputedTag(sb, 1, WireType.VarInt);
+                    sb.AppendIndentedLine("writer.WriteBool(tuple.Item1);");
+                }
+                else if (item1Type == "System.Char" || item1Type == "char")
+                {
+                    WritePrecomputedTag(sb, 1, WireType.VarInt);
+                    sb.AppendIndentedLine("writer.WriteVarInt32((int)tuple.Item1);");
+                }
+                else if (item1Type.Contains("Enum")) // Simple check for enum types
+                {
+                    WritePrecomputedTag(sb, 1, WireType.VarInt);
+                    sb.AppendIndentedLine("writer.WriteVarInt32((int)tuple.Item1);");
+                }
+                else
+                {
+                    // Complex type
+                    WritePrecomputedTag(sb, 1, WireType.Len);
+                    sb.AppendIndentedLine("var calc1 = new global::GProtobuf.Core.WriteSizeCalculator();");
+                    sb.AppendIndentedLine($"SizeCalculators.Calculate{SanitizeTypeNameForMethod(item1Type)}Size(ref calc1, tuple.Item1);");
+                    sb.AppendIndentedLine("writer.WriteVarUInt32((uint)calc1.Length);");
+                    sb.AppendIndentedLine($"{shortName}Writers.Write{SanitizeTypeNameForMethod(item1Type)}(ref writer, tuple.Item1);");
+                }
+                
+                // Write Item2 (field 2)
+                if (item2Type == "System.Double" || item2Type == "double")
+                {
+                    WritePrecomputedTag(sb, 2, WireType.Fixed64b);
+                    sb.AppendIndentedLine("writer.WriteDouble(tuple.Item2);");
+                }
+                else if (item2Type == "System.Single" || item2Type == "float")
+                {
+                    WritePrecomputedTag(sb, 2, WireType.Fixed32b);
+                    sb.AppendIndentedLine("writer.WriteFloat(tuple.Item2);");
+                }
+                else if (item2Type == "System.Int32" || item2Type == "int")
+                {
+                    WritePrecomputedTag(sb, 2, WireType.VarInt);
+                    sb.AppendIndentedLine("writer.WriteVarInt32(tuple.Item2);");
+                }
+                else if (item2Type == "System.Int64" || item2Type == "long")
+                {
+                    WritePrecomputedTag(sb, 2, WireType.VarInt);
+                    sb.AppendIndentedLine("writer.WriteVarInt64(tuple.Item2);");
+                }
+                else if (item2Type == "System.String" || item2Type == "string")
+                {
+                    WritePrecomputedTag(sb, 2, WireType.Len);
+                    sb.AppendIndentedLine("writer.WriteString(tuple.Item2);");
+                }
+                else if (item2Type == "System.Boolean" || item2Type == "bool")
+                {
+                    WritePrecomputedTag(sb, 2, WireType.VarInt);
+                    sb.AppendIndentedLine("writer.WriteBool(tuple.Item2);");
+                }
+                else if (item2Type == "System.Char" || item2Type == "char")
+                {
+                    WritePrecomputedTag(sb, 2, WireType.VarInt);
+                    sb.AppendIndentedLine("writer.WriteVarInt32((int)tuple.Item2);");
+                }
+                else if (item2Type.Contains("Enum")) // Simple check for enum types
+                {
+                    WritePrecomputedTag(sb, 2, WireType.VarInt);
+                    sb.AppendIndentedLine("writer.WriteVarInt32((int)tuple.Item2);");
+                }
+                else
+                {
+                    // Complex type
+                    WritePrecomputedTag(sb, 2, WireType.Len);
+                    sb.AppendIndentedLine("var calc2 = new global::GProtobuf.Core.WriteSizeCalculator();");
+                    sb.AppendIndentedLine($"SizeCalculators.Calculate{SanitizeTypeNameForMethod(item2Type)}Size(ref calc2, tuple.Item2);");
+                    sb.AppendIndentedLine("writer.WriteVarUInt32((uint)calc2.Length);");
+                    sb.AppendIndentedLine($"{shortName}Writers.Write{SanitizeTypeNameForMethod(item2Type)}(ref writer, tuple.Item2);");
+                }
+                
+                sb.EndBlock();
+                sb.AppendNewLine();
+            }
+        }
 
         sb.EndBlock();
 
@@ -1670,7 +2089,7 @@ class ObjectTree
 
                 sb.AppendIndentedLine($"var length = reader.ReadVarInt32();");
                 sb.AppendIndentedLine($"var reader1 = new SpanReader(reader.GetSlice(length));");
-                sb.AppendIndentedLine($"result.{protoMember.Name} = global::{protoMember.Namespace}.Serialization.SpanReaders.Read{GetClassNameFromFullName(protoMember.Type)}(ref reader1);");
+                sb.AppendIndentedLine($"result.{protoMember.Name} = global::{protoMember.Namespace}.Serialization.SpanReaders.Read{SanitizeTypeNameForMethod(protoMember.Type)}(ref reader1);");
                 break;
         }
         sb.AppendIndentedLine($"continue;");
@@ -2505,10 +2924,10 @@ class ObjectTree
                 sb.AppendIndentedLine($"if ({objectName}.{protoMember.Name} != null)");
                 sb.StartNewBlock();
                 sb.AppendIndentedLine($"var calculator{protoMember.FieldId} = new global::GProtobuf.Core.WriteSizeCalculator();");
-                sb.AppendIndentedLine($"SizeCalculators.Calculate{GetClassNameFromFullName(protoMember.Type)}Size(ref calculator{protoMember.FieldId}, {objectName}.{protoMember.Name});");
+                sb.AppendIndentedLine($"SizeCalculators.Calculate{SanitizeTypeNameForMethod(protoMember.Type)}Size(ref calculator{protoMember.FieldId}, {objectName}.{protoMember.Name});");
                 WritePrecomputedTag(sb, protoMember.FieldId, WireType.Len);
                 sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)calculator{protoMember.FieldId}.Length);");
-                sb.AppendIndentedLine($"{writeTargetShortName}Writers.Write{GetClassNameFromFullName(protoMember.Type)}(ref writer, {objectName}.{protoMember.Name});");
+                sb.AppendIndentedLine($"{writeTargetShortName}Writers.Write{SanitizeTypeNameForMethod(protoMember.Type)}(ref writer, {objectName}.{protoMember.Name});");
                 sb.EndBlock();
                 break;
         }
@@ -3291,7 +3710,7 @@ class ObjectTree
                 sb.StartNewBlock();
                 WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.Len);
                 sb.AppendIndentedLine($"var lengthBefore{protoMember.FieldId} = calculator.Length;");
-                sb.AppendIndentedLine($"SizeCalculators.Calculate{GetClassNameFromFullName(protoMember.Type)}Size(ref calculator, obj.{protoMember.Name});");
+                sb.AppendIndentedLine($"SizeCalculators.Calculate{SanitizeTypeNameForMethod(protoMember.Type)}Size(ref calculator, obj.{protoMember.Name});");
                 sb.AppendIndentedLine($"var contentLength{protoMember.FieldId} = calculator.Length - lengthBefore{protoMember.FieldId};");
                 sb.AppendIndentedLine($"calculator.WriteVarUInt32((uint)contentLength{protoMember.FieldId});");
                 sb.EndBlock();
@@ -3474,6 +3893,65 @@ class ObjectTree
             _ => IsPrimitiveArrayType(typeName) // reuse the logic for numeric primitives
         };
     }
+
+    private static bool IsTupleType(string typeName)
+    {
+        return typeName != null && (typeName.StartsWith("System.Tuple<") || typeName.StartsWith("Tuple<"));
+    }
+
+    private static (string, string) GetTupleTypeArguments(string typeName)
+    {
+        var genericStart = typeName.IndexOf('<');
+        var genericEnd = typeName.LastIndexOf('>');
+        if (genericStart > 0 && genericEnd > genericStart)
+        {
+            var genericArgs = typeName.Substring(genericStart + 1, genericEnd - genericStart - 1);
+            var argParts = SplitGenericArguments(genericArgs);
+            if (argParts.Count == 2)
+            {
+                return (argParts[0].Trim(), argParts[1].Trim());
+            }
+        }
+        return (null, null);
+    }
+
+    private static List<string> SplitGenericArguments(string genericArgs)
+    {
+        var result = new List<string>();
+        var depth = 0;
+        var currentArg = new System.Text.StringBuilder();
+        
+        for (int i = 0; i < genericArgs.Length; i++)
+        {
+            char c = genericArgs[i];
+            if (c == '<')
+            {
+                depth++;
+                currentArg.Append(c);
+            }
+            else if (c == '>')
+            {
+                depth--;
+                currentArg.Append(c);
+            }
+            else if (c == ',' && depth == 0)
+            {
+                result.Add(currentArg.ToString().Trim());
+                currentArg.Clear();
+            }
+            else
+            {
+                currentArg.Append(c);
+            }
+        }
+        
+        if (currentArg.Length > 0)
+        {
+            result.Add(currentArg.ToString().Trim());
+        }
+        
+        return result;
+    }
     
     /// <summary>
     /// Writes the deserialization logic for array types (string[], Message[], etc.)
@@ -3554,7 +4032,7 @@ class ObjectTree
                     {
                         sb.AppendIndentedLine($"var keyLen = entryReader.ReadVarInt32();");
                         sb.AppendIndentedLine($"var keyReader = new SpanReader(entryReader.GetSlice(keyLen));");
-                        sb.AppendIndentedLine($"key = global::{GetNamespaceFromType(keyType)}.Serialization.SpanReaders.Read{GetClassNameFromFullName(keyType)}(ref keyReader);");
+                        sb.AppendIndentedLine($"key = global::{GetNamespaceFromType(keyType)}.Serialization.SpanReaders.Read{SanitizeTypeNameForMethod(keyType)}(ref keyReader);");
                     }
                     
                     sb.AppendIndentedLine($"continue;");
@@ -3586,7 +4064,7 @@ class ObjectTree
                     {
                         sb.AppendIndentedLine($"var valueLen = entryReader.ReadVarInt32();");
                         sb.AppendIndentedLine($"var valueReader = new SpanReader(entryReader.GetSlice(valueLen));");
-                        sb.AppendIndentedLine($"value = global::{GetNamespaceFromType(valueType)}.Serialization.SpanReaders.Read{GetClassNameFromFullName(valueType)}(ref valueReader);");
+                        sb.AppendIndentedLine($"value = global::{GetNamespaceFromType(valueType)}.Serialization.SpanReaders.Read{SanitizeTypeNameForMethod(valueType)}(ref valueReader);");
                     }
                     
                     sb.AppendIndentedLine($"continue;");
@@ -3605,7 +4083,7 @@ class ObjectTree
             // Custom message types - deserialize nested messages
             sb.AppendIndentedLine($"var length = reader.ReadVarInt32();");
             sb.AppendIndentedLine($"var reader1 = new SpanReader(reader.GetSlice(length));");
-            sb.AppendIndentedLine($"var item = global::{protoMember.Namespace}.Serialization.SpanReaders.Read{GetClassNameFromFullName(elementType)}(ref reader1);");
+            sb.AppendIndentedLine($"var item = global::{protoMember.Namespace}.Serialization.SpanReaders.Read{SanitizeTypeNameForMethod(elementType)}(ref reader1);");
             sb.AppendIndentedLine($"resultCollector.Add(item);");
         }
         
@@ -3964,7 +4442,7 @@ class ObjectTree
                     // Complex type collections
                     sb.AppendIndentedLine($"var len = {readerVar}.ReadVarInt32();");
                     sb.AppendIndentedLine($"var subReader = new SpanReader({readerVar}.GetSlice(len));");
-                    sb.AppendIndentedLine($"keyList.Add(global::{GetNamespaceFromType(elementType)}.Serialization.SpanReaders.Read{GetClassNameFromFullName(elementType)}(ref subReader));");
+                    sb.AppendIndentedLine($"keyList.Add(global::{GetNamespaceFromType(elementType)}.Serialization.SpanReaders.Read{SanitizeTypeNameForMethod(elementType)}(ref subReader));");
                 }
             }
             else
@@ -4021,7 +4499,7 @@ class ObjectTree
                     // Complex type collections - read as sub-message
                     sb.AppendIndentedLine($"var len = {readerVar}.ReadVarInt32();");
                     sb.AppendIndentedLine($"var subReader = new SpanReader({readerVar}.GetSlice(len));");
-                    sb.AppendIndentedLine($"valueList.Add(global::{GetNamespaceFromType(elementType)}.Serialization.SpanReaders.Read{GetClassNameFromFullName(elementType)}(ref subReader));");
+                    sb.AppendIndentedLine($"valueList.Add(global::{GetNamespaceFromType(elementType)}.Serialization.SpanReaders.Read{SanitizeTypeNameForMethod(elementType)}(ref subReader));");
                 }
             }
             else
@@ -6730,15 +7208,64 @@ class ObjectTree
             return SanitizeTypeNameForMethod(elementType) + "Array";
         }
         
-        // Handle generics
-        var genericStart = simpleName.IndexOf('<');
-        if (genericStart > 0)
+        // Special handling for System.Tuple
+        if (typeName.StartsWith("System.Tuple<") || typeName.StartsWith("Tuple<"))
         {
-            var genericEnd = simpleName.LastIndexOf('>');
-            if (genericEnd > genericStart)
+            // Extract the generic arguments
+            var genericStart = typeName.IndexOf('<');
+            var genericEnd = typeName.LastIndexOf('>');
+            if (genericStart > 0 && genericEnd > genericStart)
             {
-                var baseType = simpleName.Substring(0, genericStart);
-                var genericArgs = simpleName.Substring(genericStart + 1, genericEnd - genericStart - 1);
+                var genericArgs = typeName.Substring(genericStart + 1, genericEnd - genericStart - 1);
+                
+                // Parse generic arguments
+                var sanitizedArgs = new List<string>();
+                var depth = 0;
+                var currentArg = new System.Text.StringBuilder();
+                
+                for (int i = 0; i < genericArgs.Length; i++)
+                {
+                    char c = genericArgs[i];
+                    if (c == '<')
+                    {
+                        depth++;
+                        currentArg.Append(c);
+                    }
+                    else if (c == '>')
+                    {
+                        depth--;
+                        currentArg.Append(c);
+                    }
+                    else if (c == ',' && depth == 0)
+                    {
+                        sanitizedArgs.Add(SanitizeTypeNameForMethod(currentArg.ToString().Trim()));
+                        currentArg.Clear();
+                    }
+                    else
+                    {
+                        currentArg.Append(c);
+                    }
+                }
+                
+                if (currentArg.Length > 0)
+                {
+                    sanitizedArgs.Add(SanitizeTypeNameForMethod(currentArg.ToString().Trim()));
+                }
+                
+                // Create method-friendly name for Tuple
+                return "TupleOf" + string.Join("And", sanitizedArgs);
+            }
+        }
+        
+        // Handle other generics
+        var genericStartIdx = simpleName.IndexOf('<');
+        if (genericStartIdx > 0)
+        {
+            var genericEndIdx = simpleName.LastIndexOf('>');
+            if (genericEndIdx > genericStartIdx)
+            {
+                var baseType = simpleName.Substring(0, genericStartIdx);
+                var genericArgs = simpleName.Substring(genericStartIdx + 1, genericEndIdx - genericStartIdx - 1);
                 
                 // Handle nested generics by recursively sanitizing
                 var sanitizedArgs = new List<string>();

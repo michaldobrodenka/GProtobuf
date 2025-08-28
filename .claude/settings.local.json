@@ -37,7 +37,8 @@
       "Read(E:\\work\\GProtobuf\\GProtobuf.CrossTests\\obj\\Generated\\GProtobuf.Generator\\GProtobuf.Generator.SerializerGenerator/**)",
       "Read(E:\\work\\GProtobuf\\GProtobuf.CrossTests\\obj\\Generated\\GProtobuf.Generator\\GProtobuf.Generator.SerializerGenerator/**)",
       "Read(E:\\work\\GProtobuf\\GProtobuf.CrossTests\\obj\\Generated\\GProtobuf.Generator\\GProtobuf.Generator.SerializerGenerator/**)",
-      "mcp__serena__find_file"
+      "mcp__serena__find_file",
+      "mcp__serena__get_symbols_overview"
     ],
     "deny": [],
     "ask": [],

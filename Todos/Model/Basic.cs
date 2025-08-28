@@ -88,5 +88,8 @@ namespace Todos.Model
 
         [ProtoMember(15)]
         public Dictionary<string, FirstEnum> StringEnumMap { get; set; }
+
+        [ProtoMember(16)]
+        public Tuple<double, double> DoubleTuple { get; set; }
     }
 }
