@@ -97,10 +97,10 @@ namespace GProtobuf.Core
             WriteToBuffer(MemoryMarshal.Cast<int, byte>(MemoryMarshal.CreateReadOnlySpan(ref intValue, 1)));
         }
 
-        public void WriteFixed64(ulong ulongValue)
-        {
-            WriteToBuffer(MemoryMarshal.Cast<ulong, byte>(MemoryMarshal.CreateReadOnlySpan(ref ulongValue, 1)));
-        }
+        //public void WriteFixed64(ulong ulongValue)
+        //{
+        //    WriteToBuffer(MemoryMarshal.Cast<ulong, byte>(MemoryMarshal.CreateReadOnlySpan(ref ulongValue, 1)));
+        //}
 
         public void WriteVarInt32(int intValue)
         {
@@ -260,14 +260,16 @@ namespace GProtobuf.Core
         //    }
         //}
 
-        public void WriteGuid(Guid value)
-        {
-            // Write Guid as 16-byte array (same as protobuf-net)
-            EnsureBufferSpace(16);
-            if (!value.TryWriteBytes(buffer.Slice(bufferPosition, 16)))
-                throw new InvalidOperationException("Failed to write Guid to buffer");
-            bufferPosition += 16;
-        }
+        //public void WriteGuid(Guid value)
+        //{
+        //    // Write Guid as 16-byte array (same as protobuf-net)
+        //    EnsureBufferSpace(16);
+        //    if (!value.TryWriteBytes(buffer.Slice(bufferPosition, 16)))
+        //        throw new InvalidOperationException("Failed to write Guid to buffer");
+        //    bufferPosition += 16;
+        //}
+
+
 
 
         /// <summary>
@@ -310,15 +312,58 @@ namespace GProtobuf.Core
             WriteVarUInt64(zigzagValue);
         }
 
+        ///// <summary>
+        ///// Writes a fixed-size 64-bit signed integer (8 bytes, little-endian) to the stream.
+        ///// </summary>
+        //public void WriteFixedInt64(long value)
+        //{
+        //    EnsureBufferSpace(8);
+        //    BinaryPrimitives.WriteInt64LittleEndian(buffer.Slice(bufferPosition, 8), value);
+        //    bufferPosition += 8;
+        //}
+
         /// <summary>
-        /// Writes a fixed-size 64-bit signed integer (8 bytes, little-endian) to the stream.
+        /// Writes a fixed-size 64-bit unsigned integer (8 bytes, little-endian) to the stream.
         /// </summary>
-        public void WriteFixedInt64(long value)
+        public void WriteFixedUInt64(ulong value)
         {
             EnsureBufferSpace(8);
-            BinaryPrimitives.WriteInt64LittleEndian(buffer.Slice(bufferPosition, 8), value);
+            BinaryPrimitives.WriteInt64LittleEndian(buffer.Slice(bufferPosition, 8), (uint)value);
             bufferPosition += 8;
         }
+
+        public void WriteFixed64(double value)
+        {
+            EnsureBufferSpace(8);
+            var span = buffer.Slice(bufferPosition);
+            Unsafe.WriteUnaligned(ref MemoryMarshal.GetReference(span), value); // natívna endianita
+            bufferPosition += 8;
+        }
+
+        public void WriteFixed32(float value)
+        {
+            EnsureBufferSpace(4);
+            var span = buffer.Slice(bufferPosition);
+            Unsafe.WriteUnaligned(ref MemoryMarshal.GetReference(span), value); // natívna endianita
+            bufferPosition += 4;
+        }
+
+        public void WriteFixed64(long value)
+        {
+            EnsureBufferSpace(8);
+            var span = buffer.Slice(bufferPosition);
+            Unsafe.WriteUnaligned(ref MemoryMarshal.GetReference(span), value);
+            bufferPosition += 8;
+        }
+
+        public void WriteFixed64(ulong value)
+        {
+            EnsureBufferSpace(8);
+            var span = buffer.Slice(bufferPosition);
+            Unsafe.WriteUnaligned(ref MemoryMarshal.GetReference(span), value);
+            bufferPosition += 8;
+        }
+
 
         #endregion
 
