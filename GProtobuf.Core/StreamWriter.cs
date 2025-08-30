@@ -322,15 +322,15 @@ namespace GProtobuf.Core
         //    bufferPosition += 8;
         //}
 
-        /// <summary>
-        /// Writes a fixed-size 64-bit unsigned integer (8 bytes, little-endian) to the stream.
-        /// </summary>
-        public void WriteFixedUInt64(ulong value)
-        {
-            EnsureBufferSpace(8);
-            BinaryPrimitives.WriteInt64LittleEndian(buffer.Slice(bufferPosition, 8), (uint)value);
-            bufferPosition += 8;
-        }
+        ///// <summary>
+        ///// Writes a fixed-size 64-bit unsigned integer (8 bytes, little-endian) to the stream.
+        ///// </summary>
+        //public void WriteFixedUInt64(ulong value)
+        //{
+        //    EnsureBufferSpace(8);
+        //    BinaryPrimitives.WriteInt64LittleEndian(buffer.Slice(bufferPosition, 8), (uint)value);
+        //    bufferPosition += 8;
+        //}
 
         public void WriteFixed64(double value)
         {
@@ -399,16 +399,6 @@ namespace GProtobuf.Core
             EnsureBufferSpace(4);
             BinaryPrimitives.WriteUInt32LittleEndian(buffer.Slice(bufferPosition, 4), value);
             bufferPosition += 4;
-        }
-
-        /// <summary>
-        /// Writes a fixed-size 64-bit unsigned integer (8 bytes, little-endian) to the stream.
-        /// </summary>
-        public void WriteFixedUInt64(ulong value)
-        {
-            EnsureBufferSpace(8);
-            BinaryPrimitives.WriteUInt64LittleEndian(buffer.Slice(bufferPosition, 8), value);
-            bufferPosition += 8;
         }
 
         #endregion

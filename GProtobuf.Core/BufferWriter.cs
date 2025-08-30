@@ -117,10 +117,31 @@ namespace GProtobuf.Core
             currentPosition += 4;
         }
 
+        public void WriteFixed64(double value)
+        {
+            EnsureSpace(8);
+            Unsafe.WriteUnaligned(ref MemoryMarshal.GetReference(currentSpan.Slice(currentPosition)), value); // natívna endianita
+            currentPosition += 8;
+        }
+
+        public void WriteFixed32(float value)
+        {
+            EnsureSpace(4);
+            Unsafe.WriteUnaligned(ref MemoryMarshal.GetReference(currentSpan.Slice(currentPosition)), value); // natívna endianita
+            currentPosition += 4;
+        }
+
+        public void WriteFixed64(long value)
+        {
+            EnsureSpace(8);
+            Unsafe.WriteUnaligned(ref MemoryMarshal.GetReference(currentSpan.Slice(currentPosition)), value);
+            currentPosition += 8;
+        }
+
         public void WriteFixed64(ulong value)
         {
             EnsureSpace(8);
-            BinaryPrimitives.WriteUInt64LittleEndian(currentSpan.Slice(currentPosition), value);
+            Unsafe.WriteUnaligned(ref MemoryMarshal.GetReference(currentSpan.Slice(currentPosition)), value);
             currentPosition += 8;
         }
 

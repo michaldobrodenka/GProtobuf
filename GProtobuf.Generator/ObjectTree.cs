@@ -2663,7 +2663,7 @@ class ObjectTree
                         case DataFormat.FixedSize:
                             WritePrecomputedTag(sb, protoMember.FieldId, WireType.Len);
                             sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)({objectName}.{protoMember.Name}.Length * 8));");
-                            sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteFixedInt64(v); }}");
+                            sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteFixed64(v); }}");
                             break;
                         case DataFormat.ZigZag:
                             WritePrecomputedTag(sb, protoMember.FieldId, WireType.Len);
@@ -2685,7 +2685,7 @@ class ObjectTree
                     {
                         case DataFormat.FixedSize:
                             sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.Fixed64b);");
-                            sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteVarInt32(tagAndWire); writer.WriteFixedInt64(v); }}");
+                            sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteVarInt32(tagAndWire); writer.WriteFixed64(v); }}");
                             break;
                         case DataFormat.ZigZag:
                             sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.VarInt);");
@@ -2885,7 +2885,7 @@ class ObjectTree
                     if (protoMember.DataFormat == DataFormat.FixedSize)
                     {
                         sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)({objectName}.{protoMember.Name}.Length * 8)); // 8 bytes per ulong");
-                        sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteFixedUInt64(v); }}");
+                        sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteFixed64(v); }}");
                     }
                     else
                     {
@@ -2899,7 +2899,7 @@ class ObjectTree
                     if (protoMember.DataFormat == DataFormat.FixedSize)
                     {
                         sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.Fixed64b);");
-                        sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteVarInt32(tagAndWire); writer.WriteFixedUInt64(v); }}");
+                        sb.AppendIndentedLine($"foreach(var v in {objectName}.{protoMember.Name}) {{ writer.WriteVarInt32(tagAndWire); writer.WriteFixed64(v); }}");
                     }
                     else
                     {
@@ -3477,7 +3477,7 @@ class ObjectTree
                     {
                         case DataFormat.FixedSize:
                             sb.AppendIndentedLine($"calculator.WriteVarUInt32((uint)(obj.{protoMember.Name}.Length * 8));");
-                            sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteFixedInt64(v); }}");
+                            sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteFixed64(v); }}");
                             break;
                         case DataFormat.ZigZag:
                             sb.AppendIndentedLine($"calculator.WritePackedZigZagInt64Array(obj.{protoMember.Name});");
@@ -3493,7 +3493,7 @@ class ObjectTree
                     {
                         case DataFormat.FixedSize:
                             sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.Fixed64b);");
-                            sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteVarInt32(tagAndWire); calculator.WriteFixedInt64(v); }}");
+                            sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteVarInt32(tagAndWire); calculator.WriteFixed64(v); }}");
                             break;
                         case DataFormat.ZigZag:
                             sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.VarInt);");
@@ -3674,7 +3674,7 @@ class ObjectTree
                     if (protoMember.DataFormat == DataFormat.FixedSize)
                     {
                         sb.AppendIndentedLine($"calculator.WriteVarUInt32((uint)(obj.{protoMember.Name}.Length * 8)); // 8 bytes per ulong");
-                        sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteFixedUInt64(v); }}");
+                        sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteFixed64(v); }}");
                     }
                     else
                     {
@@ -3686,7 +3686,7 @@ class ObjectTree
                     if (protoMember.DataFormat == DataFormat.FixedSize)
                     {
                         sb.AppendIndentedLine($"var tagAndWire = Utils.GetTagAndWireType({protoMember.FieldId}, WireType.Fixed64b);");
-                        sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteVarInt32(tagAndWire); calculator.WriteFixedUInt64(v); }}");
+                        sb.AppendIndentedLine($"foreach(var v in obj.{protoMember.Name}) {{ calculator.WriteVarInt32(tagAndWire); calculator.WriteFixed64(v); }}");
                     }
                     else
                     {
@@ -8154,13 +8154,13 @@ class ObjectTree
             },
             "long" or "System.Int64" => dataFormat switch
             {
-                DataFormat.FixedSize => "foreach(var item in tempArray) writer.WriteFixedInt64(item)",
+                DataFormat.FixedSize => "foreach(var item in tempArray) writer.WriteFixed64(item)",
                 DataFormat.ZigZag => "foreach(var item in tempArray) writer.WriteZigZagVarInt64(item)",
                 _ => "foreach(var item in tempArray) writer.WriteVarInt64(item)"
             },
             "ulong" or "System.UInt64" => dataFormat switch
             {
-                DataFormat.FixedSize => "foreach(var item in tempArray) writer.WriteFixedUInt64(item)",
+                DataFormat.FixedSize => "foreach(var item in tempArray) writer.WriteFixed64(item)",
                 _ => "foreach(var item in tempArray) writer.WriteUInt64(item)"
             },
             "char" or "System.Char" => "foreach(var item in tempArray) writer.WriteVarUInt32((uint)item)",
@@ -8205,13 +8205,13 @@ class ObjectTree
             },
             "long" or "System.Int64" => dataFormat switch
             {
-                DataFormat.FixedSize => "writer.WriteFixedInt64(item)",
+                DataFormat.FixedSize => "writer.WriteFixed64(item)",
                 DataFormat.ZigZag => "writer.WriteZigZagVarInt64(item)",
                 _ => "writer.WriteVarInt64(item)"
             },
             "ulong" or "System.UInt64" => dataFormat switch
             {
-                DataFormat.FixedSize => "writer.WriteFixedUInt64(item)",
+                DataFormat.FixedSize => "writer.WriteFixed64(item)",
                 _ => "writer.WriteUInt64(item)"
             },
             "char" or "System.Char" => "writer.WriteVarUInt32((uint)item)",
@@ -8269,13 +8269,13 @@ class ObjectTree
             },
             "long" or "System.Int64" => dataFormat switch
             {
-                DataFormat.FixedSize => "foreach(var item in tempArray) calculator.WriteFixedInt64(item)",
+                DataFormat.FixedSize => "foreach(var item in tempArray) calculator.WriteFixed64(item)",
                 DataFormat.ZigZag => "foreach(var item in tempArray) calculator.WriteZigZagVarInt64(item)",
                 _ => "foreach(var item in tempArray) calculator.WriteVarInt64(item)"
             },
             "ulong" or "System.UInt64" => dataFormat switch
             {
-                DataFormat.FixedSize => "foreach(var item in tempArray) calculator.WriteFixedUInt64(item)",
+                DataFormat.FixedSize => "foreach(var item in tempArray) calculator.WriteFixed64(item)",
                 _ => "foreach(var item in tempArray) calculator.WriteUInt64(item)"
             },
             "char" or "System.Char" => "foreach(var item in tempArray) calculator.WriteVarUInt32((uint)item)",
@@ -8320,13 +8320,13 @@ class ObjectTree
             },
             "long" or "System.Int64" => dataFormat switch
             {
-                DataFormat.FixedSize => "calculator.WriteFixedInt64(item)",
+                DataFormat.FixedSize => "calculator.WriteFixed64(item)",
                 DataFormat.ZigZag => "calculator.WriteZigZagVarInt64(item)",
                 _ => "calculator.WriteVarInt64(item)"
             },
             "ulong" or "System.UInt64" => dataFormat switch
             {
-                DataFormat.FixedSize => "calculator.WriteFixedUInt64(item)",
+                DataFormat.FixedSize => "calculator.WriteFixed64(item)",
                 _ => "calculator.WriteUInt64(item)"
             },
             "char" or "System.Char" => "calculator.WriteVarUInt32((uint)item)",

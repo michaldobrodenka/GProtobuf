@@ -240,12 +240,12 @@ namespace GProtobuf.Core
             Length += 8;
         }
 
-        public void WriteSFixed32(int value)
+        public void WriteFixed32(int value)
         {
             Length += 4;
         }
 
-        public void WriteSFixed64(long value)
+        public void WriteFixed64(long value)
         {
             Length += 8;
         }
