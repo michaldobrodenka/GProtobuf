@@ -5,12 +5,28 @@ namespace proto_playground
     [ProtoContract]
     public class TestClass
     {
-        //[ProtoMember(1)]
-        ////public Char MyChar { get; set; }
-        //public Guid Guid { get; set; }
+        [ProtoMember(1)]//, CompatibilityLevel(CompatibilityLevel.Level200)]
+        public DateTime DateTime { get; set; }
+    }
 
+    [ProtoContract]
+    public class DateTime2
+    {
+        [ProtoMember(1, DataFormat = DataFormat.ZigZag)]
+        public long LongValue { get; set; }
+
+        [ProtoMember(2)]
+        public int Scale { get; set; }
+
+        [ProtoMember(3)]
+        public int Kind { get; set; }
+    }
+
+    [ProtoContract]
+    public class TestClass2
+    {
         [ProtoMember(1)]
-        public Dictionary<byte, byte> DataDict { get; set; }
+        public DateTime2 DateTime { get; set; }
     }
 
     internal class Program
@@ -18,12 +34,13 @@ namespace proto_playground
         static void Main(string[] args)
         {
             using var ms = new MemoryStream();
-            //Serializer.Serialize(ms, new TestClass { MyChar = '\u03A9' });
 
+            //Serializer.Serialize(ms, new TestClass { DateTime = new DateTime(2025, 1,10) });
+            Serializer.Serialize(ms, new TestClass { DateTime = new DateTime(1) });
 
-            //Serializer.Serialize(ms, new TestClass { Guid = new Guid( new byte[]{ 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16 })});
-            Serializer.Serialize(ms, new TestClass { DataDict = new (){ { 0, 1 } } });
             var data = ms.ToArray();
+
+            var deserialized = Serializer.Deserialize<TestClass2>(new MemoryStream(data));
 
             Console.WriteLine("Hello, World!");
         }
