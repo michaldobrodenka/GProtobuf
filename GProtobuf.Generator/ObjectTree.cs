@@ -546,6 +546,16 @@ class ObjectTree
                     {
                         tupleTypes.Add(member.Type);
                     }
+                    // Also check if it's a collection of tuples
+                    else if (member.IsCollection && IsTupleType(member.CollectionElementType))
+                    {
+                        tupleTypes.Add(member.CollectionElementType);
+                    }
+                    // Also check if it's a map with tuple values
+                    else if (member.IsMap && IsTupleType(member.MapValueType))
+                    {
+                        tupleTypes.Add(member.MapValueType);
+                    }
                 }
             }
         }
@@ -860,6 +870,16 @@ class ObjectTree
                     if (IsTupleType(member.Type))
                     {
                         tupleTypesForSize.Add(member.Type);
+                    }
+                    // Also check if it's a collection of tuples
+                    else if (member.IsCollection && IsTupleType(member.CollectionElementType))
+                    {
+                        tupleTypesForSize.Add(member.CollectionElementType);
+                    }
+                    // Also check if it's a map with tuple values
+                    else if (member.IsMap && IsTupleType(member.MapValueType))
+                    {
+                        tupleTypesForSize.Add(member.MapValueType);
                     }
                 }
             }
@@ -1285,6 +1305,16 @@ class ObjectTree
                     if (IsTupleType(member.Type))
                     {
                         tupleTypes.Add(member.Type);
+                    }
+                    // Also check if it's a collection of tuples
+                    else if (member.IsCollection && IsTupleType(member.CollectionElementType))
+                    {
+                        tupleTypes.Add(member.CollectionElementType);
+                    }
+                    // Also check if it's a map with tuple values
+                    else if (member.IsMap && IsTupleType(member.MapValueType))
+                    {
+                        tupleTypes.Add(member.MapValueType);
                     }
                 }
             }
