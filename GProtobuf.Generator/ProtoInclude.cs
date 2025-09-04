@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace GProtobuf.Core
+namespace GProtobuf.Generator
 {
     /// <summary>
     /// Sub-format to use when serializing/deserializing data

@@ -20,7 +20,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\GProtobuf.Core\GProtobuf.Core.csproj" />
-    <ProjectReference Include="..\GProtobuf.Definitions\GProtobuf.Definitions.csproj" />
   </ItemGroup>
 
   <ItemGroup>

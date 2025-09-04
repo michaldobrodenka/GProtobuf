@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using GProtobuf.Core;
 
 namespace GProtobuf.Generator;
 
@@ -6483,7 +6482,7 @@ class ObjectTree
         WritePrecomputedTag(sb, protoMember.FieldId, WireType.Len);
         
         // Convert collection to byte array and write directly
-        if (protoMember.CollectionKind == Core.CollectionKind.Array)
+        if (protoMember.CollectionKind == CollectionKind.Array)
         {
             // Already byte[], write directly
             sb.AppendIndentedLine($"writer.WriteVarUInt32((uint){objectName}.{protoMember.Name}.Length);");
@@ -7871,7 +7870,7 @@ class ObjectTree
                 sb.AppendIndentedLine($"int used = 0;");
                 
                 // Use CollectionsMarshal.AsSpan for List<T> for better performance
-                if (protoMember.CollectionKind == Core.CollectionKind.ConcreteCollection && 
+                if (protoMember.CollectionKind == CollectionKind.ConcreteCollection && 
                     (protoMember.Type.StartsWith("List<") || protoMember.Type.StartsWith("System.Collections.Generic.List<")))
                 {
                     sb.AppendIndentedLine($"var span = System.Runtime.InteropServices.CollectionsMarshal.AsSpan({objectName}.{protoMember.Name});");
@@ -7973,7 +7972,7 @@ class ObjectTree
                 sb.AppendIndentedLine($"int used = 0;");
                 
                 // Use CollectionsMarshal.AsSpan for List<T> for better performance
-                if (protoMember.CollectionKind == Core.CollectionKind.ConcreteCollection && 
+                if (protoMember.CollectionKind == CollectionKind.ConcreteCollection && 
                     (protoMember.Type.StartsWith("List<") || protoMember.Type.StartsWith("System.Collections.Generic.List<")))
                 {
                     sb.AppendIndentedLine($"var span = System.Runtime.InteropServices.CollectionsMarshal.AsSpan({objectName}.{protoMember.Name});");
@@ -8071,7 +8070,7 @@ class ObjectTree
         sb.StartNewBlock();
         WritePrecomputedTagForCalculator(sb, protoMember.FieldId, WireType.Len);
         
-        if (protoMember.CollectionKind == Core.CollectionKind.Array)
+        if (protoMember.CollectionKind == CollectionKind.Array)
         {
             // Already byte[], calculate directly
             sb.AppendIndentedLine($"calculator.WriteBytes(obj.{protoMember.Name});");
@@ -8371,8 +8370,8 @@ class ObjectTree
     {
         return protoMember.CollectionKind switch
         {
-            Core.CollectionKind.Array => "Length",
-            Core.CollectionKind.InterfaceCollection when protoMember.Type.Contains("IEnumerable<") && !protoMember.Type.Contains("ICollection<") && !protoMember.Type.Contains("IList<") => "Count()",
+            CollectionKind.Array => "Length",
+            CollectionKind.InterfaceCollection when protoMember.Type.Contains("IEnumerable<") && !protoMember.Type.Contains("ICollection<") && !protoMember.Type.Contains("IList<") => "Count()",
             _ => "Count"
         };
     }

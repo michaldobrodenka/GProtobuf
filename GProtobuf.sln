@@ -8,8 +8,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GProtobuf.Generator", "GPro
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GProtobuf.Benchmark", "GProtobuf.Benchmark\GProtobuf.Benchmark.csproj", "{1324BB94-AA48-4280-B6AC-F387E1FB6222}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GProtobuf.Definitions", "GProtobuf.Definitions\GProtobuf.Definitions.csproj", "{5A6E0152-557A-4043-A895-4D99BC8AA926}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GProtobuf.CrossTests", "GProtobuf.CrossTests\GProtobuf.CrossTests.csproj", "{7A959C79-01DA-4919-892D-D01EFA3166BF}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "GeneratedFiles", "GeneratedFiles", "{B16D8E93-01AC-4B5E-B1FC-CB8BC806E073}"
@@ -41,10 +39,6 @@ Global
 		{1324BB94-AA48-4280-B6AC-F387E1FB6222}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{1324BB94-AA48-4280-B6AC-F387E1FB6222}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{1324BB94-AA48-4280-B6AC-F387E1FB6222}.Release|Any CPU.Build.0 = Release|Any CPU
-		{5A6E0152-557A-4043-A895-4D99BC8AA926}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{5A6E0152-557A-4043-A895-4D99BC8AA926}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{5A6E0152-557A-4043-A895-4D99BC8AA926}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{5A6E0152-557A-4043-A895-4D99BC8AA926}.Release|Any CPU.Build.0 = Release|Any CPU
 		{7A959C79-01DA-4919-892D-D01EFA3166BF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{7A959C79-01DA-4919-892D-D01EFA3166BF}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{7A959C79-01DA-4919-892D-D01EFA3166BF}.Release|Any CPU.ActiveCfg = Release|Any CPU

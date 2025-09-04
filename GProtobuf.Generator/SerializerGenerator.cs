@@ -55,9 +55,9 @@ public sealed class SerializerGenerator : IIncrementalGenerator
             });
     }
     
-    private static List<Core.ProtoMemberAttribute> GetProtoMemberAttributes(INamedTypeSymbol typeSymbol)
+    private static List<ProtoMemberAttribute> GetProtoMemberAttributes(INamedTypeSymbol typeSymbol)
     {
-        var result = new List<Core.ProtoMemberAttribute>();
+        var result = new List<ProtoMemberAttribute>();
 
         foreach (var property in typeSymbol.GetMembers().OfType<IPropertySymbol>())
         {
@@ -107,7 +107,7 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                     }
 
                     // Vytvoríme inštanciu s FieldId
-                    var protoMember = new Core.ProtoMemberAttribute(fieldId)
+                    var protoMember = new ProtoMemberAttribute(fieldId)
                     {
                         Name = propertyName,
                         Type = propertyType,
@@ -143,8 +143,8 @@ public sealed class SerializerGenerator : IIncrementalGenerator
 
                             case nameof(protoMember.DataFormat):
                                 protoMember.DataFormat = argument.Value.Value is int dataFormat
-                                    ? (Core.DataFormat)dataFormat
-                                    : Core.DataFormat.Default;
+                                    ? (DataFormat)dataFormat
+                                    : DataFormat.Default;
                                 break;
                         }
                     }
@@ -159,9 +159,9 @@ public sealed class SerializerGenerator : IIncrementalGenerator
         return result;
     }
 
-    private static List<Core.ProtoIncludeAttribute> GetProtoIncludeAttributes(INamedTypeSymbol typeSymbol)
+    private static List<ProtoIncludeAttribute> GetProtoIncludeAttributes(INamedTypeSymbol typeSymbol)
     {
-        var result = new List<Core.ProtoIncludeAttribute>();
+        var result = new List<ProtoIncludeAttribute>();
 
         // Prejdeme všetky atribúty na danej triede
         foreach (var attribute in typeSymbol.GetAttributes())
@@ -192,7 +192,7 @@ public sealed class SerializerGenerator : IIncrementalGenerator
             if (typeName is null || typeNamespace is null)
                 continue;
 
-            result.Add(new Core.ProtoIncludeAttribute(tag, typeName, typeNamespace));
+            result.Add(new ProtoIncludeAttribute(tag, typeName, typeNamespace));
         }
 
         return result;
@@ -201,13 +201,13 @@ public sealed class SerializerGenerator : IIncrementalGenerator
     /// <summary>
     /// Analyzes a type symbol to determine if it's a collection and extract collection metadata
     /// </summary>
-    private static (bool IsCollection, string ElementType, Core.CollectionKind Kind) AnalyzeCollectionType(ITypeSymbol typeSymbol)
+    private static (bool IsCollection, string ElementType, CollectionKind Kind) AnalyzeCollectionType(ITypeSymbol typeSymbol)
     {
         // Check if it's an array type
         if (typeSymbol.TypeKind == TypeKind.Array)
         {
             var arrayType = (IArrayTypeSymbol)typeSymbol;
-            return (true, arrayType.ElementType.ToDisplayString(), Core.CollectionKind.Array);
+            return (true, arrayType.ElementType.ToDisplayString(), CollectionKind.Array);
         }
 
         // Check if it's a generic type
@@ -219,16 +219,16 @@ public sealed class SerializerGenerator : IIncrementalGenerator
             // Check for specific collection types
             if (IsInterfaceCollectionType(namedType))
             {
-                return (true, elementType, Core.CollectionKind.InterfaceCollection);
+                return (true, elementType, CollectionKind.InterfaceCollection);
             }
             
             if (IsConcreteCollectionType(namedType))
             {
-                return (true, elementType, Core.CollectionKind.ConcreteCollection);
+                return (true, elementType, CollectionKind.ConcreteCollection);
             }
         }
 
-        return (false, null, Core.CollectionKind.None);
+        return (false, null, CollectionKind.None);
     }
 
     /// <summary>
