@@ -1,5 +1,4 @@
 ﻿using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -17,6 +16,9 @@ public sealed class SerializerGenerator : IIncrementalGenerator
 //            Debugger.Launch();
 //        }
 //#endif
+
+        var configOptions = context.AnalyzerConfigOptionsProvider
+            .Select((provider, _) => provider.GlobalOptions.TryGetValue("build_property.GenerateRefactored", out var _));
 
         var pipeline = context.SyntaxProvider.ForAttributeWithMetadataName(
             fullyQualifiedMetadataName: "ProtoBuf.ProtoContractAttribute",
@@ -38,9 +40,28 @@ public sealed class SerializerGenerator : IIncrementalGenerator
             });
         
         context.RegisterSourceOutput(
-            pipeline.Collect(),
-            static (context, typeDefinitions) =>
+            pipeline.Collect().Combine(configOptions),
+            static (context, provider) =>
             {
+                var typeDefinitions = provider.Left;
+                var shouldUsedRefactored = provider.Right;
+
+                if (shouldUsedRefactored)
+                {
+                    var refactoredObjectTree = new RefactoredObjectTree();
+                    foreach (var (namespaceName, typeDefinition) in typeDefinitions)
+                    {
+                        refactoredObjectTree.AddType(namespaceName, typeDefinition);
+                    }
+
+                    var files = CodeGenerator.GenerateFiles(refactoredObjectTree);
+                    foreach(var f in files)
+                    {
+                        context.AddSource(f.FileName, f.Code);
+                    }
+                    return;
+                }
+                
                 var objectTree = new ObjectTree();
                 foreach (var (namespaceName, typeDefinition) in typeDefinitions)
                 {

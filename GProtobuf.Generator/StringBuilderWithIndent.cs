@@ -1,93 +1,110 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Text;
 
-namespace GProtobuf.Generator
+namespace GProtobuf.Generator;
+
+internal sealed class StringBuilderWithIndent
 {
-    internal class StringBuilderWithIndent
+    private StringBuilder sb;
+
+    public StringBuilderWithIndent()
     {
-        private StringBuilder sb;
+        this.sb = new StringBuilder();
+        IndentLevel = 0;
+    }
 
-        public StringBuilderWithIndent()
+    private int IndentLevel { get; set; }
+
+    public StringBuilderWithIndent IncreaseIndent()
+    {
+        IndentLevel++;
+        return this;
+    }
+
+    public StringBuilderWithIndent DecreaseIndent()
+    {
+        if (IndentLevel > 0)
+            IndentLevel--;
+
+        return this;
+    }
+
+    public void AppendLine(string value)
+    {
+        this.sb.AppendLine(value);
+    }
+
+    public void Append(string value)
+    {
+        this.sb.Append(value);
+    }
+
+    public void AppendIndented(string value)
+    {
+        for (int i = 0; i < IndentLevel; i++)
         {
-            this.sb = new StringBuilder();
-            IndentLevel = 0;
+            this.sb.Append("    ");
+        }
+        this.sb.Append(value);
+    }
+
+    public StringBuilderWithIndent AppendIndentedLine(string value)
+    {
+        for (int i = 0; i < IndentLevel; i++)
+        {
+            this.sb.Append("    ");
+        }
+        this.sb.AppendLine(value);
+
+        return this;
+    }
+
+    public StringBuilderWithIndent AppendMultiline(string value)
+    {
+        var lines = value.Split(["\r\n"], StringSplitOptions.None);
+        foreach (var line in lines)
+        {
+            AppendIndentedLine(line);
         }
 
-        public int IndentLevel { get; set; } = 0;
+        return this;
+    }
 
-        public void IncreaseIndent()
-        {
-            IndentLevel++;
-        }
+    public StringBuilderWithIndent AppendNewLine()
+    {
+        this.sb.AppendLine();
+        return this;
+    }
 
-        public void DecreaseIndent()
-        {
-            if (IndentLevel > 0)
-                IndentLevel--;
-        }
+    public StringBuilderWithIndent StartNewBlock(string blockName = null)
+    {
+        if (blockName == null)
+            AppendIndentedLine("{");
+        else
+            AppendIndentedLine($"{{ // {blockName}");
 
-        public void AppendLine(string value)
-        {
-            this.sb.AppendLine(value);
-        }
+        return IncreaseIndent();
+    }
 
-        public void Append(string value)
-        {
-            this.sb.Append(value);
-        }
+    public StringBuilderWithIndent EndBlock(string blockName = null)
+    {
+        DecreaseIndent();
+        if (blockName == null)
+            AppendIndentedLine("}");
+        else
+            AppendIndentedLine($"}} // {blockName}");
 
-        public void AppendIndented(string value)
-        {
-            for (int i = 0; i < IndentLevel; i++)
-            {
-                this.sb.Append("    ");
-            }
-            this.sb.Append(value);
-        }
+        return this;
+    }
 
-        public void AppendIndentedLine(string value)
-        {
-            for (int i = 0; i < IndentLevel; i++)
-            {
-                this.sb.Append("    ");
-            }
-            this.sb.AppendLine(value);
-        }
+    public void Clear()
+    {
+        this.sb.Clear();
+        IndentLevel = 0;
+    }
 
-        public void AppendNewLine()
-        {
-            this.sb.AppendLine();
-        }
-
-        public void StartNewBlock(string blockName = null)
-        {
-            if (blockName == null)
-                AppendIndentedLine("{");
-            else
-                AppendIndentedLine($"{{ // {blockName}");
-
-            IncreaseIndent();
-        }
-
-        public void EndBlock(string blockName = null)
-        {
-            DecreaseIndent();
-            if (blockName == null)
-                AppendIndentedLine("}");
-            else
-                AppendIndentedLine($"}} // {blockName}");
-        }
-
-        public void Clear()
-        {
-            this.sb.Clear();
-            IndentLevel = 0;
-        }
-
-        public override string ToString()
-        {
-            return this.sb.ToString();
-        }
+    public override string ToString()
+    {
+        return this.sb.ToString();
     }
 }
