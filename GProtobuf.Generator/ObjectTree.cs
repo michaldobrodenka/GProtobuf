@@ -4,24 +4,6 @@ using System.Linq;
 
 namespace GProtobuf.Generator;
 
-// Local WireType enum matching GProtobuf.Core.WireType
-internal enum WireType
-{
-    VarInt = 0,
-    Fixed64b = 1,
-    Len = 2,
-    StartGroup = 3,
-    EndGroup = 4,
-    Fixed32b = 5
-}
-
-public sealed record TypeDefinition(
-    bool IsStruct,
-    bool IsAbstract,
-    string FullName,
-    List<ProtoIncludeAttribute> ProtoIncludes, // List of ProtoInclude derived classes
-    List<ProtoMemberAttribute> ProtoMembers);
-
 class ObjectTree
 {
     private Dictionary<string, List<TypeDefinition>> types = new();
