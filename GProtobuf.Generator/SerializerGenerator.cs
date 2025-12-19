@@ -1,5 +1,7 @@
 ﻿using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
+using GProtobuf.Generator.V2;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
@@ -46,23 +48,23 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                 var typeDefinitions = provider.Left;
                 var shouldUsedRefactored = provider.Right;
 
-                if (shouldUsedRefactored)
-                {
-                    var refactoredObjectTree = new RefactoredObjectTree();
-                    foreach (var (namespaceName, typeDefinition) in typeDefinitions)
-                    {
-                        refactoredObjectTree.AddType(namespaceName, typeDefinition);
-                    }
+                //if (shouldUsedRefactored)
+                //{
+                //    var refactoredObjectTree = new RefactoredObjectTree();
+                //    foreach (var (namespaceName, typeDefinition) in typeDefinitions)
+                //    {
+                //        refactoredObjectTree.AddType(namespaceName, typeDefinition);
+                //    }
 
-                    var files = CodeGenerator.GenerateFiles(refactoredObjectTree);
-                    foreach(var f in files)
-                    {
-                        context.AddSource(f.FileName, f.Code);
-                    }
-                    return;
-                }
+                //    var files = CodeGenerator.GenerateFiles(refactoredObjectTree);
+                //    foreach(var f in files)
+                //    {
+                //        context.AddSource(f.FileName, f.Code);
+                //    }
+                //    return;
+                //}
                 
-                var objectTree = new ObjectTree();
+                var objectTree = new ObjectTreeV2();
                 foreach (var (namespaceName, typeDefinition) in typeDefinitions)
                 {
                     objectTree.AddType(namespaceName, typeDefinition);
@@ -228,6 +230,13 @@ public sealed class SerializerGenerator : IIncrementalGenerator
         if (typeSymbol.TypeKind == TypeKind.Array)
         {
             var arrayType = (IArrayTypeSymbol)typeSymbol;
+
+            // byte[] is a primitive type (serialized as length-delimited bytes), not a collection
+            if (arrayType.ElementType.SpecialType == SpecialType.System_Byte)
+            {
+                return (false, null, CollectionKind.None);
+            }
+
             return (true, arrayType.ElementType.ToDisplayString(), CollectionKind.Array);
         }
 

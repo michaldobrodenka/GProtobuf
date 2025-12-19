@@ -55,6 +55,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         {
             var className = GetClassName(type.FullName);
 
+            // Generate main Write method (entry point)
             _sb.AppendIndentedLine($"public static void Write{className}(ref {_writerType} writer, global::{type.FullName} instance)");
             _sb.StartNewBlock();
 
@@ -71,6 +72,46 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             else
             {
                 GenerateSimpleWriteMethod(type, className);
+            }
+
+            _sb.EndBlock();
+            _sb.AppendNewLine();
+
+            // Generate WriteContent method (for nested serialization without tag)
+            GenerateWriteContentMethod(type, className);
+        }
+
+        /// <summary>
+        /// Generates WriteXxxContent method that writes just the field content without tag.
+        /// Used for nested messages.
+        /// </summary>
+        private void GenerateWriteContentMethod(TypeDefinition type, string className)
+        {
+            _sb.AppendIndentedLine($"public static void Write{className}Content(ref {_writerType} writer, global::{type.FullName} instance)");
+            _sb.StartNewBlock();
+
+            // For derived types, write all inherited fields first
+            bool isDerived = _registry.IsDerivedType(type.FullName);
+            if (isDerived)
+            {
+                var rootTypeName = _registry.GetRootType(type.FullName);
+                var rootType = _registry.GetByFullName(rootTypeName);
+                if (rootType?.ProtoMembers != null)
+                {
+                    foreach (var member in rootType.ProtoMembers)
+                    {
+                        GenerateFieldWrite(member, "instance");
+                    }
+                }
+            }
+
+            // Write own fields
+            if (type.ProtoMembers != null)
+            {
+                foreach (var member in type.ProtoMembers)
+                {
+                    GenerateFieldWrite(member, "instance");
+                }
             }
 
             _sb.EndBlock();
@@ -153,92 +194,96 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateProtoIncludeWrappers(TypeDefinition type, IReadOnlyList<string> inheritanceChain)
         {
-            // For 2-level: [Base, Derived] - write tag for Derived with length-prefixed content
-            // For 3-level: [Base, Middle, Derived] - write tag for Middle containing tag for Derived
+            // For arbitrary depth: [A, B, C, D, ...]
+            // Generate nested wrappers from level 0 to the derived type
+            // First calculate all sizes, then write nested wrappers with fields
 
-            if (inheritanceChain.Count == 2)
+            if (inheritanceChain.Count < 2)
+                return;
+
+            // Generate the outermost wrapper (from root to first derived)
+            GenerateNestedWrapper(inheritanceChain, 0);
+        }
+
+        /// <summary>
+        /// Recursively generates nested ProtoInclude wrappers for the inheritance chain.
+        /// </summary>
+        private void GenerateNestedWrapper(IReadOnlyList<string> chain, int levelIndex)
+        {
+            if (levelIndex >= chain.Count - 1)
+                return;
+
+            var currentTypeName = chain[levelIndex];
+            var nextTypeName = chain[levelIndex + 1];
+            var currentType = _registry.GetByFullName(currentTypeName);
+            var nextType = _registry.GetByFullName(nextTypeName);
+            var protoInclude = FindProtoInclude(currentType, nextTypeName);
+
+            if (protoInclude == null)
+                return;
+
+            // Write tag for this wrapper
+            GenerateWriteTag(protoInclude.FieldId, WireType.Len);
+
+            // Calculate size for this wrapper (includes nested wrappers + this level's fields)
+            var calcVar = $"calc{levelIndex}";
+            _sb.AppendIndentedLine($"var {calcVar} = new global::GProtobuf.Core.WriteSizeCalculator();");
+
+            // Calculate size for all nested content (from deepest level back up)
+            GenerateNestedSizeCalculation(chain, levelIndex, levelIndex + 1, calcVar);
+
+            // Write the length
+            _sb.AppendIndentedLine($"writer.WriteVarUInt32((uint){calcVar}.Length);");
+
+            // Write this level's (nextType's) fields first
+            if (nextType?.ProtoMembers != null)
             {
-                var baseTypeName = inheritanceChain[0];
-                var derivedTypeName = inheritanceChain[1];
+                foreach (var member in nextType.ProtoMembers)
+                {
+                    GenerateFieldWrite(member, "instance");
+                }
+            }
 
-                var baseType = _registry.GetByFullName(baseTypeName);
-                var protoInclude = FindProtoInclude(baseType, derivedTypeName);
+            // Then recursively write next wrapper (if any)
+            if (levelIndex + 2 < chain.Count)
+            {
+                GenerateNestedWrapper(chain, levelIndex + 1);
+            }
+        }
+
+        /// <summary>
+        /// Generates size calculation for nested wrappers from the given level to the deepest.
+        /// </summary>
+        private void GenerateNestedSizeCalculation(IReadOnlyList<string> chain, int startLevel, int levelIndex, string calcVar)
+        {
+            var typeName = chain[levelIndex];
+            var type = _registry.GetByFullName(typeName);
+            var className = GetClassName(typeName);
+
+            // Add this level's content size
+            _sb.AppendIndentedLine($"SizeCalculators.Calculate{className}ContentSize(ref {calcVar}, instance);");
+
+            // If there's a next level, add wrapper overhead
+            if (levelIndex + 1 < chain.Count)
+            {
+                var nextTypeName = chain[levelIndex + 1];
+                var protoInclude = FindProtoInclude(type, nextTypeName);
 
                 if (protoInclude != null)
                 {
-                    GenerateWriteTag(protoInclude.FieldId, WireType.Len);
+                    // Add tag size for next wrapper
+                    GenerateSizeTag(_sb, calcVar, protoInclude.FieldId, WireType.Len);
 
-                    // Calculate content size
-                    var derivedClassName = GetClassName(derivedTypeName);
-                    _sb.AppendIndentedLine("var calculator = new global::GProtobuf.Core.WriteSizeCalculator();");
-                    _sb.AppendIndentedLine($"SizeCalculators.Calculate{derivedClassName}ContentSize(ref calculator, instance);");
-                    _sb.AppendIndentedLine("writer.WriteVarUInt32((uint)calculator.Length);");
+                    // Calculate nested size with unique variable name (includes start level to avoid conflicts)
+                    var nestedCalcVar = $"sn{startLevel}_{levelIndex}";
+                    _sb.AppendIndentedLine($"var {nestedCalcVar} = new global::GProtobuf.Core.WriteSizeCalculator();");
 
-                    // Write derived type's own fields
-                    if (type.ProtoMembers != null)
-                    {
-                        foreach (var member in type.ProtoMembers)
-                        {
-                            GenerateFieldWrite(member, "instance");
-                        }
-                    }
-                }
-            }
-            else if (inheritanceChain.Count == 3)
-            {
-                // Complex 3-level case - similar pattern but nested
-                var baseTypeName = inheritanceChain[0];
-                var middleTypeName = inheritanceChain[1];
-                var derivedTypeName = inheritanceChain[2];
+                    // Recursively calculate nested content
+                    GenerateNestedSizeCalculation(chain, startLevel, levelIndex + 1, nestedCalcVar);
 
-                var baseType = _registry.GetByFullName(baseTypeName);
-                var middleType = _registry.GetByFullName(middleTypeName);
-
-                var includeBaseToMiddle = FindProtoInclude(baseType, middleTypeName);
-                var includeMiddleToDerived = FindProtoInclude(middleType, derivedTypeName);
-
-                if (includeBaseToMiddle != null && includeMiddleToDerived != null)
-                {
-                    // Write outer wrapper (Base -> Middle)
-                    GenerateWriteTag(includeBaseToMiddle.FieldId, WireType.Len);
-
-                    // Calculate outer wrapper size
-                    _sb.AppendIndentedLine("var outerCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
-                    GenerateSizeTag(_sb, "outerCalc", includeMiddleToDerived.FieldId, WireType.Len);
-
-                    _sb.AppendIndentedLine("var innerCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
-                    var derivedClassName = GetClassName(derivedTypeName);
-                    _sb.AppendIndentedLine($"SizeCalculators.Calculate{derivedClassName}ContentSize(ref innerCalc, instance);");
-                    _sb.AppendIndentedLine("outerCalc.WriteVarUInt32((uint)innerCalc.Length);");
-                    _sb.AppendIndentedLine("outerCalc.AddByteLength(innerCalc.Length);");
-
-                    var middleClassName = GetClassName(middleTypeName);
-                    _sb.AppendIndentedLine($"SizeCalculators.Calculate{middleClassName}ContentSize(ref outerCalc, instance);");
-                    _sb.AppendIndentedLine("writer.WriteVarUInt32((uint)outerCalc.Length);");
-
-                    // Write inner wrapper (Middle -> Derived)
-                    GenerateWriteTag(includeMiddleToDerived.FieldId, WireType.Len);
-                    _sb.AppendIndentedLine("var derivedCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
-                    _sb.AppendIndentedLine($"SizeCalculators.Calculate{derivedClassName}ContentSize(ref derivedCalc, instance);");
-                    _sb.AppendIndentedLine("writer.WriteVarUInt32((uint)derivedCalc.Length);");
-
-                    // Write derived fields
-                    if (type.ProtoMembers != null)
-                    {
-                        foreach (var member in type.ProtoMembers)
-                        {
-                            GenerateFieldWrite(member, "instance");
-                        }
-                    }
-
-                    // Write middle type fields
-                    if (middleType?.ProtoMembers != null)
-                    {
-                        foreach (var member in middleType.ProtoMembers)
-                        {
-                            GenerateFieldWrite(member, "instance");
-                        }
-                    }
+                    // Add length prefix size and content size
+                    _sb.AppendIndentedLine($"{calcVar}.WriteVarUInt32((uint){nestedCalcVar}.Length);");
+                    _sb.AppendIndentedLine($"{calcVar}.AddByteLength({nestedCalcVar}.Length);");
                 }
             }
         }
@@ -400,7 +445,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
             else
             {
-                _sb.AppendIndentedLine($"writer.WriteBytes(stackalloc byte[] {{ {bytesString} }});");
+                // Use static ReadOnlySpan from Tags class for zero-allocation
+                var tagPropertyName = TagsGenerator.GetTagPropertyName(fieldId, wireType);
+                _sb.AppendIndentedLine($"writer.WriteBytes(Tags.{tagPropertyName});");
             }
         }
 

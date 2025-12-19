@@ -32,6 +32,11 @@ namespace GProtobuf.Generator.V2
 
                 WriteHeader(sb, ns);
 
+                // Generate static Tags class for multi-byte tags (zero-allocation)
+                var tagsGenerator = new TagsGenerator(sb);
+                tagsGenerator.CollectTags(types);
+                tagsGenerator.Generate();
+
                 // Generate Deserializers class (entry point methods)
                 GenerateDeserializers(sb, types);
 
@@ -69,12 +74,24 @@ namespace GProtobuf.Generator.V2
             {
                 var className = GetClassName(type.FullName);
 
+                // Deserialize method - creates new instance
                 sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(ReadOnlySpan<byte> data)");
                 sb.StartNewBlock();
                 sb.AppendIndentedLine("var reader = new SpanReader(data);");
                 sb.AppendIndentedLine($"return SpanReaders.Read{className}(ref reader);");
                 sb.EndBlock();
                 sb.AppendNewLine();
+
+                // Populate method - fills existing instance (zero object allocation)
+                if (!type.IsAbstract)
+                {
+                    sb.AppendIndentedLine($"public static void Populate{className}(ReadOnlySpan<byte> data, global::{type.FullName} instance)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine("var reader = new SpanReader(data);");
+                    sb.AppendIndentedLine($"SpanReaders.Populate{className}(ref reader, instance);");
+                    sb.EndBlock();
+                    sb.AppendNewLine();
+                }
             }
 
             sb.EndBlock();

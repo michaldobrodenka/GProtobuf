@@ -5,7 +5,6 @@ namespace GProtobuf.Generator.V2
 {
     /// <summary>
     /// Maps C# types to protobuf wire format operations.
-    /// API matches SpanReader/SpanWriter methods from GProtobuf.Core.
     /// </summary>
     internal static class TypeMapping
     {
@@ -122,7 +121,6 @@ namespace GProtobuf.Generator.V2
 
         /// <summary>
         /// Gets read expression for a primitive type.
-        /// API matches SpanReader methods from ObjectTree.
         /// </summary>
         public static string GetReadExpression(
             string typeName,
@@ -148,6 +146,7 @@ namespace GProtobuf.Generator.V2
                 },
                 "System.Int16" => format switch
                 {
+                    DataFormat.FixedSize => $"(short){readerVar}.ReadFixedInt32()",
                     DataFormat.ZigZag => $"{readerVar}.ReadInt16({wireTypeVar}, true)",
                     _ => $"{readerVar}.ReadInt16({wireTypeVar}, false)"
                 },
@@ -156,9 +155,21 @@ namespace GProtobuf.Generator.V2
                     DataFormat.ZigZag => $"{readerVar}.ReadSByte({wireTypeVar}, true)",
                     _ => $"{readerVar}.ReadSByte({wireTypeVar}, false)"
                 },
-                "System.UInt32" => $"{readerVar}.ReadUInt32({wireTypeVar})",
-                "System.UInt64" => $"{readerVar}.ReadUInt64({wireTypeVar})",
-                "System.UInt16" => $"{readerVar}.ReadUInt16({wireTypeVar})",
+                "System.UInt32" => format switch
+                {
+                    DataFormat.FixedSize => $"{readerVar}.ReadFixedUInt32()",
+                    _ => $"{readerVar}.ReadUInt32({wireTypeVar})"
+                },
+                "System.UInt64" => format switch
+                {
+                    DataFormat.FixedSize => $"{readerVar}.ReadFixedUInt64()",
+                    _ => $"{readerVar}.ReadUInt64({wireTypeVar})"
+                },
+                "System.UInt16" => format switch
+                {
+                    DataFormat.FixedSize => $"(ushort){readerVar}.ReadFixedUInt32()",
+                    _ => $"{readerVar}.ReadUInt16({wireTypeVar})"
+                },
                 "System.Byte" => $"{readerVar}.ReadByte({wireTypeVar})",
                 "System.Single" => $"{readerVar}.ReadFloat({wireTypeVar})",
                 "System.Double" => $"{readerVar}.ReadDouble({wireTypeVar})",
@@ -300,13 +311,13 @@ namespace GProtobuf.Generator.V2
                 },
                 "System.Int64" => format switch
                 {
-                    DataFormat.FixedSize => $"{writerVar}.WriteFixedSizeInt64({valueExpr})",
+                    DataFormat.FixedSize => $"{writerVar}.WriteFixed64({valueExpr})",
                     DataFormat.ZigZag => $"{writerVar}.WriteZigZagVarInt64({valueExpr})",
                     _ => $"{writerVar}.WriteVarInt64({valueExpr})"
                 },
                 "System.Int16" => format switch
                 {
-                    DataFormat.FixedSize => $"{writerVar}.WriteFixedSizeInt32({valueExpr})",
+                    DataFormat.FixedSize => $"{writerVar}.WriteFixedInt32({valueExpr})",
                     DataFormat.ZigZag => $"{writerVar}.WriteInt16({valueExpr}, true)",
                     _ => $"{writerVar}.WriteInt16({valueExpr}, false)"
                 },
@@ -336,7 +347,7 @@ namespace GProtobuf.Generator.V2
                 "System.Boolean" => $"{writerVar}.WriteBool({valueExpr})",
                 "System.Char" => $"{writerVar}.WriteVarUInt32((uint){valueExpr})",
                 "System.String" => $"{writerVar}.WriteString({valueExpr})",
-                "System.Byte[]" => $"{writerVar}.WriteBytes({valueExpr})",
+                "System.Byte[]" => $"{writerVar}.WriteVarUInt32((uint){valueExpr}.Length); {writerVar}.WriteBytes({valueExpr})",
                 _ => null
             };
         }

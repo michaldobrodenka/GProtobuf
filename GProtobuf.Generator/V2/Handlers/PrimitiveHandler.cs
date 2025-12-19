@@ -59,10 +59,26 @@ namespace GProtobuf.Generator.V2.Handlers
             DataFormat format,
             string readerVar = "reader")
         {
+            GeneratePackedArrayRead(sb, targetVar, elementTypeName, format, CollectionKind.Array, null, readerVar);
+        }
+
+        /// <summary>
+        /// Generates read code for packed primitive array with collection kind support.
+        /// </summary>
+        public void GeneratePackedArrayRead(
+            StringBuilderWithIndent sb,
+            string targetVar,
+            string elementTypeName,
+            DataFormat format,
+            CollectionKind collectionKind,
+            string collectionTypeName,
+            string readerVar = "reader")
+        {
             var readExpr = TypeMapping.GetPackedArrayReadExpression(elementTypeName, format, readerVar);
             if (readExpr != null)
             {
-                sb.AppendIndentedLine($"{targetVar} = {readExpr};");
+                var assignment = GenerateCollectionAssignment(targetVar, elementTypeName, collectionKind, collectionTypeName, readExpr);
+                sb.AppendIndentedLine(assignment);
             }
         }
 
@@ -76,6 +92,22 @@ namespace GProtobuf.Generator.V2.Handlers
             string elementTypeName,
             DataFormat format,
             int fieldId,
+            string readerVar = "reader")
+        {
+            GenerateNonPackedArrayRead(sb, targetVar, elementTypeName, format, fieldId, CollectionKind.Array, null, readerVar);
+        }
+
+        /// <summary>
+        /// Generates read code for non-packed repeated primitive field with collection kind support.
+        /// </summary>
+        public void GenerateNonPackedArrayRead(
+            StringBuilderWithIndent sb,
+            string targetVar,
+            string elementTypeName,
+            DataFormat format,
+            int fieldId,
+            CollectionKind collectionKind,
+            string collectionTypeName,
             string readerVar = "reader")
         {
             var shortType = TypeMapping.GetShortTypeName(elementTypeName);
@@ -97,7 +129,49 @@ namespace GProtobuf.Generator.V2.Handlers
             sb.AppendIndentedLine($"break;");
             sb.EndBlock();
             sb.EndBlock();
-            sb.AppendIndentedLine($"{targetVar} = resultCollector.ToArray();");
+
+            // Generate assignment based on collection kind
+            var assignment = GenerateCollectionAssignment(targetVar, elementTypeName, collectionKind, collectionTypeName, "resultCollector.ToArray()");
+            sb.AppendIndentedLine(assignment);
+        }
+
+        /// <summary>
+        /// Generates the correct collection assignment based on CollectionKind.
+        /// </summary>
+        private string GenerateCollectionAssignment(
+            string targetVar,
+            string elementTypeName,
+            CollectionKind collectionKind,
+            string collectionTypeName,
+            string arrayExpr)
+        {
+            var shortElementType = TypeMapping.GetShortTypeName(elementTypeName);
+
+            switch (collectionKind)
+            {
+                case CollectionKind.Array:
+                    return $"{targetVar} = {arrayExpr};";
+
+                case CollectionKind.InterfaceCollection:
+                case CollectionKind.ConcreteCollection:
+                    // Check for specific collection types
+                    if (collectionTypeName != null)
+                    {
+                        if (collectionTypeName.Contains("HashSet<") || collectionTypeName.Contains("System.Collections.Generic.HashSet<"))
+                        {
+                            return $"{targetVar} = new global::System.Collections.Generic.HashSet<{shortElementType}>({arrayExpr});";
+                        }
+                        else if (collectionTypeName.Contains("List<") || collectionTypeName.Contains("System.Collections.Generic.List<"))
+                        {
+                            return $"{targetVar} = new global::System.Collections.Generic.List<{shortElementType}>({arrayExpr});";
+                        }
+                    }
+                    // Default to List for interface collections
+                    return $"{targetVar} = new global::System.Collections.Generic.List<{shortElementType}>({arrayExpr});";
+
+                default:
+                    return $"{targetVar} = {arrayExpr};";
+            }
         }
 
         #endregion
@@ -333,7 +407,9 @@ namespace GProtobuf.Generator.V2.Handlers
             }
             else
             {
-                sb.AppendIndentedLine($"{writerVar}.WriteBytes(stackalloc byte[] {{ {bytesString} }});");
+                // Use static ReadOnlySpan from Tags class for zero-allocation
+                var tagPropertyName = CodeGeneration.TagsGenerator.GetTagPropertyName(fieldId, wireType);
+                sb.AppendIndentedLine($"{writerVar}.WriteBytes(Tags.{tagPropertyName});");
             }
         }
 
