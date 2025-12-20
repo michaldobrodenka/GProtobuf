@@ -114,6 +114,7 @@ namespace GProtobuf.Generator.V2.Handlers
             var elementReadExpr = TypeMapping.GetElementReadExpression(elementTypeName, format, readerVar);
             var expectedWireType = TypeMapping.GetWireTypeString(elementTypeName, format);
 
+            //TODO - revisit variable naming and logic
             sb.AppendIndentedLine($"using var resultCollector = new global::GProtobuf.Core.UnmanagedCollectionCollector<{shortType}>(stackalloc {shortType}[256 / sizeof({shortType})], 1024);");
             sb.AppendIndentedLine($"var wireType1 = wireType;");
             sb.AppendIndentedLine($"var fieldId1 = fieldId;");

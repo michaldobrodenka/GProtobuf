@@ -377,8 +377,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateMapFieldWrite(ProtoMemberAttribute member, string sourceVar)
         {
-            // TODO: Implement with MapHandler
-            _sb.AppendIndentedLine($"// TODO: Map field {member.Name}");
+            var mapHandler = new MapHandler(_sb);
+            mapHandler.GenerateWrite(member, sourceVar);
         }
 
         private void GenerateCollectionFieldWrite(ProtoMemberAttribute member, string sourceVar)
@@ -467,14 +467,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                    || _registry.IsDerivedType(type.FullName);
         }
 
-        private static string GetClassName(string fullName)
-        {
-            if (string.IsNullOrEmpty(fullName))
-                return fullName;
-
-            var lastDot = fullName.LastIndexOf('.');
-            return lastDot >= 0 ? fullName.Substring(lastDot + 1) : fullName;
-        }
+        private static string GetClassName(string fullName) => TypeNameHelper.GetClassName(fullName);
 
         private static ProtoIncludeAttribute FindProtoInclude(TypeDefinition type, string derivedTypeName)
         {

@@ -254,8 +254,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             if (member.IsMap)
             {
-                _sb.AppendIndentedLine($"// TODO: Map field {member.Name}");
-                _sb.AppendIndentedLine($"{readerVar}.SkipField({wireTypeVar});");
+                var mapHandler = new MapHandler(_sb);
+                mapHandler.GenerateRead(member, $"result.{member.Name}");
             }
             else if (member.IsCollection)
             {
@@ -571,8 +571,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // Route to appropriate handler based on field type
             if (member.IsMap)
             {
-                _sb.AppendIndentedLine($"// TODO: Map field {member.Name}");
-                _sb.AppendIndentedLine("reader.SkipField(wireType);");
+                var mapHandler = new MapHandler(_sb);
+                mapHandler.GenerateRead(member, $"instance.{member.Name}");
             }
             else if (member.IsCollection)
             {
@@ -827,9 +827,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateMapFieldReadBody(ProtoMemberAttribute member)
         {
-            // TODO: Implement with MapHandler
-            _sb.AppendIndentedLine($"// TODO: Map field {member.Name}");
-            _sb.AppendIndentedLine("reader.SkipField(wireType);");
+            var mapHandler = new MapHandler(_sb);
+            mapHandler.GenerateRead(member, $"result.{member.Name}");
         }
 
         private void GenerateCollectionFieldReadBody(ProtoMemberAttribute member)
@@ -885,9 +884,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateMapFieldRead(ProtoMemberAttribute member)
         {
-            // TODO: Implement with MapHandler
-            _sb.AppendIndentedLine($"// TODO: Map field {member.Name}");
-            _sb.AppendIndentedLine("reader.SkipField(wireType);");
+            var mapHandler = new MapHandler(_sb);
+            mapHandler.GenerateRead(member, $"result.{member.Name}");
             _sb.AppendIndentedLine("continue;");
         }
 
@@ -947,14 +945,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                    || _registry.IsDerivedType(type.FullName);
         }
 
-        private static string GetClassName(string fullName)
-        {
-            if (string.IsNullOrEmpty(fullName))
-                return fullName;
-
-            var lastDot = fullName.LastIndexOf('.');
-            return lastDot >= 0 ? fullName.Substring(lastDot + 1) : fullName;
-        }
+        private static string GetClassName(string fullName) => TypeNameHelper.GetClassName(fullName);
 
         #endregion
     }

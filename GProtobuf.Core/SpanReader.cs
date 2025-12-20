@@ -3,6 +3,7 @@ using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection.PortableExecutable;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -514,6 +515,17 @@ namespace GProtobuf.Core
             var fieldId = typeAndFieldId >> 3;
 
             return (type, fieldId);
+        }
+
+        /// <summary>
+        /// Reads wire type and field ID using out parameters (zero allocation).
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void ReadWireTypeAndFieldId(out WireType wireType, out int fieldId)
+        {
+            var typeAndFieldId = this.ReadVarInt32();
+            wireType = (WireType)(typeAndFieldId & 0b111);
+            fieldId = typeAndFieldId >> 3;
         }
 
         /// <summary>

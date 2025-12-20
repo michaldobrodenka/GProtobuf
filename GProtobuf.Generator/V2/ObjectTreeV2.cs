@@ -160,14 +160,7 @@ namespace GProtobuf.Generator.V2
 
         #region Helpers
 
-        private static string GetClassName(string fullName)
-        {
-            if (string.IsNullOrEmpty(fullName))
-                return fullName;
-
-            var lastDot = fullName.LastIndexOf('.');
-            return lastDot >= 0 ? fullName.Substring(lastDot + 1) : fullName;
-        }
+        private static string GetClassName(string fullName) => TypeNameHelper.GetClassName(fullName);
 
         #endregion
     }
