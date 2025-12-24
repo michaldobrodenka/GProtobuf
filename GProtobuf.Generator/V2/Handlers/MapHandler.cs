@@ -1,24 +1,114 @@
 using System;
+using GProtobuf.Generator.V2.Handlers.Core;
+using GProtobuf.Generator.V2.Helpers;
 
 namespace GProtobuf.Generator.V2.Handlers
 {
     /// <summary>
     /// Handles code generation for map/dictionary types in protobuf.
     /// Maps are serialized as repeated length-delimited messages with key (field 1) and value (field 2).
+    ///
+    /// For complex types (custom classes as keys, nested collections), uses VirtualMapTypeRegistry
+    /// to generate reusable virtual type serializers.
     /// </summary>
     internal class MapHandler
     {
         private readonly StringBuilderWithIndent _sb;
+        private readonly VirtualMapTypeRegistry _registry;
+        private readonly string _writerClassName;
 
-        public MapHandler(StringBuilderWithIndent sb)
+        public MapHandler(StringBuilderWithIndent sb) : this(sb, null, "StreamWriters")
+        {
+        }
+
+        public MapHandler(StringBuilderWithIndent sb, VirtualMapTypeRegistry registry)
+            : this(sb, registry, "StreamWriters")
+        {
+        }
+
+        public MapHandler(StringBuilderWithIndent sb, VirtualMapTypeRegistry registry, string writerClassName)
         {
             _sb = sb;
+            _registry = registry;
+            _writerClassName = writerClassName ?? "StreamWriters";
+        }
+
+        /// <summary>
+        /// Checks if a map type requires virtual type generation (complex key/value types).
+        /// </summary>
+        public static bool RequiresVirtualType(string keyType, string valueType)
+        {
+            // Check if key is complex (not a primitive)
+            if (IsComplexType(keyType))
+                return true;
+
+            // Check if value is complex (nested dictionary, collection of dictionaries, custom class)
+            if (IsComplexType(valueType))
+                return true;
+
+            return false;
+        }
+
+        /// <summary>
+        /// Checks if a type is complex (requires virtual type handling).
+        /// </summary>
+        private static bool IsComplexType(string typeName)
+        {
+            // Simple primitives are not complex
+            if (TypeMapping.IsSimpleType(typeName))
+                return false;
+
+            var normalized = TypeMapping.NormalizeTypeName(typeName);
+
+            // String and Guid are handled inline
+            if (normalized == "System.String" || normalized == "System.Guid")
+                return false;
+
+            // Simple arrays of primitives are handled inline
+            if (typeName.EndsWith("[]"))
+            {
+                var elementType = typeName.Substring(0, typeName.Length - 2);
+                return !TypeMapping.IsSimpleType(elementType) &&
+                       TypeMapping.NormalizeTypeName(elementType) != "System.String";
+            }
+
+            // Nested dictionaries are complex
+            if (typeName.Contains("Dictionary<") || typeName.Contains("IDictionary<"))
+                return true;
+
+            // Collections are always complex (inline MapHandler doesn't support them as keys/values)
+            if (typeName.Contains("List<") || typeName.Contains("HashSet<"))
+                return true;
+
+            // Custom classes are complex
+            return true;
+        }
+
+        /// <summary>
+        /// Registers the map type in the virtual type registry if needed.
+        /// </summary>
+        public VirtualMapEntryInfo RegisterIfNeeded(ProtoMemberAttribute member)
+        {
+            if (_registry == null)
+                return null;
+
+            var keyType = member.MapKeyType;
+            var valueType = member.MapValueType;
+
+            if (!RequiresVirtualType(keyType, valueType))
+                return null;
+
+            return _registry.RegisterMapEntry(
+                keyType, valueType,
+                member.MapKeyIsEnum, member.MapValueIsEnum,
+                member.MapKeyEnumUnderlyingType, member.MapValueEnumUnderlyingType);
         }
 
         #region Read (Deserialization)
 
         /// <summary>
         /// Generates code to read a map field.
+        /// Uses virtual type methods for complex types, inline code for simple types.
         /// </summary>
         public void GenerateRead(ProtoMemberAttribute member, string targetVar)
         {
@@ -26,9 +116,53 @@ namespace GProtobuf.Generator.V2.Handlers
             var valueType = member.MapValueType;
             var dictCreationType = GetDictionaryCreationType(member.Type, keyType, valueType);
 
+            // Check if we should use virtual type
+            var virtualInfo = RegisterIfNeeded(member);
+
             // Initialize dictionary if null
             _sb.AppendIndentedLine($"{targetVar} ??= new {dictCreationType}();");
 
+            if (virtualInfo != null)
+            {
+                // Use virtual type reader
+                GenerateVirtualTypeRead(targetVar, virtualInfo, member);
+            }
+            else
+            {
+                // Use inline reading for simple types
+                GenerateInlineRead(targetVar, keyType, valueType, member);
+            }
+        }
+
+        /// <summary>
+        /// Generates code that calls the virtual type reader method.
+        /// </summary>
+        private void GenerateVirtualTypeRead(string targetVar, VirtualMapEntryInfo virtualInfo, ProtoMemberAttribute member)
+        {
+            var methodName = $"Read{virtualInfo.TypeName}";
+
+            // Call the virtual reader method
+            _sb.AppendIndentedLine($"var entry = SpanReaders.{methodName}(ref reader);");
+            _sb.AppendIndentedLine("if (entry.success)");
+            _sb.StartNewBlock();
+
+            if (IsKeyValuePairCollection(member.Type))
+            {
+                _sb.AppendIndentedLine($"{targetVar}.Add(new global::System.Collections.Generic.KeyValuePair<{member.MapKeyType}, {member.MapValueType}>(entry.key, entry.value));");
+            }
+            else
+            {
+                _sb.AppendIndentedLine($"{targetVar}[entry.key] = entry.value;");
+            }
+
+            _sb.EndBlock();
+        }
+
+        /// <summary>
+        /// Generates inline reading code for simple map types.
+        /// </summary>
+        private void GenerateInlineRead(string targetVar, string keyType, string valueType, ProtoMemberAttribute member)
+        {
             // Read entry length
             _sb.AppendIndentedLine("var entryLength = reader.ReadVarUInt32();");
             _sb.AppendIndentedLine("var entryEnd = reader.Position + (int)entryLength;");
@@ -99,20 +233,13 @@ namespace GProtobuf.Generator.V2.Handlers
                 return;
             }
 
-            // Special cases not in TypeMapping
-            var normalized = TypeMapping.NormalizeTypeName(typeName);
-            switch (normalized)
+            // Try special types (String, Guid)
+            if (SpecialTypeHandler.TryGenerateRead(_sb, targetVar, typeName))
             {
-                case "System.String":
-                    _sb.AppendIndentedLine($"{targetVar} = global::GProtobuf.Core.SpanReaders.ReadString(ref reader, global::GProtobuf.Core.WireType.Len);");
-                    break;
-                case "System.Guid":
-                    _sb.AppendIndentedLine($"{targetVar} = reader.ReadGuid();");
-                    break;
-                default:
-                    _sb.AppendIndentedLine($"// Unsupported type: {typeName}");
-                    break;
+                return;
             }
+
+            _sb.AppendIndentedLine($"// Unsupported type: {typeName}");
         }
 
         private void GenerateValueRead(string valueType, bool isEnum)
@@ -131,16 +258,10 @@ namespace GProtobuf.Generator.V2.Handlers
                 return;
             }
 
-            // Check special types
-            var normalized = TypeMapping.NormalizeTypeName(valueType);
-            switch (normalized)
+            // Try special types (String, Guid)
+            if (SpecialTypeHandler.TryGenerateRead(_sb, "value", valueType))
             {
-                case "System.String":
-                    _sb.AppendIndentedLine("value = global::GProtobuf.Core.SpanReaders.ReadString(ref reader, global::GProtobuf.Core.WireType.Len);");
-                    return;
-                case "System.Guid":
-                    _sb.AppendIndentedLine("value = reader.ReadGuid();");
-                    return;
+                return;
             }
 
             // Complex types
@@ -257,15 +378,63 @@ namespace GProtobuf.Generator.V2.Handlers
 
         /// <summary>
         /// Generates code to write a map field.
+        /// Uses virtual type methods for complex types, inline code for simple types.
         /// </summary>
         public void GenerateWrite(ProtoMemberAttribute member, string sourceVar)
         {
             var keyType = member.MapKeyType;
             var valueType = member.MapValueType;
 
+            // Check if we should use virtual type
+            var virtualInfo = RegisterIfNeeded(member);
+
             _sb.AppendIndentedLine($"if ({sourceVar} != null)");
             _sb.StartNewBlock();
 
+            if (virtualInfo != null)
+            {
+                // Use virtual type writer
+                GenerateVirtualTypeWrite(sourceVar, virtualInfo, member);
+            }
+            else
+            {
+                // Use inline writing for simple types
+                GenerateInlineWrite(sourceVar, keyType, valueType, member);
+            }
+
+            _sb.EndBlock(); // if
+        }
+
+        /// <summary>
+        /// Generates code that calls the virtual type writer method.
+        /// </summary>
+        private void GenerateVirtualTypeWrite(string sourceVar, VirtualMapEntryInfo virtualInfo, ProtoMemberAttribute member)
+        {
+            var methodName = $"Write{virtualInfo.TypeName}";
+
+            _sb.AppendIndentedLine($"foreach (var kvp in {sourceVar})");
+            _sb.StartNewBlock();
+
+            // Skip null values for reference types
+            if (!IsPrimitiveType(member.MapValueType) && !member.MapValueType.EndsWith("[]"))
+            {
+                _sb.AppendIndentedLine("if (kvp.Value == null) continue;");
+            }
+
+            // Write tag
+            GenerateWriteTag(member.FieldId, WireType.Len);
+
+            // Call the virtual writer method
+            _sb.AppendIndentedLine($"{_writerClassName}.{methodName}(ref writer, kvp.Key, kvp.Value);");
+
+            _sb.EndBlock(); // foreach
+        }
+
+        /// <summary>
+        /// Generates inline writing code for simple map types.
+        /// </summary>
+        private void GenerateInlineWrite(string sourceVar, string keyType, string valueType, ProtoMemberAttribute member)
+        {
             // Reuse calculators outside the loop to reduce allocations
             _sb.AppendIndentedLine("var entryCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
 
@@ -301,7 +470,6 @@ namespace GProtobuf.Generator.V2.Handlers
             GenerateValueWrite(valueType, "kvp.Value", member.MapValueIsEnum);
 
             _sb.EndBlock(); // foreach
-            _sb.EndBlock(); // if
         }
 
         private void GeneratePrimitiveWrite(string typeName, string sourceVar, bool isEnum, int fieldId)
@@ -323,20 +491,13 @@ namespace GProtobuf.Generator.V2.Handlers
                 return;
             }
 
-            // Special cases
-            var normalized = TypeMapping.NormalizeTypeName(typeName);
-            switch (normalized)
+            // Try special types (String, Guid)
+            if (SpecialTypeHandler.TryGenerateWrite(_sb, sourceVar, typeName))
             {
-                case "System.String":
-                    _sb.AppendIndentedLine($"writer.WriteString({sourceVar});");
-                    break;
-                case "System.Guid":
-                    _sb.AppendIndentedLine($"writer.WriteGuid({sourceVar});");
-                    break;
-                default:
-                    _sb.AppendIndentedLine($"// Unsupported type: {typeName}");
-                    break;
+                return;
             }
+
+            _sb.AppendIndentedLine($"// Unsupported type: {typeName}");
         }
 
         private void GenerateValueWrite(string valueType, string sourceVar, bool isEnum)
@@ -358,16 +519,10 @@ namespace GProtobuf.Generator.V2.Handlers
                 return;
             }
 
-            // Special types
-            var normalized = TypeMapping.NormalizeTypeName(valueType);
-            switch (normalized)
+            // Try special types (String, Guid)
+            if (SpecialTypeHandler.TryGenerateWrite(_sb, sourceVar, valueType))
             {
-                case "System.String":
-                    _sb.AppendIndentedLine($"writer.WriteString({sourceVar});");
-                    return;
-                case "System.Guid":
-                    _sb.AppendIndentedLine($"writer.WriteGuid({sourceVar});");
-                    return;
+                return;
             }
 
             // Complex types
@@ -382,7 +537,7 @@ namespace GProtobuf.Generator.V2.Handlers
                 _sb.AppendIndentedLine("nestedCalc.Reset();");
                 _sb.AppendIndentedLine($"SizeCalculators.Calculate{sanitizedName}ContentSize(ref nestedCalc, {sourceVar});");
                 _sb.AppendIndentedLine("writer.WriteVarUInt32((uint)nestedCalc.Length);");
-                _sb.AppendIndentedLine($"StreamWriters.Write{sanitizedName}Content(ref writer, {sourceVar});");
+                _sb.AppendIndentedLine($"{_writerClassName}.Write{sanitizedName}Content(ref writer, {sourceVar});");
             }
         }
 
@@ -434,15 +589,13 @@ namespace GProtobuf.Generator.V2.Handlers
                 return;
             }
 
-            // Special case for string
-            if (TypeMapping.NormalizeTypeName(elementType) == "System.String")
+            // Try special types (String, Guid)
+            if (SpecialTypeHandler.TryGenerateSize(_sb, itemVar, elementType, calcVar))
             {
-                _sb.AppendIndentedLine($"{calcVar}.WriteString({itemVar});");
+                return;
             }
-            else
-            {
-                _sb.AppendIndentedLine($"// Unsupported element type for size calculation: {elementType}");
-            }
+
+            _sb.AppendIndentedLine($"// Unsupported element type for size calculation: {elementType}");
         }
 
         private void GenerateElementWrite(string elementType, string itemVar)
@@ -454,15 +607,13 @@ namespace GProtobuf.Generator.V2.Handlers
                 return;
             }
 
-            // Special case for string
-            if (TypeMapping.NormalizeTypeName(elementType) == "System.String")
+            // Try special types (String, Guid)
+            if (SpecialTypeHandler.TryGenerateWrite(_sb, itemVar, elementType))
             {
-                _sb.AppendIndentedLine($"writer.WriteString({itemVar});");
+                return;
             }
-            else
-            {
-                _sb.AppendIndentedLine($"// Unsupported element type for write: {elementType}");
-            }
+
+            _sb.AppendIndentedLine($"// Unsupported element type for write: {elementType}");
         }
 
         #endregion
@@ -471,14 +622,68 @@ namespace GProtobuf.Generator.V2.Handlers
 
         /// <summary>
         /// Generates code to calculate size of a map field.
+        /// Uses virtual type methods for complex types, inline code for simple types.
         /// </summary>
         public void GenerateSize(ProtoMemberAttribute member, string sourceVar)
         {
             var valueType = member.MapValueType;
 
+            // Check if we should use virtual type
+            var virtualInfo = RegisterIfNeeded(member);
+
             _sb.AppendIndentedLine($"if ({sourceVar} != null)");
             _sb.StartNewBlock();
 
+            if (virtualInfo != null)
+            {
+                // Use virtual type size calculator
+                GenerateVirtualTypeSize(sourceVar, virtualInfo, member);
+            }
+            else
+            {
+                // Use inline size calculation for simple types
+                GenerateInlineSize(sourceVar, valueType, member);
+            }
+
+            _sb.EndBlock(); // if
+        }
+
+        /// <summary>
+        /// Generates code that calls the virtual type size calculator method.
+        /// </summary>
+        private void GenerateVirtualTypeSize(string sourceVar, VirtualMapEntryInfo virtualInfo, ProtoMemberAttribute member)
+        {
+            var methodName = $"Calculate{virtualInfo.TypeName}Size";
+            var (_, tagBytes) = TypeMapping.PrecomputeTagBytes(member.FieldId, WireType.Len);
+
+            _sb.AppendIndentedLine("var entryCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+
+            _sb.AppendIndentedLine($"foreach (var kvp in {sourceVar})");
+            _sb.StartNewBlock();
+
+            // Skip null values for reference types
+            if (!IsPrimitiveType(member.MapValueType) && !member.MapValueType.EndsWith("[]"))
+            {
+                _sb.AppendIndentedLine("if (kvp.Value == null) continue;");
+            }
+
+            // Reset and calculate entry size
+            _sb.AppendIndentedLine("entryCalc.Reset();");
+            _sb.AppendIndentedLine($"SizeCalculators.{methodName}(ref entryCalc, kvp.Key, kvp.Value);");
+
+            // Add tag and length prefix size
+            _sb.AppendIndentedLine($"calculator.AddByteLength({tagBytes});");
+            _sb.AppendIndentedLine("calculator.WriteVarUInt32((uint)entryCalc.Length);");
+            _sb.AppendIndentedLine("calculator.AddByteLength(entryCalc.Length);");
+
+            _sb.EndBlock(); // foreach
+        }
+
+        /// <summary>
+        /// Generates inline size calculation code for simple map types.
+        /// </summary>
+        private void GenerateInlineSize(string sourceVar, string valueType, ProtoMemberAttribute member)
+        {
             // Reuse calculators outside the loop to reduce allocations
             _sb.AppendIndentedLine("var entryCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
 
@@ -510,7 +715,6 @@ namespace GProtobuf.Generator.V2.Handlers
             _sb.AppendIndentedLine("calculator.AddByteLength(entryCalc.Length);");
 
             _sb.EndBlock(); // foreach
-            _sb.EndBlock(); // if
         }
 
         private void GenerateEntrySizeCalculation(ProtoMemberAttribute member, string keyVar, string valueVar, string calcVar)
@@ -542,20 +746,13 @@ namespace GProtobuf.Generator.V2.Handlers
                 return;
             }
 
-            // Special cases
-            var normalized = TypeMapping.NormalizeTypeName(typeName);
-            switch (normalized)
+            // Try special types (String, Guid)
+            if (SpecialTypeHandler.TryGenerateSize(_sb, sourceVar, typeName, calcVar))
             {
-                case "System.String":
-                    _sb.AppendIndentedLine($"{calcVar}.WriteString({sourceVar});");
-                    break;
-                case "System.Guid":
-                    _sb.AppendIndentedLine($"{calcVar}.AddByteLength(18);"); // 2 bytes length prefix + 16 bytes
-                    break;
-                default:
-                    _sb.AppendIndentedLine($"// Unsupported type: {typeName}");
-                    break;
+                return;
             }
+
+            _sb.AppendIndentedLine($"// Unsupported type: {typeName}");
         }
 
         private void GenerateValueSizeCalculation(string valueType, string sourceVar, string calcVar, bool isEnum)
@@ -578,16 +775,10 @@ namespace GProtobuf.Generator.V2.Handlers
                 return;
             }
 
-            // Special types
-            var normalized = TypeMapping.NormalizeTypeName(valueType);
-            switch (normalized)
+            // Try special types (String, Guid)
+            if (SpecialTypeHandler.TryGenerateSize(_sb, sourceVar, valueType, calcVar))
             {
-                case "System.String":
-                    _sb.AppendIndentedLine($"{calcVar}.WriteString({sourceVar});");
-                    return;
-                case "System.Guid":
-                    _sb.AppendIndentedLine($"{calcVar}.AddByteLength(18);");
-                    return;
+                return;
             }
 
             // Complex types
@@ -647,140 +838,25 @@ namespace GProtobuf.Generator.V2.Handlers
 
         private void GenerateWriteTag(int fieldId, WireType wireType)
         {
-            var (bytesString, byteCount) = TypeMapping.PrecomputeTagBytes(fieldId, wireType);
-            if (byteCount == 1)
-            {
-                _sb.AppendIndentedLine($"writer.WriteSingleByte({bytesString});");
-            }
-            else
-            {
-                var tagPropertyName = CodeGeneration.TagsGenerator.GetTagPropertyName(fieldId, wireType);
-                _sb.AppendIndentedLine($"writer.WriteBytes(Tags.{tagPropertyName});");
-            }
+            TagGenerator.WriteTag(_sb, fieldId, wireType);
         }
 
         private void GenerateWriteTagBytes(int fieldId, WireType wireType)
         {
-            var (bytesString, _) = TypeMapping.PrecomputeTagBytes(fieldId, wireType);
             // For map entry tags (1 and 2), they're always single byte
-            _sb.AppendIndentedLine($"writer.WriteSingleByte({bytesString});");
+            TagGenerator.WriteSingleByteTag(_sb, fieldId, wireType);
         }
 
-        /// <summary>
-        /// Returns fixed size in bytes for types with constant size, or 0 for variable-size types.
-        /// </summary>
-        private static int GetFixedElementSize(string elementType)
-        {
-            var normalized = TypeMapping.NormalizeTypeName(elementType);
-            return normalized switch
-            {
-                "System.Single" => 4,
-                "System.Double" => 8,
-                "System.Boolean" => 1,
-                "System.Byte" => 1,
-                "System.SByte" => 1,
-                // VarInt types have variable size
-                _ => 0
-            };
-        }
-
-        /// <summary>
-        /// Checks if value type needs a nested calculator (for nested messages or variable-size collections).
-        /// </summary>
-        private static bool NeedsNestedCalculator(string valueType)
-        {
-            // Primitive types don't need nested calculator
-            if (IsPrimitiveType(valueType))
-                return false;
-
-            // Arrays with fixed-size elements don't need nested calculator
-            if (valueType.EndsWith("[]"))
-            {
-                var elementType = valueType.Substring(0, valueType.Length - 2);
-                return GetFixedElementSize(elementType) == 0;
-            }
-
-            // List/HashSet with fixed-size elements don't need nested calculator
-            if (IsListType(valueType) || IsHashSetType(valueType))
-            {
-                var elementType = GetCollectionElementType(valueType);
-                return GetFixedElementSize(elementType) == 0;
-            }
-
-            // Nested message types need nested calculator
-            return true;
-        }
-
+        // Delegated to TypeHelper
+        private static int GetFixedElementSize(string elementType) => TypeHelper.GetFixedElementSize(elementType);
+        private static bool NeedsNestedCalculator(string valueType) => TypeHelper.NeedsNestedCalculator(valueType);
         private static string GetDictionaryCreationType(string mapType, string keyType, string valueType)
-        {
-            // For List<KeyValuePair<K,V>> we need to use List for intermediate storage
-            if (mapType.Contains("List<") && mapType.Contains("KeyValuePair<"))
-            {
-                return $"global::System.Collections.Generic.List<global::System.Collections.Generic.KeyValuePair<{keyType}, {valueType}>>";
-            }
-
-            // For ICollection<KeyValuePair<K,V>> use List
-            if (mapType.Contains("ICollection<") && mapType.Contains("KeyValuePair<"))
-            {
-                return $"global::System.Collections.Generic.List<global::System.Collections.Generic.KeyValuePair<{keyType}, {valueType}>>";
-            }
-
-            // For interface types (IDictionary<K,V>), use Dictionary<K,V>
-            if (mapType.Contains("IDictionary<"))
-            {
-                return $"global::System.Collections.Generic.Dictionary<{keyType}, {valueType}>";
-            }
-
-            // For concrete Dictionary<K,V> or custom types, use the full type
-            if (mapType.Contains("Dictionary<") && !IsCustomDictionaryType(mapType))
-            {
-                return $"global::System.Collections.Generic.Dictionary<{keyType}, {valueType}>";
-            }
-
-            // For custom derived dictionary types, use the full qualified type name
-            return $"global::{mapType}";
-        }
-
-        private static bool IsCustomDictionaryType(string mapType)
-        {
-            return !mapType.StartsWith("System.Collections.Generic.Dictionary<") &&
-                   !mapType.StartsWith("Dictionary<") &&
-                   mapType.Contains("Dictionary");
-        }
-
-        private static bool IsKeyValuePairCollection(string mapType)
-        {
-            return (mapType.Contains("List<") || mapType.Contains("ICollection<")) &&
-                   mapType.Contains("KeyValuePair<");
-        }
-
-        private static bool IsPrimitiveType(string typeName)
-        {
-            return TypeMapping.IsSimpleType(typeName) ||
-                   TypeMapping.NormalizeTypeName(typeName) == "System.Guid";
-        }
-
-        private static bool IsListType(string typeName)
-        {
-            return typeName.Contains("List<") && !typeName.Contains("KeyValuePair");
-        }
-
-        private static bool IsHashSetType(string typeName)
-        {
-            return typeName.Contains("HashSet<");
-        }
-
-        private static string GetCollectionElementType(string collectionType)
-        {
-            // Extract element type from List<T> or HashSet<T>
-            var startIndex = collectionType.IndexOf('<') + 1;
-            var endIndex = collectionType.LastIndexOf('>');
-            if (startIndex > 0 && endIndex > startIndex)
-            {
-                return collectionType.Substring(startIndex, endIndex - startIndex);
-            }
-            return collectionType;
-        }
+            => TypeHelper.GetDictionaryCreationType(mapType, keyType, valueType);
+        private static bool IsKeyValuePairCollection(string mapType) => TypeHelper.IsKeyValuePairCollection(mapType);
+        private static bool IsPrimitiveType(string typeName) => TypeHelper.IsPrimitiveType(typeName);
+        private static bool IsListType(string typeName) => TypeHelper.IsListType(typeName);
+        private static bool IsHashSetType(string typeName) => TypeHelper.IsHashSetType(typeName);
+        private static string GetCollectionElementType(string collectionType) => TypeHelper.GetCollectionElementType(collectionType);
 
         #endregion
     }

@@ -1,3 +1,5 @@
+using GProtobuf.Generator.V2.Handlers;
+
 namespace GProtobuf.Generator.V2.CodeGeneration
 {
     /// <summary>
@@ -8,7 +10,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
     internal class BufferWriterGenerator : StreamWriterGenerator
     {
         public BufferWriterGenerator(StringBuilderWithIndent sb, TypeRegistry registry)
-            : base(sb, registry, "Buffer")
+            : base(sb, registry, null, "Buffer")
+        {
+        }
+
+        public BufferWriterGenerator(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry)
+            : base(sb, registry, virtualMapRegistry, "Buffer")
         {
         }
     }

@@ -1,4 +1,5 @@
 using System;
+using GProtobuf.Generator.V2.Handlers.Core;
 
 namespace GProtobuf.Generator.V2.Handlers
 {
@@ -400,18 +401,7 @@ namespace GProtobuf.Generator.V2.Handlers
         /// </summary>
         private void GenerateWriteTag(StringBuilderWithIndent sb, int fieldId, WireType wireType, string writerVar)
         {
-            var (bytesString, byteCount) = TypeMapping.PrecomputeTagBytes(fieldId, wireType);
-
-            if (byteCount == 1)
-            {
-                sb.AppendIndentedLine($"{writerVar}.WriteSingleByte({bytesString});");
-            }
-            else
-            {
-                // Use static ReadOnlySpan from Tags class for zero-allocation
-                var tagPropertyName = CodeGeneration.TagsGenerator.GetTagPropertyName(fieldId, wireType);
-                sb.AppendIndentedLine($"{writerVar}.WriteBytes(Tags.{tagPropertyName});");
-            }
+            TagGenerator.WriteTag(sb, fieldId, wireType, writerVar);
         }
 
         /// <summary>
@@ -419,8 +409,7 @@ namespace GProtobuf.Generator.V2.Handlers
         /// </summary>
         private void GenerateSizeTag(StringBuilderWithIndent sb, int fieldId, WireType wireType, string calculatorVar)
         {
-            var (_, byteCount) = TypeMapping.PrecomputeTagBytes(fieldId, wireType);
-            sb.AppendIndentedLine($"{calculatorVar}.AddByteLength({byteCount});");
+            TagGenerator.AddTagSize(sb, fieldId, wireType, calculatorVar);
         }
 
         #endregion

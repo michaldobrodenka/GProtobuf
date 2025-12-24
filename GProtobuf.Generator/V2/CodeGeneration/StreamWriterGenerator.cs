@@ -1,5 +1,7 @@
 using System.Collections.Generic;
 using GProtobuf.Generator.V2.Handlers;
+using GProtobuf.Generator.V2.Handlers.Core;
+using GProtobuf.Generator.V2.Helpers;
 
 namespace GProtobuf.Generator.V2.CodeGeneration
 {
@@ -12,22 +14,36 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         private readonly StringBuilderWithIndent _sb;
         private readonly TypeRegistry _registry;
         private readonly PrimitiveHandler _primitiveHandler;
+        private readonly VirtualMapTypeRegistry _virtualMapRegistry;
         private readonly string _writerType;
         private readonly string _className;
+        private readonly string _writerKind;
 
         public StreamWriterGenerator(StringBuilderWithIndent sb, TypeRegistry registry)
-            : this(sb, registry, "Stream")
+            : this(sb, registry, null, "Stream")
         {
         }
 
-        protected StreamWriterGenerator(StringBuilderWithIndent sb, TypeRegistry registry, string writerKind)
+        public StreamWriterGenerator(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry)
+            : this(sb, registry, virtualMapRegistry, "Stream")
+        {
+        }
+
+        protected StreamWriterGenerator(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry, string writerKind)
         {
             _sb = sb;
             _registry = registry;
             _primitiveHandler = new PrimitiveHandler();
+            _virtualMapRegistry = virtualMapRegistry ?? new VirtualMapTypeRegistry();
+            _writerKind = writerKind;
             _writerType = $"global::GProtobuf.Core.{writerKind}Writer";
             _className = $"{writerKind}Writers";
         }
+
+        /// <summary>
+        /// Gets the virtual map type registry used by this generator.
+        /// </summary>
+        public VirtualMapTypeRegistry VirtualMapRegistry => _virtualMapRegistry;
 
         /// <summary>
         /// Generates complete Writers class for all types.
@@ -42,8 +58,29 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 GenerateWriteMethod(type);
             }
 
+            // Generate virtual map entry writers
+            GenerateVirtualMapEntryWriters();
+
             _sb.EndBlock();
             _sb.AppendNewLine();
+        }
+
+        /// <summary>
+        /// Generates writer methods for all registered virtual map entry types.
+        /// </summary>
+        private void GenerateVirtualMapEntryWriters()
+        {
+            var virtualTypes = _virtualMapRegistry.GetAllTypes();
+            if (virtualTypes.Count == 0) return;
+
+            _sb.AppendNewLine();
+            _sb.AppendIndentedLine("// Virtual Map Entry Writers");
+
+            var generator = new VirtualMapEntryGenerator(_sb, _virtualMapRegistry, _writerKind);
+            foreach (var virtualType in virtualTypes)
+            {
+                generator.GenerateWriter(virtualType);
+            }
         }
 
         #region Write Method
@@ -377,7 +414,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateMapFieldWrite(ProtoMemberAttribute member, string sourceVar)
         {
-            var mapHandler = new MapHandler(_sb);
+            var mapHandler = new MapHandler(_sb, _virtualMapRegistry, _className);
             mapHandler.GenerateWrite(member, sourceVar);
         }
 
@@ -437,50 +474,25 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateWriteTag(int fieldId, WireType wireType)
         {
-            var (bytesString, byteCount) = TypeMapping.PrecomputeTagBytes(fieldId, wireType);
-
-            if (byteCount == 1)
-            {
-                _sb.AppendIndentedLine($"writer.WriteSingleByte({bytesString});");
-            }
-            else
-            {
-                // Use static ReadOnlySpan from Tags class for zero-allocation
-                var tagPropertyName = TagsGenerator.GetTagPropertyName(fieldId, wireType);
-                _sb.AppendIndentedLine($"writer.WriteBytes(Tags.{tagPropertyName});");
-            }
+            TagGenerator.WriteTag(_sb, fieldId, wireType);
         }
 
         private void GenerateSizeTag(StringBuilderWithIndent sb, string calculatorVar, int fieldId, WireType wireType)
         {
-            var (_, byteCount) = TypeMapping.PrecomputeTagBytes(fieldId, wireType);
-            sb.AppendIndentedLine($"{calculatorVar}.AddByteLength({byteCount});");
+            TagGenerator.AddTagSize(sb, fieldId, wireType, calculatorVar);
         }
 
         #endregion
 
         #region Helpers
 
-        private bool HasInheritance(TypeDefinition type)
-        {
-            return (type.ProtoIncludes != null && type.ProtoIncludes.Count > 0)
-                   || _registry.IsDerivedType(type.FullName);
-        }
+        private bool HasInheritance(TypeDefinition type) =>
+            GeneratorHelpers.HasInheritance(type, _registry);
 
         private static string GetClassName(string fullName) => TypeNameHelper.GetClassName(fullName);
 
-        private static ProtoIncludeAttribute FindProtoInclude(TypeDefinition type, string derivedTypeName)
-        {
-            if (type?.ProtoIncludes == null)
-                return null;
-
-            foreach (var include in type.ProtoIncludes)
-            {
-                if (include.Type == derivedTypeName)
-                    return include;
-            }
-            return null;
-        }
+        private static ProtoIncludeAttribute FindProtoInclude(TypeDefinition type, string derivedTypeName) =>
+            GeneratorHelpers.FindProtoInclude(type, derivedTypeName);
 
         #endregion
     }

@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using System.Text;
 
-namespace GProtobuf.Generator.V2
+namespace GProtobuf.Generator.V2.Helpers
 {
     /// <summary>
     /// Helper class for sanitizing type names for use in generated method names.

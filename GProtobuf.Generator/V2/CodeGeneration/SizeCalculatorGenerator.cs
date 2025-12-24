@@ -1,5 +1,7 @@
 using System.Collections.Generic;
 using GProtobuf.Generator.V2.Handlers;
+using GProtobuf.Generator.V2.Handlers.Core;
+using GProtobuf.Generator.V2.Helpers;
 
 namespace GProtobuf.Generator.V2.CodeGeneration
 {
@@ -12,13 +14,25 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         private readonly StringBuilderWithIndent _sb;
         private readonly TypeRegistry _registry;
         private readonly PrimitiveHandler _primitiveHandler;
+        private readonly VirtualMapTypeRegistry _virtualMapRegistry;
 
         public SizeCalculatorGenerator(StringBuilderWithIndent sb, TypeRegistry registry)
+            : this(sb, registry, null)
+        {
+        }
+
+        public SizeCalculatorGenerator(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry)
         {
             _sb = sb;
             _registry = registry;
             _primitiveHandler = new PrimitiveHandler();
+            _virtualMapRegistry = virtualMapRegistry ?? new VirtualMapTypeRegistry();
         }
+
+        /// <summary>
+        /// Gets the virtual map type registry used by this generator.
+        /// </summary>
+        public VirtualMapTypeRegistry VirtualMapRegistry => _virtualMapRegistry;
 
         /// <summary>
         /// Generates complete SizeCalculators class for all types.
@@ -34,8 +48,29 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 GenerateCalculateContentSizeMethod(type);
             }
 
+            // Generate virtual map entry size calculators
+            GenerateVirtualMapEntrySizeCalculators();
+
             _sb.EndBlock();
             _sb.AppendNewLine();
+        }
+
+        /// <summary>
+        /// Generates size calculator methods for all registered virtual map entry types.
+        /// </summary>
+        private void GenerateVirtualMapEntrySizeCalculators()
+        {
+            var virtualTypes = _virtualMapRegistry.GetAllTypes();
+            if (virtualTypes.Count == 0) return;
+
+            _sb.AppendNewLine();
+            _sb.AppendIndentedLine("// Virtual Map Entry Size Calculators");
+
+            var generator = new VirtualMapEntryGenerator(_sb, _virtualMapRegistry);
+            foreach (var virtualType in virtualTypes)
+            {
+                generator.GenerateSizeCalculator(virtualType);
+            }
         }
 
         #region CalculateSize Method
@@ -208,7 +243,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 return;
 
             // Add tag size for this inner wrapper
-            var (_, tagBytes) = TypeMapping.PrecomputeTagBytes(protoInclude.FieldId, WireType.Len);
+            var tagBytes = TagGenerator.GetTagByteCount(protoInclude.FieldId, WireType.Len);
             _sb.AppendIndentedLine($"{parentCalcVar}.AddByteLength({tagBytes});");
 
             // Calculate inner wrapper content size
@@ -320,7 +355,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateMapFieldSize(ProtoMemberAttribute member, string sourceVar)
         {
-            var mapHandler = new MapHandler(_sb);
+            var mapHandler = new MapHandler(_sb, _virtualMapRegistry);
             mapHandler.GenerateSize(member, sourceVar);
         }
 
@@ -378,8 +413,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateSizeTag(int fieldId, WireType wireType)
         {
-            var (_, byteCount) = TypeMapping.PrecomputeTagBytes(fieldId, wireType);
-            _sb.AppendIndentedLine($"calculator.AddByteLength({byteCount});");
+            TagGenerator.AddTagSize(_sb, fieldId, wireType);
         }
 
         #endregion
@@ -388,18 +422,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private static string GetClassName(string fullName) => TypeNameHelper.GetClassName(fullName);
 
-        private static ProtoIncludeAttribute FindProtoInclude(TypeDefinition type, string derivedTypeName)
-        {
-            if (type?.ProtoIncludes == null)
-                return null;
-
-            foreach (var include in type.ProtoIncludes)
-            {
-                if (include.Type == derivedTypeName)
-                    return include;
-            }
-            return null;
-        }
+        private static ProtoIncludeAttribute FindProtoInclude(TypeDefinition type, string derivedTypeName) =>
+            GeneratorHelpers.FindProtoInclude(type, derivedTypeName);
 
         #endregion
     }

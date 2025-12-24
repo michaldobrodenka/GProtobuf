@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using GProtobuf.Generator.V2.Handlers;
+using GProtobuf.Generator.V2.Helpers;
 
 namespace GProtobuf.Generator.V2.CodeGeneration
 {
@@ -12,13 +13,25 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         private readonly StringBuilderWithIndent _sb;
         private readonly TypeRegistry _registry;
         private readonly PrimitiveHandler _primitiveHandler;
+        private readonly VirtualMapTypeRegistry _virtualMapRegistry;
 
         public SpanReaderGenerator(StringBuilderWithIndent sb, TypeRegistry registry)
+            : this(sb, registry, null)
+        {
+        }
+
+        public SpanReaderGenerator(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry)
         {
             _sb = sb;
             _registry = registry;
             _primitiveHandler = new PrimitiveHandler();
+            _virtualMapRegistry = virtualMapRegistry ?? new VirtualMapTypeRegistry();
         }
+
+        /// <summary>
+        /// Gets the virtual map type registry used by this generator.
+        /// </summary>
+        public VirtualMapTypeRegistry VirtualMapRegistry => _virtualMapRegistry;
 
         /// <summary>
         /// Generates complete SpanReaders class for all types.
@@ -35,8 +48,29 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 GeneratePopulateMethod(type);
             }
 
+            // Generate virtual map entry readers
+            GenerateVirtualMapEntryReaders();
+
             _sb.EndBlock();
             _sb.AppendNewLine();
+        }
+
+        /// <summary>
+        /// Generates reader methods for all registered virtual map entry types.
+        /// </summary>
+        private void GenerateVirtualMapEntryReaders()
+        {
+            var virtualTypes = _virtualMapRegistry.GetAllTypes();
+            if (virtualTypes.Count == 0) return;
+
+            _sb.AppendNewLine();
+            _sb.AppendIndentedLine("// Virtual Map Entry Readers");
+
+            var generator = new VirtualMapEntryGenerator(_sb, _virtualMapRegistry);
+            foreach (var virtualType in virtualTypes)
+            {
+                generator.GenerateReader(virtualType);
+            }
         }
 
         #region Read Method
@@ -254,7 +288,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             if (member.IsMap)
             {
-                var mapHandler = new MapHandler(_sb);
+                var mapHandler = new MapHandler(_sb, _virtualMapRegistry);
                 mapHandler.GenerateRead(member, $"result.{member.Name}");
             }
             else if (member.IsCollection)
@@ -571,7 +605,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // Route to appropriate handler based on field type
             if (member.IsMap)
             {
-                var mapHandler = new MapHandler(_sb);
+                var mapHandler = new MapHandler(_sb, _virtualMapRegistry);
                 mapHandler.GenerateRead(member, $"instance.{member.Name}");
             }
             else if (member.IsCollection)
@@ -827,7 +861,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateMapFieldReadBody(ProtoMemberAttribute member)
         {
-            var mapHandler = new MapHandler(_sb);
+            var mapHandler = new MapHandler(_sb, _virtualMapRegistry);
             mapHandler.GenerateRead(member, $"result.{member.Name}");
         }
 
@@ -884,7 +918,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateMapFieldRead(ProtoMemberAttribute member)
         {
-            var mapHandler = new MapHandler(_sb);
+            var mapHandler = new MapHandler(_sb, _virtualMapRegistry);
             mapHandler.GenerateRead(member, $"result.{member.Name}");
             _sb.AppendIndentedLine("continue;");
         }
@@ -939,11 +973,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         #region Helpers
 
-        private bool HasInheritance(TypeDefinition type)
-        {
-            return (type.ProtoIncludes != null && type.ProtoIncludes.Count > 0)
-                   || _registry.IsDerivedType(type.FullName);
-        }
+        private bool HasInheritance(TypeDefinition type) =>
+            GeneratorHelpers.HasInheritance(type, _registry);
 
         private static string GetClassName(string fullName) => TypeNameHelper.GetClassName(fullName);
 

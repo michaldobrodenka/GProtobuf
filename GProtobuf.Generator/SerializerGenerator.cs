@@ -339,27 +339,54 @@ public sealed class SerializerGenerator : IIncrementalGenerator
         // Check for IDictionary<TKey, TValue> interface
         var dictionaryInterface = namedType.AllInterfaces.FirstOrDefault(i =>
             i.OriginalDefinition?.ToDisplayString() == "System.Collections.Generic.IDictionary<TKey, TValue>");
-        
+
         if (dictionaryInterface != null && dictionaryInterface.TypeArguments.Length == 2)
         {
             var keyTypeSymbol = dictionaryInterface.TypeArguments[0];
             var valueTypeSymbol = dictionaryInterface.TypeArguments[1];
-            
+
             var keyType = keyTypeSymbol.ToDisplayString();
             var valueType = valueTypeSymbol.ToDisplayString();
-            
+
             // Check if key is enum
             bool keyIsEnum = keyTypeSymbol.TypeKind == TypeKind.Enum;
             string keyEnumUnderlyingType = keyIsEnum ? ((INamedTypeSymbol)keyTypeSymbol).EnumUnderlyingType?.ToDisplayString() ?? "System.Int32" : null;
-            
+
             // Check if value is enum
             bool valueIsEnum = valueTypeSymbol.TypeKind == TypeKind.Enum;
             string valueEnumUnderlyingType = valueIsEnum ? ((INamedTypeSymbol)valueTypeSymbol).EnumUnderlyingType?.ToDisplayString() ?? "System.Int32" : null;
-            
+
             // Arrays as keys are supported
             return (true, keyType, valueType, keyIsEnum, keyEnumUnderlyingType, valueIsEnum, valueEnumUnderlyingType);
         }
-        
+
+        // Check for List<KeyValuePair<TKey, TValue>> or ICollection<KeyValuePair<TKey, TValue>>
+        // These are treated as map types in protobuf-net
+        // ToDo: revisit this implementation later
+        if (namedType.TypeArguments.Length == 1)
+        {
+            var elementType = namedType.TypeArguments[0] as INamedTypeSymbol;
+            if (elementType?.OriginalDefinition?.ToDisplayString() == "System.Collections.Generic.KeyValuePair<TKey, TValue>"
+                && elementType.TypeArguments.Length == 2)
+            {
+                var keyTypeSymbol = elementType.TypeArguments[0];
+                var valueTypeSymbol = elementType.TypeArguments[1];
+
+                var keyType = keyTypeSymbol.ToDisplayString();
+                var valueType = valueTypeSymbol.ToDisplayString();
+
+                // Check if key is enum
+                bool keyIsEnum = keyTypeSymbol.TypeKind == TypeKind.Enum;
+                string keyEnumUnderlyingType = keyIsEnum ? ((INamedTypeSymbol)keyTypeSymbol).EnumUnderlyingType?.ToDisplayString() ?? "System.Int32" : null;
+
+                // Check if value is enum
+                bool valueIsEnum = valueTypeSymbol.TypeKind == TypeKind.Enum;
+                string valueEnumUnderlyingType = valueIsEnum ? ((INamedTypeSymbol)valueTypeSymbol).EnumUnderlyingType?.ToDisplayString() ?? "System.Int32" : null;
+
+                return (true, keyType, valueType, keyIsEnum, keyEnumUnderlyingType, valueIsEnum, valueEnumUnderlyingType);
+            }
+        }
+
         return (false, null, null, false, null, false, null);
     }
 }
