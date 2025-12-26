@@ -1,7 +1,7 @@
 using GProtobuf.Generator.V2.Helpers;
 using System.Collections.Generic;
 
-namespace GProtobuf.Generator.V2
+namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
 {
     /// <summary>
     /// Tracks virtual map entry types that have been registered for generation.
@@ -22,6 +22,7 @@ namespace GProtobuf.Generator.V2
         {
             var typeName = VirtualTypeNameGenerator.GetMapEntryTypeName(keyType, valueType);
 
+            // Checks if a type has been registered.
             if (_registeredTypes.TryGetValue(typeName, out var existing))
             {
                 return existing;
@@ -53,11 +54,6 @@ namespace GProtobuf.Generator.V2
         /// Gets all registered virtual types in order of registration.
         /// </summary>
         public IReadOnlyList<VirtualMapEntryInfo> GetAllTypes() => _orderedTypes;
-
-        /// <summary>
-        /// Checks if a type has been registered.
-        /// </summary>
-        public bool IsRegistered(string typeName) => _registeredTypes.ContainsKey(typeName);
 
         /// <summary>
         /// Gets info for a registered type.

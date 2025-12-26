@@ -1,6 +1,8 @@
 using System.Collections.Generic;
+using GProtobuf.Generator.V2.CodeGeneration.Core;
 using GProtobuf.Generator.V2.Handlers;
 using GProtobuf.Generator.V2.Handlers.Core;
+using GProtobuf.Generator.V2.Handlers.VirtualTypes;
 using GProtobuf.Generator.V2.Helpers;
 
 namespace GProtobuf.Generator.V2.CodeGeneration
@@ -14,6 +16,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         private readonly StringBuilderWithIndent _sb;
         private readonly TypeRegistry _registry;
         private readonly PrimitiveHandler _primitiveHandler;
+        private readonly CollectionHandler _collectionHandler;
         private readonly VirtualMapTypeRegistry _virtualMapRegistry;
 
         public SizeCalculatorGenerator(StringBuilderWithIndent sb, TypeRegistry registry)
@@ -26,6 +29,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb = sb;
             _registry = registry;
             _primitiveHandler = new PrimitiveHandler();
+            _collectionHandler = new CollectionHandler(sb);
             _virtualMapRegistry = virtualMapRegistry ?? new VirtualMapTypeRegistry();
         }
 
@@ -81,7 +85,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// </summary>
         private void GenerateCalculateSizeMethod(TypeDefinition type)
         {
-            var className = GetClassName(type.FullName);
+            var className = TypeNameHelper.GetClassName(type.FullName);
 
             _sb.AppendIndentedLine($"public static void Calculate{className}Size(ref global::GProtobuf.Core.WriteSizeCalculator calculator, global::{type.FullName} obj)");
             _sb.StartNewBlock();
@@ -125,12 +129,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             foreach (var include in type.ProtoIncludes)
             {
-                var derivedClassName = GetClassName(include.Type);
+                var derivedClassName = TypeNameHelper.GetClassName(include.Type);
                 _sb.AppendIndentedLine($"case global::{include.Type} derived:");
                 _sb.IncreaseIndent();
 
                 // Add tag size for ProtoInclude
-                GenerateSizeTag(include.FieldId, WireType.Len);
+                TagCodeHelper.AddTagSize(_sb, include.FieldId, WireType.Len);
 
                 // Calculate content size first
                 _sb.AppendIndentedLine("var lengthBefore = calculator.Length;");
@@ -198,20 +202,20 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var currentTypeName = chain[levelIndex];
             var nextTypeName = chain[levelIndex + 1];
             var currentType = _registry.GetByFullName(currentTypeName);
-            var protoInclude = FindProtoInclude(currentType, nextTypeName);
+            var protoInclude = GeneratorHelpers.FindProtoInclude(currentType, nextTypeName);
 
             if (protoInclude == null)
                 return;
 
             // Add tag size for this wrapper
-            GenerateSizeTag(protoInclude.FieldId, WireType.Len);
+            TagCodeHelper.AddTagSize(_sb, protoInclude.FieldId, WireType.Len);
 
             // Calculate wrapper content size (includes nested wrappers + this level's fields)
             var calcVar = $"wrapperCalc{levelIndex}";
             _sb.AppendIndentedLine($"var {calcVar} = new global::GProtobuf.Core.WriteSizeCalculator();");
 
             // Add this level's (nextType's) content size
-            var nextClassName = GetClassName(nextTypeName);
+            var nextClassName = TypeNameHelper.GetClassName(nextTypeName);
             _sb.AppendIndentedLine($"Calculate{nextClassName}ContentSize(ref {calcVar}, obj);");
 
             // If there's another level, add its wrapper size recursively
@@ -237,13 +241,13 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var currentTypeName = chain[levelIndex];
             var nextTypeName = chain[levelIndex + 1];
             var currentType = _registry.GetByFullName(currentTypeName);
-            var protoInclude = FindProtoInclude(currentType, nextTypeName);
+            var protoInclude = GeneratorHelpers.FindProtoInclude(currentType, nextTypeName);
 
             if (protoInclude == null)
                 return;
 
             // Add tag size for this inner wrapper
-            var tagBytes = TagGenerator.GetTagByteCount(protoInclude.FieldId, WireType.Len);
+            var tagBytes = TagCodeHelper.GetTagByteCount(protoInclude.FieldId, WireType.Len);
             _sb.AppendIndentedLine($"{parentCalcVar}.AddByteLength({tagBytes});");
 
             // Calculate inner wrapper content size
@@ -251,7 +255,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine($"var {calcVar} = new global::GProtobuf.Core.WriteSizeCalculator();");
 
             // Add next level's content size
-            var nextClassName = GetClassName(nextTypeName);
+            var nextClassName = TypeNameHelper.GetClassName(nextTypeName);
             _sb.AppendIndentedLine($"Calculate{nextClassName}ContentSize(ref {calcVar}, obj);");
 
             // If there's another level, add its wrapper size recursively
@@ -275,7 +279,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// </summary>
         private void GenerateCalculateContentSizeMethod(TypeDefinition type)
         {
-            var className = GetClassName(type.FullName);
+            var className = TypeNameHelper.GetClassName(type.FullName);
 
             _sb.AppendIndentedLine($"public static void Calculate{className}ContentSize(ref global::GProtobuf.Core.WriteSizeCalculator calculator, global::{type.FullName} obj)");
             _sb.StartNewBlock();
@@ -339,7 +343,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 _sb.AppendIndentedLine($"if ({sourceVar}.HasValue)");
                 _sb.StartNewBlock();
-                GenerateSizeTag(member.FieldId, WireType.VarInt);
+                TagCodeHelper.AddTagSize(_sb, member.FieldId, WireType.VarInt);
                 _sb.AppendIndentedLine($"calculator.WriteVarInt32((int){sourceVar}.Value);");
                 _sb.EndBlock();
             }
@@ -347,7 +351,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 _sb.AppendIndentedLine($"if ((int){sourceVar} != 0)");
                 _sb.StartNewBlock();
-                GenerateSizeTag(member.FieldId, WireType.VarInt);
+                TagCodeHelper.AddTagSize(_sb, member.FieldId, WireType.VarInt);
                 _sb.AppendIndentedLine($"calculator.WriteVarInt32((int){sourceVar});");
                 _sb.EndBlock();
             }
@@ -384,19 +388,23 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
             else
             {
-                // TODO: Implement with CollectionHandler for complex types
-                _sb.AppendIndentedLine($"// TODO: Collection field {member.Name}");
+                // Complex type collection
+                var elementClassName = TypeNameHelper.GetClassName(member.CollectionElementType);
+                _collectionHandler.GenerateComplexCollectionSize(
+                    member.FieldId,
+                    sourceVar,
+                    elementClassName);
             }
         }
 
         private void GenerateComplexTypeSize(ProtoMemberAttribute member, string sourceVar)
         {
-            var typeName = GetClassName(member.Type);
+            var typeName = TypeNameHelper.GetClassName(member.Type);
 
             _sb.AppendIndentedLine($"if ({sourceVar} != null)");
             _sb.StartNewBlock();
 
-            GenerateSizeTag(member.FieldId, WireType.Len);
+            TagCodeHelper.AddTagSize(_sb, member.FieldId, WireType.Len);
 
             // Calculate content size first
             _sb.AppendIndentedLine("var lengthBefore = calculator.Length;");
@@ -409,22 +417,5 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         #endregion
 
-        #region Tag Generation
-
-        private void GenerateSizeTag(int fieldId, WireType wireType)
-        {
-            TagGenerator.AddTagSize(_sb, fieldId, wireType);
-        }
-
-        #endregion
-
-        #region Helpers
-
-        private static string GetClassName(string fullName) => TypeNameHelper.GetClassName(fullName);
-
-        private static ProtoIncludeAttribute FindProtoInclude(TypeDefinition type, string derivedTypeName) =>
-            GeneratorHelpers.FindProtoInclude(type, derivedTypeName);
-
-        #endregion
     }
 }

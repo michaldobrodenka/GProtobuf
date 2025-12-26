@@ -1,5 +1,7 @@
 using System.Collections.Generic;
+using GProtobuf.Generator.V2.CodeGeneration.Core;
 using GProtobuf.Generator.V2.Handlers;
+using GProtobuf.Generator.V2.Handlers.VirtualTypes;
 using GProtobuf.Generator.V2.Helpers;
 
 namespace GProtobuf.Generator.V2.CodeGeneration
@@ -13,6 +15,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         private readonly StringBuilderWithIndent _sb;
         private readonly TypeRegistry _registry;
         private readonly PrimitiveHandler _primitiveHandler;
+        private readonly CollectionHandler _collectionHandler;
         private readonly VirtualMapTypeRegistry _virtualMapRegistry;
 
         public SpanReaderGenerator(StringBuilderWithIndent sb, TypeRegistry registry)
@@ -25,6 +28,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb = sb;
             _registry = registry;
             _primitiveHandler = new PrimitiveHandler();
+            _collectionHandler = new CollectionHandler(sb);
             _virtualMapRegistry = virtualMapRegistry ?? new VirtualMapTypeRegistry();
         }
 
@@ -81,12 +85,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// </summary>
         private void GenerateReadMethod(TypeDefinition type)
         {
-            var className = GetClassName(type.FullName);
+            var className = TypeNameHelper.GetClassName(type.FullName);
 
             _sb.AppendIndentedLine($"public static global::{type.FullName} Read{className}(ref SpanReader reader)");
             _sb.StartNewBlock();
 
-            bool hasInheritance = HasInheritance(type);
+            bool hasInheritance = GeneratorHelpers.HasInheritance(type, _registry);
 
             if (!hasInheritance)
             {
@@ -222,7 +226,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             if (levelIndex + 1 < chain.Count)
             {
                 var nextTypeName = chain[levelIndex + 1];
-                var protoInclude = FindProtoInclude(currentType, nextTypeName);
+                var protoInclude = GeneratorHelpers.FindProtoInclude(currentType, nextTypeName);
 
                 if (protoInclude != null)
                 {
@@ -297,7 +301,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
             else if (member.IsEnum)
             {
-                var typeName = GetClassName(member.Type);
+                var typeName = TypeNameHelper.GetClassName(member.Type);
                 _sb.AppendIndentedLine($"result.{member.Name} = ({typeName}){readerVar}.ReadVarInt32();");
             }
             else if (_primitiveHandler.CanHandle(member.Type))
@@ -353,30 +357,20 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
             else
             {
-                _sb.AppendIndentedLine($"// TODO: Collection field {member.Name}");
+                // Complex type collection (for derived types)
+                // Note: readerVar might not be "reader", but CollectionHandler uses "reader" internally
+                // For now, we skip this field - will need enhancement if derived types need complex collections
+                _sb.AppendIndentedLine($"// TODO: Complex collection field {member.Name} in derived type - needs enhancement");
                 _sb.AppendIndentedLine($"{readerVar}.SkipField({wireTypeVar});");
             }
         }
 
         private void GenerateComplexTypeReadBodyWithReader(ProtoMemberAttribute member, string readerVar)
         {
-            var typeName = GetClassName(member.Type);
+            var typeName = TypeNameHelper.GetClassName(member.Type);
             _sb.AppendIndentedLine($"var length = {readerVar}.ReadVarInt32();");
             _sb.AppendIndentedLine($"var nestedReader = new SpanReader({readerVar}.GetSlice(length));");
             _sb.AppendIndentedLine($"result.{member.Name} = Read{typeName}Content(ref nestedReader);");
-        }
-
-        private static ProtoIncludeAttribute FindProtoInclude(TypeDefinition type, string derivedTypeName)
-        {
-            if (type?.ProtoIncludes == null)
-                return null;
-
-            foreach (var include in type.ProtoIncludes)
-            {
-                if (include.Type == derivedTypeName)
-                    return include;
-            }
-            return null;
         }
 
         #endregion
@@ -389,12 +383,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// </summary>
         private void GenerateReadContentMethod(TypeDefinition type)
         {
-            var className = GetClassName(type.FullName);
+            var className = TypeNameHelper.GetClassName(type.FullName);
 
             _sb.AppendIndentedLine($"public static global::{type.FullName} Read{className}Content(ref SpanReader reader)");
             _sb.StartNewBlock();
 
-            bool hasInheritance = HasInheritance(type);
+            bool hasInheritance = GeneratorHelpers.HasInheritance(type, _registry);
 
             if (!hasInheritance)
             {
@@ -520,12 +514,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             if (type.IsAbstract)
                 return;
 
-            var className = GetClassName(type.FullName);
+            var className = TypeNameHelper.GetClassName(type.FullName);
 
             _sb.AppendIndentedLine($"public static void Populate{className}(ref SpanReader reader, global::{type.FullName} instance)");
             _sb.StartNewBlock();
 
-            bool hasInheritance = HasInheritance(type);
+            bool hasInheritance = GeneratorHelpers.HasInheritance(type, _registry);
 
             if (!hasInheritance)
             {
@@ -614,7 +608,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
             else if (member.IsEnum)
             {
-                var typeName = GetClassName(member.Type);
+                var typeName = TypeNameHelper.GetClassName(member.Type);
                 _sb.AppendIndentedLine($"instance.{member.Name} = ({typeName})reader.ReadVarInt32();");
             }
             else if (_primitiveHandler.CanHandle(member.Type))
@@ -624,7 +618,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             else
             {
                 // Complex type - nested message
-                var typeName = GetClassName(member.Type);
+                var typeName = TypeNameHelper.GetClassName(member.Type);
                 _sb.AppendIndentedLine("var length = reader.ReadVarInt32();");
                 _sb.AppendIndentedLine("var nestedReader = new SpanReader(reader.GetSlice(length));");
                 _sb.AppendIndentedLine($"instance.{member.Name} = Read{typeName}Content(ref nestedReader);");
@@ -672,8 +666,14 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
             else
             {
-                _sb.AppendIndentedLine($"// TODO: Collection field {member.Name}");
-                _sb.AppendIndentedLine("reader.SkipField(wireType);");
+                // Complex type collection (for Populate methods)
+                var elementClassName = TypeNameHelper.GetClassName(member.CollectionElementType);
+                _collectionHandler.GenerateComplexCollectionRead(
+                    $"instance.{member.Name}",
+                    member.CollectionElementType,
+                    elementClassName,
+                    member.CollectionKind,
+                    member.Type);
             }
         }
 
@@ -787,7 +787,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateProtoIncludeReadCase(ProtoIncludeAttribute include)
         {
-            var derivedClassName = GetClassName(include.Type);
+            var derivedClassName = TypeNameHelper.GetClassName(include.Type);
 
             _sb.AppendIndentedLine($"case {include.FieldId}:");
             _sb.IncreaseIndent();
@@ -840,7 +840,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateProtoIncludeRead(ProtoIncludeAttribute include)
         {
-            var derivedClassName = GetClassName(include.Type);
+            var derivedClassName = TypeNameHelper.GetClassName(include.Type);
 
             _sb.AppendIndentedLine($"if (fieldId == {include.FieldId})");
             _sb.StartNewBlock();
@@ -855,7 +855,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         // Body versions for switch case (without continue/break - those are added by GenerateFieldReadCase)
         private void GenerateEnumFieldReadBody(ProtoMemberAttribute member)
         {
-            var typeName = GetClassName(member.Type);
+            var typeName = TypeNameHelper.GetClassName(member.Type);
             _sb.AppendIndentedLine($"result.{member.Name} = ({typeName})reader.ReadVarInt32();");
         }
 
@@ -894,15 +894,20 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
             else
             {
-                // TODO: Implement with CollectionHandler for complex types
-                _sb.AppendIndentedLine($"// TODO: Collection field {member.Name}");
-                _sb.AppendIndentedLine("reader.SkipField(wireType);");
+                // Complex type collection
+                var elementClassName = TypeNameHelper.GetClassName(member.CollectionElementType);
+                _collectionHandler.GenerateComplexCollectionRead(
+                    $"result.{member.Name}",
+                    member.CollectionElementType,
+                    elementClassName,
+                    member.CollectionKind,
+                    member.Type);
             }
         }
 
         private void GenerateComplexTypeReadBody(ProtoMemberAttribute member)
         {
-            var typeName = GetClassName(member.Type);
+            var typeName = TypeNameHelper.GetClassName(member.Type);
             _sb.AppendIndentedLine("var length = reader.ReadVarInt32();");
             _sb.AppendIndentedLine("var nestedReader = new SpanReader(reader.GetSlice(length));");
             _sb.AppendIndentedLine($"result.{member.Name} = Read{typeName}Content(ref nestedReader);");
@@ -911,7 +916,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         // Legacy versions for if-else (with continue)
         private void GenerateEnumFieldRead(ProtoMemberAttribute member)
         {
-            var typeName = GetClassName(member.Type);
+            var typeName = TypeNameHelper.GetClassName(member.Type);
             _sb.AppendIndentedLine($"result.{member.Name} = ({typeName})reader.ReadVarInt32();");
             _sb.AppendIndentedLine("continue;");
         }
@@ -953,30 +958,26 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
             else
             {
-                // TODO: Implement with CollectionHandler for complex types
-                _sb.AppendIndentedLine($"// TODO: Collection field {member.Name}");
-                _sb.AppendIndentedLine("reader.SkipField(wireType);");
+                // Complex type collection
+                var elementClassName = TypeNameHelper.GetClassName(member.CollectionElementType);
+                _collectionHandler.GenerateComplexCollectionRead(
+                    $"result.{member.Name}",
+                    member.CollectionElementType,
+                    elementClassName,
+                    member.CollectionKind,
+                    member.Type);
                 _sb.AppendIndentedLine("continue;");
             }
         }
 
         private void GenerateComplexTypeRead(ProtoMemberAttribute member)
         {
-            var typeName = GetClassName(member.Type);
+            var typeName = TypeNameHelper.GetClassName(member.Type);
             _sb.AppendIndentedLine("var length = reader.ReadVarInt32();");
             _sb.AppendIndentedLine("var nestedReader = new SpanReader(reader.GetSlice(length));");
             _sb.AppendIndentedLine($"result.{member.Name} = Read{typeName}Content(ref nestedReader);");
             _sb.AppendIndentedLine("continue;");
         }
-
-        #endregion
-
-        #region Helpers
-
-        private bool HasInheritance(TypeDefinition type) =>
-            GeneratorHelpers.HasInheritance(type, _registry);
-
-        private static string GetClassName(string fullName) => TypeNameHelper.GetClassName(fullName);
 
         #endregion
     }

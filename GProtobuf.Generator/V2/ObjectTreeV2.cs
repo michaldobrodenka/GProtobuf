@@ -1,8 +1,8 @@
 using System.Collections.Generic;
 using System.Linq;
 using GProtobuf.Generator.V2.CodeGeneration;
-using GProtobuf.Generator.V2.Handlers;
-using GProtobuf.Generator.V2.CodeGeneration.Core;
+using GProtobuf.Generator.V2.Handlers.VirtualTypes;
+using GProtobuf.Generator.V2.Helpers;
 
 namespace GProtobuf.Generator.V2
 {
@@ -12,8 +12,8 @@ namespace GProtobuf.Generator.V2
     /// </summary>
     public class ObjectTreeV2
     {
-        private readonly TypeRegistry _registry = new TypeRegistry();
-        private readonly VirtualMapTypeRegistry _virtualMapRegistry = new VirtualMapTypeRegistry();
+        private readonly TypeRegistry _registry = new();
+        private readonly VirtualMapTypeRegistry _virtualMapRegistry = new();
 
         #region Type Registration
 
@@ -75,7 +75,7 @@ namespace GProtobuf.Generator.V2
 
             foreach (var type in types)
             {
-                var className = GetClassName(type.FullName);
+                var className = TypeNameHelper.GetClassName(type.FullName);
 
                 // Deserialize method - creates new instance
                 sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(ReadOnlySpan<byte> data)");
@@ -112,7 +112,7 @@ namespace GProtobuf.Generator.V2
 
             foreach (var type in types)
             {
-                var className = GetClassName(type.FullName);
+                var className = TypeNameHelper.GetClassName(type.FullName);
 
                 // Stream serializer
                 sb.AppendIndentedLine($"public static void Serialize{className}(Stream stream, global::{type.FullName} obj)");
@@ -158,12 +158,6 @@ namespace GProtobuf.Generator.V2
         {
             sb.EndBlock(); // Close namespace
         }
-
-        #endregion
-
-        #region Helpers
-
-        private static string GetClassName(string fullName) => TypeNameHelper.GetClassName(fullName);
 
         #endregion
     }

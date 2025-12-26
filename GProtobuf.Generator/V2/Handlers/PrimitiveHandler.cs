@@ -401,7 +401,7 @@ namespace GProtobuf.Generator.V2.Handlers
         /// </summary>
         private void GenerateWriteTag(StringBuilderWithIndent sb, int fieldId, WireType wireType, string writerVar)
         {
-            TagGenerator.WriteTag(sb, fieldId, wireType, writerVar);
+            TagCodeHelper.WriteTag(sb, fieldId, wireType, writerVar);
         }
 
         /// <summary>
@@ -409,7 +409,7 @@ namespace GProtobuf.Generator.V2.Handlers
         /// </summary>
         private void GenerateSizeTag(StringBuilderWithIndent sb, int fieldId, WireType wireType, string calculatorVar)
         {
-            TagGenerator.AddTagSize(sb, fieldId, wireType, calculatorVar);
+            TagCodeHelper.AddTagSize(sb, fieldId, wireType, calculatorVar);
         }
 
         #endregion

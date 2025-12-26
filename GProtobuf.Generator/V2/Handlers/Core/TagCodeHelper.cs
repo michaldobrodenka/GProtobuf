@@ -6,7 +6,7 @@ namespace GProtobuf.Generator.V2.Handlers.Core
     /// Centralized tag generation for serialization code.
     /// Handles both single-byte and multi-byte tag writing.
     /// </summary>
-    internal static class TagGenerator
+    internal static class TagCodeHelper
     {
         /// <summary>
         /// Generates code to write a tag with optimal method (single byte or span).

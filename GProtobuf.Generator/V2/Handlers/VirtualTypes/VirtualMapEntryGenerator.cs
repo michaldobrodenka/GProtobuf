@@ -1,7 +1,7 @@
 using System;
 using GProtobuf.Generator.V2.Handlers.Core;
 
-namespace GProtobuf.Generator.V2.Handlers
+namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
 {
     /// <summary>
     /// Generates serialization code for virtual map entry types.

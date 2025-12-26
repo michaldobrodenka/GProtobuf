@@ -1,4 +1,4 @@
-namespace GProtobuf.Generator.V2.Helpers
+namespace GProtobuf.Generator.V2.CodeGeneration.Core
 {
     /// <summary>
     /// Common helper methods shared across code generators.

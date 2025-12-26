@@ -21,15 +21,6 @@ namespace GProtobuf.Generator.V2
         }
 
         /// <summary>
-        /// Generates a method-safe name for serialization methods.
-        /// Example: ReadMapEntry_Int32_String, WriteMapEntry_CustomClass_ListOfDictionary...
-        /// </summary>
-        public static string GetMapEntryMethodSuffix(string keyType, string valueType)
-        {
-            return GetMapEntryTypeName(keyType, valueType);
-        }
-
-        /// <summary>
         /// Converts a type name to a safe identifier that can be used in generated code.
         /// Handles generics, nested types, and primitives.
         /// </summary>

@@ -1,5 +1,6 @@
 using System;
 using GProtobuf.Generator.V2.Handlers.Core;
+using GProtobuf.Generator.V2.Handlers.VirtualTypes;
 using GProtobuf.Generator.V2.Helpers;
 
 namespace GProtobuf.Generator.V2.Handlers
@@ -16,10 +17,6 @@ namespace GProtobuf.Generator.V2.Handlers
         private readonly StringBuilderWithIndent _sb;
         private readonly VirtualMapTypeRegistry _registry;
         private readonly string _writerClassName;
-
-        public MapHandler(StringBuilderWithIndent sb) : this(sb, null, "StreamWriters")
-        {
-        }
 
         public MapHandler(StringBuilderWithIndent sb, VirtualMapTypeRegistry registry)
             : this(sb, registry, "StreamWriters")
@@ -114,7 +111,7 @@ namespace GProtobuf.Generator.V2.Handlers
         {
             var keyType = member.MapKeyType;
             var valueType = member.MapValueType;
-            var dictCreationType = GetDictionaryCreationType(member.Type, keyType, valueType);
+            var dictCreationType = TypeHelper.GetDictionaryCreationType(member.Type, keyType, valueType);
 
             // Check if we should use virtual type
             var virtualInfo = RegisterIfNeeded(member);
@@ -146,7 +143,7 @@ namespace GProtobuf.Generator.V2.Handlers
             _sb.AppendIndentedLine("if (entry.success)");
             _sb.StartNewBlock();
 
-            if (IsKeyValuePairCollection(member.Type))
+            if (TypeHelper.IsKeyValuePairCollection(member.Type))
             {
                 _sb.AppendIndentedLine($"{targetVar}.Add(new global::System.Collections.Generic.KeyValuePair<{member.MapKeyType}, {member.MapValueType}>(entry.key, entry.value));");
             }
@@ -207,7 +204,7 @@ namespace GProtobuf.Generator.V2.Handlers
             _sb.EndBlock(); // while
 
             // Add to dictionary/collection
-            if (IsKeyValuePairCollection(member.Type))
+            if (TypeHelper.IsKeyValuePairCollection(member.Type))
             {
                 _sb.AppendIndentedLine($"{targetVar}.Add(new global::System.Collections.Generic.KeyValuePair<{keyType}, {valueType}>(key, value));");
             }
@@ -269,7 +266,7 @@ namespace GProtobuf.Generator.V2.Handlers
             {
                 GeneratePackedArrayValueRead(valueType);
             }
-            else if (IsListType(valueType) || IsHashSetType(valueType))
+            else if (TypeHelper.IsListType(valueType) || TypeHelper.IsHashSetType(valueType))
             {
                 GenerateCollectionValueRead(valueType);
             }
@@ -318,8 +315,8 @@ namespace GProtobuf.Generator.V2.Handlers
 
         private void GenerateCollectionValueRead(string valueType)
         {
-            var elementType = GetCollectionElementType(valueType);
-            var isHashSet = IsHashSetType(valueType);
+            var elementType = TypeHelper.GetCollectionElementType(valueType);
+            var isHashSet = TypeHelper.IsHashSetType(valueType);
             var shortElementType = TypeMapping.GetShortTypeName(elementType);
 
             // Try to use optimized packed array read, then convert to collection
@@ -416,13 +413,13 @@ namespace GProtobuf.Generator.V2.Handlers
             _sb.StartNewBlock();
 
             // Skip null values for reference types
-            if (!IsPrimitiveType(member.MapValueType) && !member.MapValueType.EndsWith("[]"))
+            if (!TypeHelper.IsPrimitiveType(member.MapValueType) && !member.MapValueType.EndsWith("[]"))
             {
                 _sb.AppendIndentedLine("if (kvp.Value == null) continue;");
             }
 
             // Write tag
-            GenerateWriteTag(member.FieldId, WireType.Len);
+            TagCodeHelper.WriteTag(_sb, member.FieldId, WireType.Len);
 
             // Call the virtual writer method
             _sb.AppendIndentedLine($"{_writerClassName}.{methodName}(ref writer, kvp.Key, kvp.Value);");
@@ -439,7 +436,7 @@ namespace GProtobuf.Generator.V2.Handlers
             _sb.AppendIndentedLine("var entryCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
 
             // Create nested calculator if value type needs it (nested messages or variable-size collections)
-            if (NeedsNestedCalculator(valueType))
+            if (TypeHelper.NeedsNestedCalculator(valueType))
             {
                 _sb.AppendIndentedLine("var nestedCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
             }
@@ -448,7 +445,7 @@ namespace GProtobuf.Generator.V2.Handlers
             _sb.StartNewBlock();
 
             // Skip null values for reference types
-            if (!IsPrimitiveType(valueType) && !valueType.EndsWith("[]"))
+            if (!TypeHelper.IsPrimitiveType(valueType) && !valueType.EndsWith("[]"))
             {
                 _sb.AppendIndentedLine("if (kvp.Value == null) continue;");
             }
@@ -460,7 +457,7 @@ namespace GProtobuf.Generator.V2.Handlers
             GenerateEntrySizeCalculation(member, "kvp.Key", "kvp.Value", "entryCalc");
 
             // Write tag and length
-            GenerateWriteTag(member.FieldId, WireType.Len);
+            TagCodeHelper.WriteTag(_sb, member.FieldId, WireType.Len);
             _sb.AppendIndentedLine("writer.WriteVarUInt32((uint)entryCalc.Length);");
 
             // Write key
@@ -475,7 +472,7 @@ namespace GProtobuf.Generator.V2.Handlers
         private void GeneratePrimitiveWrite(string typeName, string sourceVar, bool isEnum, int fieldId)
         {
             var wireType = isEnum ? WireType.VarInt : TypeMapping.GetWireType(typeName, DataFormat.Default);
-            GenerateWriteTagBytes(fieldId, wireType);
+            TagCodeHelper.WriteSingleByteTag(_sb, fieldId, wireType);
 
             if (isEnum)
             {
@@ -503,7 +500,7 @@ namespace GProtobuf.Generator.V2.Handlers
         private void GenerateValueWrite(string valueType, string sourceVar, bool isEnum)
         {
             var wireType = isEnum ? WireType.VarInt : TypeMapping.GetWireType(valueType, DataFormat.Default);
-            GenerateWriteTagBytes(2, wireType);
+            TagCodeHelper.WriteSingleByteTag(_sb, 2, wireType);
 
             if (isEnum)
             {
@@ -526,7 +523,7 @@ namespace GProtobuf.Generator.V2.Handlers
             }
 
             // Complex types
-            if (valueType.EndsWith("[]") || IsListType(valueType) || IsHashSetType(valueType))
+            if (valueType.EndsWith("[]") || TypeHelper.IsListType(valueType) || TypeHelper.IsHashSetType(valueType))
             {
                 GenerateCollectionValueWrite(valueType, sourceVar);
             }
@@ -545,9 +542,9 @@ namespace GProtobuf.Generator.V2.Handlers
         {
             var elementType = valueType.EndsWith("[]")
                 ? valueType.Substring(0, valueType.Length - 2)
-                : GetCollectionElementType(valueType);
+                : TypeHelper.GetCollectionElementType(valueType);
 
-            var fixedSize = GetFixedElementSize(elementType);
+            var fixedSize = TypeHelper.GetFixedElementSize(elementType);
 
             if (fixedSize > 0)
             {
@@ -662,7 +659,7 @@ namespace GProtobuf.Generator.V2.Handlers
             _sb.StartNewBlock();
 
             // Skip null values for reference types
-            if (!IsPrimitiveType(member.MapValueType) && !member.MapValueType.EndsWith("[]"))
+            if (!TypeHelper.IsPrimitiveType(member.MapValueType) && !member.MapValueType.EndsWith("[]"))
             {
                 _sb.AppendIndentedLine("if (kvp.Value == null) continue;");
             }
@@ -688,7 +685,7 @@ namespace GProtobuf.Generator.V2.Handlers
             _sb.AppendIndentedLine("var entryCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
 
             // Create nested calculator if value type needs it (nested messages or variable-size collections)
-            if (NeedsNestedCalculator(valueType))
+            if (TypeHelper.NeedsNestedCalculator(valueType))
             {
                 _sb.AppendIndentedLine("var nestedCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
             }
@@ -697,7 +694,7 @@ namespace GProtobuf.Generator.V2.Handlers
             _sb.StartNewBlock();
 
             // Skip null values for reference types
-            if (!IsPrimitiveType(valueType) && !valueType.EndsWith("[]"))
+            if (!TypeHelper.IsPrimitiveType(valueType) && !valueType.EndsWith("[]"))
             {
                 _sb.AppendIndentedLine("if (kvp.Value == null) continue;");
             }
@@ -782,7 +779,7 @@ namespace GProtobuf.Generator.V2.Handlers
             }
 
             // Complex types
-            if (valueType.EndsWith("[]") || IsListType(valueType) || IsHashSetType(valueType))
+            if (valueType.EndsWith("[]") || TypeHelper.IsListType(valueType) || TypeHelper.IsHashSetType(valueType))
             {
                 GenerateCollectionValueSizeCalculation(valueType, sourceVar, calcVar);
             }
@@ -801,9 +798,9 @@ namespace GProtobuf.Generator.V2.Handlers
         {
             var elementType = valueType.EndsWith("[]")
                 ? valueType.Substring(0, valueType.Length - 2)
-                : GetCollectionElementType(valueType);
+                : TypeHelper.GetCollectionElementType(valueType);
 
-            var fixedSize = GetFixedElementSize(elementType);
+            var fixedSize = TypeHelper.GetFixedElementSize(elementType);
 
             if (fixedSize > 0)
             {
@@ -834,30 +831,5 @@ namespace GProtobuf.Generator.V2.Handlers
 
         #endregion
 
-        #region Helpers
-
-        private void GenerateWriteTag(int fieldId, WireType wireType)
-        {
-            TagGenerator.WriteTag(_sb, fieldId, wireType);
-        }
-
-        private void GenerateWriteTagBytes(int fieldId, WireType wireType)
-        {
-            // For map entry tags (1 and 2), they're always single byte
-            TagGenerator.WriteSingleByteTag(_sb, fieldId, wireType);
-        }
-
-        // Delegated to TypeHelper
-        private static int GetFixedElementSize(string elementType) => TypeHelper.GetFixedElementSize(elementType);
-        private static bool NeedsNestedCalculator(string valueType) => TypeHelper.NeedsNestedCalculator(valueType);
-        private static string GetDictionaryCreationType(string mapType, string keyType, string valueType)
-            => TypeHelper.GetDictionaryCreationType(mapType, keyType, valueType);
-        private static bool IsKeyValuePairCollection(string mapType) => TypeHelper.IsKeyValuePairCollection(mapType);
-        private static bool IsPrimitiveType(string typeName) => TypeHelper.IsPrimitiveType(typeName);
-        private static bool IsListType(string typeName) => TypeHelper.IsListType(typeName);
-        private static bool IsHashSetType(string typeName) => TypeHelper.IsHashSetType(typeName);
-        private static string GetCollectionElementType(string collectionType) => TypeHelper.GetCollectionElementType(collectionType);
-
-        #endregion
     }
 }

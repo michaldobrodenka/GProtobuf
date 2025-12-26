@@ -1,4 +1,4 @@
-using GProtobuf.Generator.V2.Handlers;
+using GProtobuf.Generator.V2.Handlers.VirtualTypes;
 
 namespace GProtobuf.Generator.V2.CodeGeneration
 {
