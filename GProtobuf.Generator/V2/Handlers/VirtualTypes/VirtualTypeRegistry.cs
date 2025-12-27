@@ -11,6 +11,12 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
     {
         private readonly Dictionary<string, VirtualMapEntryInfo> _registeredTypes = new();
         private readonly List<VirtualMapEntryInfo> _orderedTypes = new();
+        private readonly VirtualTupleTypeRegistry _tupleRegistry;
+
+        public VirtualMapTypeRegistry(VirtualTupleTypeRegistry tupleRegistry = null)
+        {
+            _tupleRegistry = tupleRegistry;
+        }
 
         /// <summary>
         /// Registers a map entry type for generation if not already registered.
@@ -77,6 +83,13 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         /// </summary>
         private void RegisterNestedTypes(VirtualMapEntryInfo info)
         {
+            // Register nested Tuples in key and value types
+            if (_tupleRegistry != null)
+            {
+                _tupleRegistry.RegisterNestedTuples(info.KeyType);
+                _tupleRegistry.RegisterNestedTuples(info.ValueType);
+            }
+
             // If value is a dictionary, register it
             if (info.ValueTypeInfo.IsDictionary)
             {

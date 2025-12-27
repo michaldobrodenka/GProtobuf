@@ -9,6 +9,17 @@ namespace GProtobuf.Generator.V2.Helpers
     internal static class TypeNameHelper
     {
         /// <summary>
+        /// Gets a safe method name from a full type name, removing "System." prefixes.
+        /// Use this for generating method names in virtual type generators (Tuple, Map, etc).
+        /// </summary>
+        public static string GetSafeMethodName(string fullName)
+        {
+            var className = GetClassName(fullName);
+            // Remove "System." prefix that may appear in nested type names
+            return className?.Replace("System.", "") ?? className;
+        }
+
+        /// <summary>
         /// Gets a valid C# method name from a full type name.
         /// Handles nullable types, value tuples, and generic types.
         /// </summary>
@@ -171,20 +182,20 @@ namespace GProtobuf.Generator.V2.Helpers
         {
             return typeName switch
             {
-                "string" or "String" => "String",
-                "int" or "Int32" => "Int",
-                "long" or "Int64" => "Long",
-                "float" or "Single" => "Float",
-                "double" or "Double" => "Double",
-                "bool" or "Boolean" => "Bool",
-                "byte" or "Byte" => "Byte",
-                "short" or "Int16" => "Short",
-                "uint" or "UInt32" => "UInt",
-                "ulong" or "UInt64" => "ULong",
-                "ushort" or "UInt16" => "UShort",
-                "sbyte" or "SByte" => "SByte",
-                "decimal" or "Decimal" => "Decimal",
-                "char" or "Char" => "Char",
+                "string" or "String" => "string",
+                "int" or "Int32" => "int",
+                "long" or "Int64" => "long",
+                "float" or "Single" => "float",
+                "double" or "Double" => "double",
+                "bool" or "Boolean" => "bool",
+                "byte" or "Byte" => "byte",
+                "short" or "Int16" => "short",
+                "uint" or "UInt32" => "uint",
+                "ulong" or "UInt64" => "ulong",
+                "ushort" or "UInt16" => "ushort",
+                "sbyte" or "SByte" => "sbyte",
+                "decimal" or "Decimal" => "decimal",
+                "char" or "Char" => "char",
                 _ => typeName
             };
         }

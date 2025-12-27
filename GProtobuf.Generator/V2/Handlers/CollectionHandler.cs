@@ -59,7 +59,8 @@ namespace GProtobuf.Generator.V2.Handlers
             string elementTypeName,
             string elementClassName,
             CollectionKind collectionKind,
-            string collectionTypeName)
+            string collectionTypeName,
+            string readerVar = "reader")
         {
             var shortElementType = TypeMapping.GetShortTypeName(elementTypeName);
 
@@ -73,8 +74,8 @@ namespace GProtobuf.Generator.V2.Handlers
             _sb.EndBlock();
 
             // Read length-prefixed item
-            _sb.AppendIndentedLine("var length = reader.ReadVarInt32();");
-            _sb.AppendIndentedLine("var nestedReader = new SpanReader(reader.GetSlice(length));");
+            _sb.AppendIndentedLine($"var length = {readerVar}.ReadVarInt32();");
+            _sb.AppendIndentedLine($"var nestedReader = new SpanReader({readerVar}.GetSlice(length));");
             _sb.AppendIndentedLine($"var item = Read{elementClassName}Content(ref nestedReader);");
 
             // Add to collection
@@ -87,24 +88,34 @@ namespace GProtobuf.Generator.V2.Handlers
             {
                 case CollectionKind.Array:
                     // Arrays can't be used with Add(), so use List
-                    return $"new global::System.Collections.Generic.List<{elementType}>()";
+                    return GetListInit(elementType);
 
                 case CollectionKind.InterfaceCollection:
                 case CollectionKind.ConcreteCollection:
-                    // Check for specific types
+                    // Use TypeHelper for reliable type detection
                     if (collectionTypeName != null)
                     {
-                        if (collectionTypeName.Contains("HashSet<"))
-                            return $"new global::System.Collections.Generic.HashSet<{elementType}>()";
-                        if (collectionTypeName.Contains("List<"))
-                            return $"new global::System.Collections.Generic.List<{elementType}>()";
+                        if (TypeHelper.IsHashSetType(collectionTypeName))
+                            return GetHashSetInit(elementType);
+                        if (TypeHelper.IsListType(collectionTypeName))
+                            return GetListInit(elementType);
                     }
                     // Default to List
-                    return $"new global::System.Collections.Generic.List<{elementType}>()";
+                    return GetListInit(elementType);
 
                 default:
-                    return $"new global::System.Collections.Generic.List<{elementType}>()";
+                    return GetListInit(elementType);
             }
+        }
+
+        private static string GetListInit(string elementType)
+        {
+            return $"new global::System.Collections.Generic.List<{elementType}>()";
+        }
+
+        private static string GetHashSetInit(string elementType)
+        {
+            return $"new global::System.Collections.Generic.HashSet<{elementType}>()";
         }
 
         #endregion

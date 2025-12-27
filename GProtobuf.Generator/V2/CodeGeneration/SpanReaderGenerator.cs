@@ -16,7 +16,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         private readonly TypeRegistry _registry;
         private readonly PrimitiveHandler _primitiveHandler;
         private readonly CollectionHandler _collectionHandler;
+        private readonly TupleHandler _tupleHandler;
         private readonly VirtualMapTypeRegistry _virtualMapRegistry;
+        private readonly VirtualTupleTypeRegistry _virtualTupleRegistry;
 
         public SpanReaderGenerator(StringBuilderWithIndent sb, TypeRegistry registry)
             : this(sb, registry, null)
@@ -29,13 +31,20 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _registry = registry;
             _primitiveHandler = new PrimitiveHandler();
             _collectionHandler = new CollectionHandler(sb);
-            _virtualMapRegistry = virtualMapRegistry ?? new VirtualMapTypeRegistry();
+            _virtualTupleRegistry = new VirtualTupleTypeRegistry();
+            _virtualMapRegistry = virtualMapRegistry ?? new VirtualMapTypeRegistry(_virtualTupleRegistry);
+            _tupleHandler = new TupleHandler(sb, _virtualTupleRegistry);
         }
 
         /// <summary>
         /// Gets the virtual map type registry used by this generator.
         /// </summary>
         public VirtualMapTypeRegistry VirtualMapRegistry => _virtualMapRegistry;
+
+        /// <summary>
+        /// Gets the virtual tuple type registry used by this generator.
+        /// </summary>
+        public VirtualTupleTypeRegistry VirtualTupleRegistry => _virtualTupleRegistry;
 
         /// <summary>
         /// Generates complete SpanReaders class for all types.
@@ -54,6 +63,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             // Generate virtual map entry readers
             GenerateVirtualMapEntryReaders();
+
+            // Generate virtual tuple readers
+            GenerateVirtualTupleReaders();
 
             _sb.EndBlock();
             _sb.AppendNewLine();
@@ -74,6 +86,24 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             foreach (var virtualType in virtualTypes)
             {
                 generator.GenerateReader(virtualType);
+            }
+        }
+
+        /// <summary>
+        /// Generates reader methods for all registered virtual tuple types.
+        /// </summary>
+        private void GenerateVirtualTupleReaders()
+        {
+            var tupleTypes = _virtualTupleRegistry.GetAllTypes();
+            if (tupleTypes.Count == 0) return;
+
+            _sb.AppendNewLine();
+            _sb.AppendIndentedLine("// Virtual Tuple Readers");
+
+            var generator = new VirtualTupleGenerator(_sb);
+            foreach (var tupleInfo in tupleTypes)
+            {
+                generator.GenerateReader(tupleInfo);
             }
         }
 
@@ -304,6 +334,10 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 var typeName = TypeNameHelper.GetClassName(member.Type);
                 _sb.AppendIndentedLine($"result.{member.Name} = ({typeName}){readerVar}.ReadVarInt32();");
             }
+            else if (TupleHandler.IsTupleType(member.Type))
+            {
+                _tupleHandler.GenerateTupleRead($"result.{member.Name}", member.Type, readerVar);
+            }
             else if (_primitiveHandler.CanHandle(member.Type))
             {
                 _primitiveHandler.GenerateRead(_sb, $"result.{member.Name}", member.Type, member.DataFormat, readerVar, wireTypeVar);
@@ -355,13 +389,28 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                         readerVar);
                 }
             }
+            else if (TupleHandler.IsTupleType(member.CollectionElementType))
+            {
+                // Tuple collection - generate inline
+                _tupleHandler.GenerateTupleCollectionRead(
+                    $"result.{member.Name}",
+                    member.CollectionElementType,
+                    member.FieldId,
+                    member.CollectionKind,
+                    member.Type,
+                    readerVar);
+            }
             else
             {
-                // Complex type collection (for derived types)
-                // Note: readerVar might not be "reader", but CollectionHandler uses "reader" internally
-                // For now, we skip this field - will need enhancement if derived types need complex collections
-                _sb.AppendIndentedLine($"// TODO: Complex collection field {member.Name} in derived type - needs enhancement");
-                _sb.AppendIndentedLine($"{readerVar}.SkipField({wireTypeVar});");
+                // Complex type collection
+                var elementClassName = TypeNameHelper.GetClassName(member.CollectionElementType);
+                _collectionHandler.GenerateComplexCollectionRead(
+                    $"result.{member.Name}",
+                    member.CollectionElementType,
+                    elementClassName,
+                    member.CollectionKind,
+                    member.Type,
+                    readerVar);
             }
         }
 
@@ -611,6 +660,10 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 var typeName = TypeNameHelper.GetClassName(member.Type);
                 _sb.AppendIndentedLine($"instance.{member.Name} = ({typeName})reader.ReadVarInt32();");
             }
+            else if (TupleHandler.IsTupleType(member.Type))
+            {
+                _tupleHandler.GenerateTupleRead($"instance.{member.Name}", member.Type);
+            }
             else if (_primitiveHandler.CanHandle(member.Type))
             {
                 _primitiveHandler.GenerateRead(_sb, $"instance.{member.Name}", member.Type, member.DataFormat);
@@ -664,6 +717,17 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                         member.Type);
                 }
             }
+            else if (TupleHandler.IsTupleType(member.CollectionElementType))
+            {
+                // Tuple collection - generate inline
+                _tupleHandler.GenerateTupleCollectionRead(
+                    $"instance.{member.Name}",
+                    member.CollectionElementType,
+                    member.FieldId,
+                    member.CollectionKind,
+                    member.Type,
+                    "reader");
+            }
             else
             {
                 // Complex type collection (for Populate methods)
@@ -710,6 +774,10 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             else if (member.IsEnum)
             {
                 GenerateEnumFieldReadBody(member);
+            }
+            else if (TupleHandler.IsTupleType(member.Type))
+            {
+                _tupleHandler.GenerateTupleRead($"result.{member.Name}", member.Type);
             }
             else if (_primitiveHandler.CanHandle(member.Type))
             {
@@ -760,6 +828,10 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             else if (member.IsEnum)
             {
                 GenerateEnumFieldReadBody(member);
+            }
+            else if (TupleHandler.IsTupleType(member.Type))
+            {
+                _tupleHandler.GenerateTupleRead($"result.{member.Name}", member.Type);
             }
             else if (_primitiveHandler.CanHandle(member.Type))
             {
@@ -822,6 +894,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             else if (member.IsEnum)
             {
                 GenerateEnumFieldRead(member);
+            }
+            else if (TupleHandler.IsTupleType(member.Type))
+            {
+                _tupleHandler.GenerateTupleRead($"result.{member.Name}", member.Type);
+                _sb.AppendIndentedLine("continue;");
             }
             else if (_primitiveHandler.CanHandle(member.Type))
             {
@@ -892,6 +969,17 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                         member.Type);
                 }
             }
+            else if (TupleHandler.IsTupleType(member.CollectionElementType))
+            {
+                // Tuple collection - generate inline
+                _tupleHandler.GenerateTupleCollectionRead(
+                    $"result.{member.Name}",
+                    member.CollectionElementType,
+                    member.FieldId,
+                    member.CollectionKind,
+                    member.Type,
+                    "reader");
+            }
             else
             {
                 // Complex type collection
@@ -954,6 +1042,18 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                         member.CollectionKind,
                         member.Type);
                 }
+                _sb.AppendIndentedLine("continue;");
+            }
+            else if (TupleHandler.IsTupleType(member.CollectionElementType))
+            {
+                // Tuple collection - generate inline
+                _tupleHandler.GenerateTupleCollectionRead(
+                    $"result.{member.Name}",
+                    member.CollectionElementType,
+                    member.FieldId,
+                    member.CollectionKind,
+                    member.Type,
+                    "reader");
                 _sb.AppendIndentedLine("continue;");
             }
             else

@@ -43,6 +43,16 @@ namespace GProtobuf.Generator.V2
         }
 
         /// <summary>
+        /// Checks if type can be used in non-packed repeated fields (includes string).
+        /// Note: byte[] is NOT an element type - it's a field type. For List&lt;byte&gt;, element is byte (primitive).
+        /// </summary>
+        public static bool IsNonPackedArrayType(string elementTypeName)
+        {
+            var normalized = NormalizeTypeName(elementTypeName);
+            return IsPrimitiveArrayType(normalized) || normalized == "System.String";
+        }
+
+        /// <summary>
         /// Gets the default value expression for skip-if-default check.
         /// Returns null for types that should always be written.
         /// </summary>
@@ -281,6 +291,7 @@ namespace GProtobuf.Generator.V2
                 "System.Double" => $"{readerVar}.ReadFixedDouble()",
                 "System.Boolean" => $"{readerVar}.ReadBool(WireType.VarInt)",
                 "System.Char" => $"(char){readerVar}.ReadVarUInt32()",
+                "System.String" => $"{readerVar}.ReadString(WireType.Len)",
                 _ => null
             };
         }
@@ -407,6 +418,7 @@ namespace GProtobuf.Generator.V2
                 "System.Double" => $"{writerVar}.WriteDouble({valueExpr})",
                 "System.Boolean" => $"{writerVar}.WriteBool({valueExpr})",
                 "System.Char" => $"{writerVar}.WriteVarUInt32((uint){valueExpr})",
+                "System.String" => $"{writerVar}.WriteString({valueExpr})",
                 _ => null
             };
         }

@@ -13,7 +13,6 @@ namespace GProtobuf.Generator.V2
     public class ObjectTreeV2
     {
         private readonly TypeRegistry _registry = new();
-        private readonly VirtualMapTypeRegistry _virtualMapRegistry = new();
 
         #region Type Registration
 
@@ -46,17 +45,17 @@ namespace GProtobuf.Generator.V2
                 // Generate Serializers class (entry point methods)
                 GenerateSerializers(sb, types);
 
-                // Generate SpanReaders class (registers virtual map types during generation)
-                new SpanReaderGenerator(sb, _registry, _virtualMapRegistry).GenerateAll(types);
+                // Generate SpanReaders class (creates own virtual registries)
+                new SpanReaderGenerator(sb, _registry).GenerateAll(types);
 
-                // Generate StreamWriters class (uses shared virtual map registry)
-                new StreamWriterGenerator(sb, _registry, _virtualMapRegistry).GenerateAll(types);
+                // Generate StreamWriters class (creates own virtual registries)
+                new StreamWriterGenerator(sb, _registry).GenerateAll(types);
 
-                // Generate BufferWriters class (same as StreamWriter but for IBufferWriter)
-                new BufferWriterGenerator(sb, _registry, _virtualMapRegistry).GenerateAll(types);
+                // Generate BufferWriters class (creates own virtual registries)
+                new BufferWriterGenerator(sb, _registry).GenerateAll(types);
 
-                // Generate SizeCalculators class (uses shared virtual map registry)
-                new SizeCalculatorGenerator(sb, _registry, _virtualMapRegistry).GenerateAll(types);
+                // Generate SizeCalculators class (creates own virtual registries)
+                new SizeCalculatorGenerator(sb, _registry).GenerateAll(types);
 
                 WriteFooter(sb);
 

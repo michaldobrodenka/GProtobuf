@@ -17,7 +17,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         private readonly TypeRegistry _registry;
         private readonly PrimitiveHandler _primitiveHandler;
         private readonly CollectionHandler _collectionHandler;
+        private readonly TupleHandler _tupleHandler;
         private readonly VirtualMapTypeRegistry _virtualMapRegistry;
+        private readonly VirtualTupleTypeRegistry _virtualTupleRegistry;
         private readonly string _writerType;
         private readonly string _className;
         private readonly string _writerKind;
@@ -38,7 +40,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _registry = registry;
             _primitiveHandler = new PrimitiveHandler();
             _collectionHandler = new CollectionHandler(sb);
-            _virtualMapRegistry = virtualMapRegistry ?? new VirtualMapTypeRegistry();
+            _virtualTupleRegistry = new VirtualTupleTypeRegistry();
+            _virtualMapRegistry = virtualMapRegistry ?? new VirtualMapTypeRegistry(_virtualTupleRegistry);
+            _tupleHandler = new TupleHandler(sb, _virtualTupleRegistry);
             _writerKind = writerKind;
             _writerType = $"global::GProtobuf.Core.{writerKind}Writer";
             _className = $"{writerKind}Writers";
@@ -48,6 +52,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// Gets the virtual map type registry used by this generator.
         /// </summary>
         public VirtualMapTypeRegistry VirtualMapRegistry => _virtualMapRegistry;
+
+        /// <summary>
+        /// Gets the virtual tuple type registry used by this generator.
+        /// </summary>
+        public VirtualTupleTypeRegistry VirtualTupleRegistry => _virtualTupleRegistry;
 
         /// <summary>
         /// Generates complete Writers class for all types.
@@ -64,6 +73,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             // Generate virtual map entry writers
             GenerateVirtualMapEntryWriters();
+
+            // Generate virtual tuple writers
+            GenerateVirtualTupleWriters();
 
             _sb.EndBlock();
             _sb.AppendNewLine();
@@ -84,6 +96,24 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             foreach (var virtualType in virtualTypes)
             {
                 generator.GenerateWriter(virtualType);
+            }
+        }
+
+        /// <summary>
+        /// Generates writer methods for all registered virtual tuple types.
+        /// </summary>
+        private void GenerateVirtualTupleWriters()
+        {
+            var tupleTypes = _virtualTupleRegistry.GetAllTypes();
+            if (tupleTypes.Count == 0) return;
+
+            _sb.AppendNewLine();
+            _sb.AppendIndentedLine("// Virtual Tuple Writers");
+
+            var generator = new VirtualTupleGenerator(_sb, _writerKind);
+            foreach (var tupleInfo in tupleTypes)
+            {
+                generator.GenerateWriter(tupleInfo);
             }
         }
 
@@ -379,6 +409,10 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 GenerateEnumFieldWrite(member, sourceVar);
             }
+            else if (TupleHandler.IsTupleType(member.Type))
+            {
+                _tupleHandler.GenerateTupleWrite(member.FieldId, sourceVar, member.Type);
+            }
             else if (_primitiveHandler.CanHandle(member.Type))
             {
                 _primitiveHandler.GenerateWrite(
@@ -444,6 +478,14 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                         member.DataFormat,
                         member.FieldId);
                 }
+            }
+            else if (TupleHandler.IsTupleType(member.CollectionElementType))
+            {
+                // Tuple collection - generate inline
+                _tupleHandler.GenerateTupleCollectionWrite(
+                    member.FieldId,
+                    sourceVar,
+                    member.CollectionElementType);
             }
             else
             {

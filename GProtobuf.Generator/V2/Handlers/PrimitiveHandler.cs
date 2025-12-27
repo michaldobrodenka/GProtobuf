@@ -24,7 +24,7 @@ namespace GProtobuf.Generator.V2.Handlers
         /// </summary>
         public bool CanHandleCollection(string elementTypeName)
         {
-            return TypeMapping.IsPrimitiveArrayType(elementTypeName);
+            return TypeMapping.IsNonPackedArrayType(elementTypeName);
         }
 
         #endregion
@@ -111,30 +111,57 @@ namespace GProtobuf.Generator.V2.Handlers
             string collectionTypeName,
             string readerVar = "reader")
         {
+            var normalized = TypeMapping.NormalizeTypeName(elementTypeName);
             var shortType = TypeMapping.GetShortTypeName(elementTypeName);
             var elementReadExpr = TypeMapping.GetElementReadExpression(elementTypeName, format, readerVar);
             var expectedWireType = TypeMapping.GetWireTypeString(elementTypeName, format);
 
-            //TODO - revisit variable naming and logic
-            sb.AppendIndentedLine($"using var resultCollector = new global::GProtobuf.Core.UnmanagedCollectionCollector<{shortType}>(stackalloc {shortType}[256 / sizeof({shortType})], 1024);");
-            sb.AppendIndentedLine($"var wireType1 = wireType;");
-            sb.AppendIndentedLine($"var fieldId1 = fieldId;");
-            sb.AppendIndentedLine($"while (fieldId1 == fieldId && wireType1 == {expectedWireType})");
-            sb.StartNewBlock();
-            sb.AppendIndentedLine($"resultCollector.Add({elementReadExpr});");
-            sb.AppendIndentedLine($"if ({readerVar}.EndOfData) break;");
-            sb.AppendIndentedLine($"var p = {readerVar}.Position;");
-            sb.AppendIndentedLine($"(wireType1, fieldId1) = {readerVar}.ReadKey();");
-            sb.AppendIndentedLine($"if (fieldId1 != fieldId)");
-            sb.StartNewBlock();
-            sb.AppendIndentedLine($"{readerVar}.Position = p; // rewind");
-            sb.AppendIndentedLine($"break;");
-            sb.EndBlock();
-            sb.EndBlock();
+            // For managed types (string), use List<T>
+            if (normalized == "System.String")
+            {
+                sb.AppendIndentedLine($"var tempList = new global::System.Collections.Generic.List<{shortType}>();");
+                sb.AppendIndentedLine($"var wireType1 = wireType;");
+                sb.AppendIndentedLine($"var fieldId1 = fieldId;");
+                sb.AppendIndentedLine($"while (fieldId1 == fieldId && wireType1 == {expectedWireType})");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"tempList.Add({elementReadExpr});");
+                sb.AppendIndentedLine($"if ({readerVar}.EndOfData) break;");
+                sb.AppendIndentedLine($"var p = {readerVar}.Position;");
+                sb.AppendIndentedLine($"(wireType1, fieldId1) = {readerVar}.ReadKey();");
+                sb.AppendIndentedLine($"if (fieldId1 != fieldId)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"{readerVar}.Position = p; // rewind");
+                sb.AppendIndentedLine($"break;");
+                sb.EndBlock();
+                sb.EndBlock();
 
-            // Generate assignment based on collection kind
-            var assignment = GenerateCollectionAssignment(targetVar, elementTypeName, collectionKind, collectionTypeName, "resultCollector.ToArray()");
-            sb.AppendIndentedLine(assignment);
+                // Generate assignment based on collection kind
+                var assignment = GenerateCollectionAssignment(targetVar, elementTypeName, collectionKind, collectionTypeName, "tempList.ToArray()");
+                sb.AppendIndentedLine(assignment);
+            }
+            else
+            {
+                // For unmanaged types, use UnmanagedCollectionCollector
+                sb.AppendIndentedLine($"using var resultCollector = new global::GProtobuf.Core.UnmanagedCollectionCollector<{shortType}>(stackalloc {shortType}[256 / sizeof({shortType})], 1024);");
+                sb.AppendIndentedLine($"var wireType1 = wireType;");
+                sb.AppendIndentedLine($"var fieldId1 = fieldId;");
+                sb.AppendIndentedLine($"while (fieldId1 == fieldId && wireType1 == {expectedWireType})");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"resultCollector.Add({elementReadExpr});");
+                sb.AppendIndentedLine($"if ({readerVar}.EndOfData) break;");
+                sb.AppendIndentedLine($"var p = {readerVar}.Position;");
+                sb.AppendIndentedLine($"(wireType1, fieldId1) = {readerVar}.ReadKey();");
+                sb.AppendIndentedLine($"if (fieldId1 != fieldId)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"{readerVar}.Position = p; // rewind");
+                sb.AppendIndentedLine($"break;");
+                sb.EndBlock();
+                sb.EndBlock();
+
+                // Generate assignment based on collection kind
+                var assignment = GenerateCollectionAssignment(targetVar, elementTypeName, collectionKind, collectionTypeName, "resultCollector.ToArray()");
+                sb.AppendIndentedLine(assignment);
+            }
         }
 
         /// <summary>

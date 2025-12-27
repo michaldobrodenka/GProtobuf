@@ -86,27 +86,5 @@ namespace GProtobuf.Generator.V2.Handlers.Core
         }
 
         #endregion
-
-        #region Type Checks
-
-        /// <summary>
-        /// Checks if a type is a special type that requires custom handling.
-        /// </summary>
-        public static bool IsSpecialType(string typeName)
-        {
-            var normalized = TypeMapping.NormalizeTypeName(typeName);
-            return normalized == "System.String" || normalized == "System.Guid";
-        }
-
-        /// <summary>
-        /// Gets the wire type for special types.
-        /// </summary>
-        public static WireType GetWireType(string typeName)
-        {
-            // Both String and Guid use length-delimited wire type
-            return WireType.Len;
-        }
-
-        #endregion
     }
 }

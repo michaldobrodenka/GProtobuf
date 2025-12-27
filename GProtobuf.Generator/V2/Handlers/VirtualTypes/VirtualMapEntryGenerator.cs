@@ -1,5 +1,6 @@
 using System;
 using GProtobuf.Generator.V2.Handlers.Core;
+using GProtobuf.Generator.V2.Helpers;
 
 namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
 {
@@ -135,6 +136,18 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 return;
             }
 
+            // Check if this is a Tuple type (before IsCustomType check)
+            if (TupleHandler.IsTupleType(typeName))
+            {
+                // Tuple type - use virtual Tuple Read method
+                var className = TypeNameHelper.GetSafeMethodName(typeName);
+                _sb.AppendIndentedLine("var msgLength = reader.ReadVarUInt32();");
+                _sb.AppendIndentedLine("var msgSpan = reader.GetSlice((int)msgLength);");
+                _sb.AppendIndentedLine("var scopedReader = new SpanReader(msgSpan);");
+                _sb.AppendIndentedLine($"{targetVar} = SpanReaders.Read{className}Content(ref scopedReader);");
+                return;
+            }
+
             if (typeInfo.IsCustomType)
             {
                 // Custom message type - use scoped reader to limit reading to message bounds
@@ -228,6 +241,16 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                     }
                     _sb.EndBlock();
                 }
+            }
+            else if (TupleHandler.IsTupleType(elementType))
+            {
+                // Collection of Tuple types - use virtual Tuple Read method
+                var className = TypeNameHelper.GetSafeMethodName(elementType);
+                _sb.AppendIndentedLine("var itemLength = reader.ReadVarUInt32();");
+                _sb.AppendIndentedLine("var itemSpan = reader.GetSlice((int)itemLength);");
+                _sb.AppendIndentedLine("var scopedReader = new SpanReader(itemSpan);");
+                _sb.AppendIndentedLine($"var item = SpanReaders.Read{className}Content(ref scopedReader);");
+                _sb.AppendIndentedLine($"{targetVar}.Add(item);");
             }
             else if (elemInfo.IsCustomType)
             {
@@ -341,6 +364,26 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             if (typeInfo.IsCollection)
             {
                 GenerateCollectionFieldSize(sourceVar, typeInfo, calcVar, fieldId);
+                return;
+            }
+
+            // Check if this is a Tuple type (before IsCustomType check)
+            if (TupleHandler.IsTupleType(typeName))
+            {
+                // Tuple type - use virtual Tuple Size method
+                var className = TypeNameHelper.GetSafeMethodName(typeName);
+
+                _sb.AppendIndentedLine($"var tempCalc{fieldId} = new global::GProtobuf.Core.WriteSizeCalculator();");
+                _sb.AppendIndentedLine($"SizeCalculators.Calculate{className}ContentSize(ref tempCalc{fieldId}, {sourceVar});");
+
+                // Cache the length if a cache variable is provided
+                if (lengthCacheVar != null)
+                {
+                    _sb.AppendIndentedLine($"{lengthCacheVar} = tempCalc{fieldId}.Length;");
+                }
+
+                _sb.AppendIndentedLine($"{calcVar}.WriteVarUInt32((uint)tempCalc{fieldId}.Length);");
+                _sb.AppendIndentedLine($"{calcVar}.AddByteLength(tempCalc{fieldId}.Length);");
                 return;
             }
 
@@ -502,6 +545,23 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             if (typeInfo.IsCollection)
             {
                 GenerateCollectionFieldWrite(sourceVar, typeInfo, fieldId);
+                return;
+            }
+
+            // Check if this is a Tuple type (before IsCustomType check)
+            if (TupleHandler.IsTupleType(typeName))
+            {
+                // Tuple type - use virtual Tuple Write method
+                var className = TypeNameHelper.GetSafeMethodName(typeName);
+                var writersClass = _writerClassName != null ? $"{_writerClassName}Writers" : "StreamWriters";
+
+                // Calculate size
+                _sb.AppendIndentedLine($"var writeCalc{fieldId} = new global::GProtobuf.Core.WriteSizeCalculator();");
+                _sb.AppendIndentedLine($"SizeCalculators.Calculate{className}ContentSize(ref writeCalc{fieldId}, {sourceVar});");
+                _sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)writeCalc{fieldId}.Length);");
+
+                // Write content
+                _sb.AppendIndentedLine($"{writersClass}.Write{className}Content(ref writer, {sourceVar});");
                 return;
             }
 

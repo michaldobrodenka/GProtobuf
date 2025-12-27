@@ -1,5 +1,7 @@
 using System;
 using System.Text;
+using GProtobuf.Generator.V2.Handlers;
+using GProtobuf.Generator.V2.Helpers;
 
 namespace GProtobuf.Generator.V2
 {
@@ -11,7 +13,7 @@ namespace GProtobuf.Generator.V2
     {
         /// <summary>
         /// Generates a virtual type name for a map entry with given key and value types.
-        /// Example: MapEntry_Int32_String, MapEntry_CustomClass_ListOfDictionaryOfInt32AndString
+        /// Example: MapEntry_Int32_String, MapEntry`_CustomClass_ListOfDictionaryOfInt32AndString
         /// </summary>
         public static string GetMapEntryTypeName(string keyType, string valueType)
         {
@@ -48,7 +50,7 @@ namespace GProtobuf.Generator.V2
             // Handle Dictionary<K, V>
             if (IsDictionaryType(typeName))
             {
-                var (keyType, valueType) = ParseDictionaryTypes(typeName);
+                var (keyType, valueType) = ParseTwoGenericArgs(typeName);
                 if (keyType != null && valueType != null)
                 {
                     return $"DictionaryOf{GetSafeTypeName(keyType)}And{GetSafeTypeName(valueType)}";
@@ -83,6 +85,13 @@ namespace GProtobuf.Generator.V2
                 {
                     return $"KeyValuePairOf{GetSafeTypeName(keyType)}And{GetSafeTypeName(valueType)}";
                 }
+            }
+
+            // Handle Tuple types (before primitive check to handle System.Tuple specifically)
+            if (TupleHandler.IsTupleType(typeName))
+            {
+                // Use TypeNameHelper.GetSafeMethodName which removes "System." prefixes
+                return TypeNameHelper.GetSafeMethodName(typeName);
             }
 
             // Handle primitive types
@@ -191,15 +200,6 @@ namespace GProtobuf.Generator.V2
         #endregion
 
         #region Generic Parsing
-
-        /// <summary>
-        /// Parses Dictionary&lt;K, V&gt; and returns (keyType, valueType).
-        /// Handles nested generics correctly.
-        /// </summary>
-        private static (string keyType, string valueType) ParseDictionaryTypes(string typeName)
-        {
-            return ParseTwoGenericArgs(typeName);
-        }
 
         /// <summary>
         /// Parses a generic type with two type arguments (e.g., Dictionary&lt;K, V&gt;, KeyValuePair&lt;K, V&gt;).

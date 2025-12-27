@@ -17,7 +17,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         private readonly TypeRegistry _registry;
         private readonly PrimitiveHandler _primitiveHandler;
         private readonly CollectionHandler _collectionHandler;
+        private readonly TupleHandler _tupleHandler;
         private readonly VirtualMapTypeRegistry _virtualMapRegistry;
+        private readonly VirtualTupleTypeRegistry _virtualTupleRegistry;
 
         public SizeCalculatorGenerator(StringBuilderWithIndent sb, TypeRegistry registry)
             : this(sb, registry, null)
@@ -30,13 +32,10 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _registry = registry;
             _primitiveHandler = new PrimitiveHandler();
             _collectionHandler = new CollectionHandler(sb);
-            _virtualMapRegistry = virtualMapRegistry ?? new VirtualMapTypeRegistry();
+            _virtualTupleRegistry = new VirtualTupleTypeRegistry();
+            _virtualMapRegistry = virtualMapRegistry ?? new VirtualMapTypeRegistry(_virtualTupleRegistry);
+            _tupleHandler = new TupleHandler(sb, _virtualTupleRegistry);
         }
-
-        /// <summary>
-        /// Gets the virtual map type registry used by this generator.
-        /// </summary>
-        public VirtualMapTypeRegistry VirtualMapRegistry => _virtualMapRegistry;
 
         /// <summary>
         /// Generates complete SizeCalculators class for all types.
@@ -54,6 +53,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             // Generate virtual map entry size calculators
             GenerateVirtualMapEntrySizeCalculators();
+
+            // Generate virtual tuple size calculators
+            GenerateVirtualTupleSizeCalculators();
 
             _sb.EndBlock();
             _sb.AppendNewLine();
@@ -74,6 +76,24 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             foreach (var virtualType in virtualTypes)
             {
                 generator.GenerateSizeCalculator(virtualType);
+            }
+        }
+
+        /// <summary>
+        /// Generates size calculator methods for all registered virtual tuple types.
+        /// </summary>
+        private void GenerateVirtualTupleSizeCalculators()
+        {
+            var tupleTypes = _virtualTupleRegistry.GetAllTypes();
+            if (tupleTypes.Count == 0) return;
+
+            _sb.AppendNewLine();
+            _sb.AppendIndentedLine("// Virtual Tuple Size Calculators");
+
+            var generator = new VirtualTupleGenerator(_sb);
+            foreach (var tupleInfo in tupleTypes)
+            {
+                generator.GenerateSizeCalculator(tupleInfo);
             }
         }
 
@@ -320,6 +340,10 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 GenerateEnumFieldSize(member, sourceVar);
             }
+            else if (TupleHandler.IsTupleType(member.Type))
+            {
+                _tupleHandler.GenerateTupleSize(member.FieldId, sourceVar, member.Type);
+            }
             else if (_primitiveHandler.CanHandle(member.Type))
             {
                 _primitiveHandler.GenerateSize(
@@ -385,6 +409,14 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                         member.DataFormat,
                         member.FieldId);
                 }
+            }
+            else if (TupleHandler.IsTupleType(member.CollectionElementType))
+            {
+                // Tuple collection - generate inline
+                _tupleHandler.GenerateTupleCollectionSize(
+                    member.FieldId,
+                    sourceVar,
+                    member.CollectionElementType);
             }
             else
             {
