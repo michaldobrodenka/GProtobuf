@@ -32,6 +32,10 @@ namespace GProtobuf.Generator.V2
                 var sb = new StringBuilderWithIndent();
                 var types = _registry.GetByNamespace(ns).ToList();
 
+                // Create shared virtual registries
+                var virtualTupleRegistry = new VirtualTupleTypeRegistry();
+                var virtualMapRegistry = new VirtualMapTypeRegistry(virtualTupleRegistry);
+
                 WriteHeader(sb, ns);
 
                 // Generate static Tags class for multi-byte tags (zero-allocation)
@@ -45,17 +49,25 @@ namespace GProtobuf.Generator.V2
                 // Generate Serializers class (entry point methods)
                 GenerateSerializers(sb, types);
 
-                // Generate SpanReaders class (creates own virtual registries)
-                new SpanReaderGenerator(sb, _registry).GenerateAll(types);
+                // Generate SpanReaders class (uses shared virtual registries, registers Dictionary and Tuple types)
+                new SpanReaderGenerator(sb, _registry, virtualMapRegistry, virtualTupleRegistry).GenerateAll(types);
 
-                // Generate StreamWriters class (creates own virtual registries)
-                new StreamWriterGenerator(sb, _registry).GenerateAll(types);
+                // Generate StreamWriters class (uses shared virtual registries)
+                new StreamWriterGenerator(sb, _registry, virtualMapRegistry, virtualTupleRegistry).GenerateAll(types);
 
-                // Generate BufferWriters class (creates own virtual registries)
-                new BufferWriterGenerator(sb, _registry).GenerateAll(types);
+                // Generate BufferWriters class (uses shared virtual registries)
+                new BufferWriterGenerator(sb, _registry, virtualMapRegistry, virtualTupleRegistry).GenerateAll(types);
 
-                // Generate SizeCalculators class (creates own virtual registries)
-                new SizeCalculatorGenerator(sb, _registry).GenerateAll(types);
+                // Generate SizeCalculators class (uses shared virtual registries)
+                new SizeCalculatorGenerator(sb, _registry, virtualMapRegistry, virtualTupleRegistry).GenerateAll(types);
+
+                // Generate KeyValue structs AFTER all types are registered
+                var keyValueGenerator = new KeyValueClassGenerator(sb, virtualMapRegistry);
+                keyValueGenerator.GenerateAllKeyValueClasses();
+
+                // Generate TupleValue structs AFTER all types are registered
+                var tupleValueGenerator = new TupleValueGenerator(sb, virtualTupleRegistry);
+                tupleValueGenerator.GenerateAllTupleValueStructs();
 
                 WriteFooter(sb);
 

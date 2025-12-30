@@ -27,12 +27,17 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         }
 
         public SizeCalculatorGenerator(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry)
+            : this(sb, registry, virtualMapRegistry, null)
+        {
+        }
+
+        public SizeCalculatorGenerator(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry, VirtualTupleTypeRegistry virtualTupleRegistry)
         {
             _sb = sb;
             _registry = registry;
             _primitiveHandler = new PrimitiveHandler();
             _collectionHandler = new CollectionHandler(sb);
-            _virtualTupleRegistry = new VirtualTupleTypeRegistry();
+            _virtualTupleRegistry = virtualTupleRegistry ?? new VirtualTupleTypeRegistry();
             _virtualMapRegistry = virtualMapRegistry ?? new VirtualMapTypeRegistry(_virtualTupleRegistry);
             _tupleHandler = new TupleHandler(sb, _virtualTupleRegistry);
         }
@@ -77,6 +82,10 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 generator.GenerateSizeCalculator(virtualType);
             }
+
+            // Generate KeyValue methods that use MapEntry methods
+            var keyValueGenerator = new KeyValueClassGenerator(_sb, _virtualMapRegistry);
+            keyValueGenerator.GenerateKeyValueMethods("SizeCalculators");
         }
 
         /// <summary>
@@ -95,6 +104,10 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 generator.GenerateSizeCalculator(tupleInfo);
             }
+
+            // Generate TupleValue wrapper methods
+            var tupleValueGenerator = new TupleValueGenerator(_sb, _virtualTupleRegistry);
+            tupleValueGenerator.GenerateTupleValueMethods("SizeCalculators");
         }
 
         #region CalculateSize Method

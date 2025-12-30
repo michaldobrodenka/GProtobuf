@@ -169,32 +169,53 @@ namespace GProtobuf.Generator.V2.Handlers.Core
         #region Dictionary Helpers
 
         /// <summary>
+        /// Adds global:: prefix to a type if it's not a primitive or system type.
+        /// </summary>
+        private static string EnsureGlobalPrefix(string typeName)
+        {
+            // Already has global:: prefix
+            if (typeName.StartsWith("global::"))
+                return typeName;
+
+            // Primitive types and system types don't need global:: prefix
+            if (IsPrimitiveType(typeName) || typeName.StartsWith("System."))
+                return typeName;
+
+            // Add global:: prefix for custom types
+            return $"global::{typeName}";
+        }
+
+        /// <summary>
         /// Gets the concrete type to use when creating a dictionary instance.
         /// </summary>
         public static string GetDictionaryCreationType(string mapType, string keyType, string valueType)
         {
+            // Ensure key and value types have global:: prefix if needed
+            var globalKeyType = EnsureGlobalPrefix(keyType);
+            var globalValueType = EnsureGlobalPrefix(valueType);
+
             // For List<KeyValuePair<K,V>> we need to use List for intermediate storage
             if (mapType.Contains("List<") && mapType.Contains("KeyValuePair<"))
             {
-                return $"global::System.Collections.Generic.List<global::System.Collections.Generic.KeyValuePair<{keyType}, {valueType}>>";
+                return $"global::System.Collections.Generic.List<global::System.Collections.Generic.KeyValuePair<{globalKeyType}, {globalValueType}>>";
             }
 
             // For ICollection<KeyValuePair<K,V>> use List
             if (mapType.Contains("ICollection<") && mapType.Contains("KeyValuePair<"))
             {
-                return $"global::System.Collections.Generic.List<global::System.Collections.Generic.KeyValuePair<{keyType}, {valueType}>>";
+                return $"global::System.Collections.Generic.List<global::System.Collections.Generic.KeyValuePair<{globalKeyType}, {globalValueType}>>";
             }
 
             // For interface types (IDictionary<K,V>), use Dictionary<K,V>
             if (mapType.Contains("IDictionary<"))
             {
-                return $"global::System.Collections.Generic.Dictionary<{keyType}, {valueType}>";
+                return $"global::System.Collections.Generic.Dictionary<{globalKeyType}, {globalValueType}>";
             }
 
             // For concrete Dictionary<K,V> or custom types, use the full type
             if (mapType.Contains("Dictionary<") && !IsCustomDictionaryType(mapType))
             {
-                return $"global::System.Collections.Generic.Dictionary<{keyType}, {valueType}>";
+                return $"global::System.Collections.Generic.Dictionary<{globalKeyType}, {globalValueType}>";
             }
 
             // For custom derived dictionary types, use the full qualified type name

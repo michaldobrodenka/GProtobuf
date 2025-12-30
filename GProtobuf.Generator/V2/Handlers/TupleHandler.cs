@@ -158,7 +158,8 @@ namespace GProtobuf.Generator.V2.Handlers
         public void GenerateTupleWrite(
             int fieldId,
             string sourceVar,
-            string tupleTypeName)
+            string tupleTypeName,
+            string writerClassName)
         {
             var itemTypes = ParseTupleTypes(tupleTypeName);
             if (itemTypes.Count == 0)
@@ -182,7 +183,7 @@ namespace GProtobuf.Generator.V2.Handlers
 
             // Write length and content
             _sb.AppendIndentedLine("writer.WriteVarUInt32((uint)tupleCalc.Length);");
-            _sb.AppendIndentedLine($"StreamWriters.Write{tupleInfo.SafeName}Content(ref writer, {sourceVar});");
+            _sb.AppendIndentedLine($"{writerClassName}.Write{tupleInfo.SafeName}Content(ref writer, {sourceVar});");
 
             _sb.EndBlock(); // if
         }
@@ -193,7 +194,8 @@ namespace GProtobuf.Generator.V2.Handlers
         public void GenerateTupleCollectionWrite(
             int fieldId,
             string sourceVar,
-            string tupleTypeName)
+            string tupleTypeName,
+            string writerClassName)
         {
             var itemTypes = ParseTupleTypes(tupleTypeName);
             if (itemTypes.Count == 0)
@@ -219,7 +221,7 @@ namespace GProtobuf.Generator.V2.Handlers
             _sb.AppendIndentedLine("writer.WriteVarUInt32((uint)tupleCalc.Length);");
 
             // Write content
-            _sb.AppendIndentedLine($"StreamWriters.Write{tupleInfo.SafeName}Content(ref writer, item);");
+            _sb.AppendIndentedLine($"{writerClassName}.Write{tupleInfo.SafeName}Content(ref writer, item);");
 
             _sb.EndBlock(); // foreach
             _sb.EndBlock(); // if

@@ -31,19 +31,13 @@ namespace GProtobuf.Generator.V2.Handlers
         }
 
         /// <summary>
-        /// Checks if a map type requires virtual type generation (complex key/value types).
+        /// Checks if a map type requires virtual type generation.
+        /// NEW IMPLEMENTATION: Always use KeyValue classes for ALL dictionaries.
         /// </summary>
         public static bool RequiresVirtualType(string keyType, string valueType)
         {
-            // Check if key is complex (not a primitive)
-            if (IsComplexType(keyType))
-                return true;
-
-            // Check if value is complex (nested dictionary, collection of dictionaries, custom class)
-            if (IsComplexType(valueType))
-                return true;
-
-            return false;
+            // Always use KeyValue classes for all dictionaries
+            return true;
         }
 
         /// <summary>
@@ -82,7 +76,8 @@ namespace GProtobuf.Generator.V2.Handlers
         }
 
         /// <summary>
-        /// Registers the map type in the virtual type registry if needed.
+        /// Registers the map type in the virtual type registry.
+        /// Always registers since we use KeyValue classes for all dictionaries.
         /// </summary>
         public VirtualMapEntryInfo RegisterIfNeeded(ProtoMemberAttribute member)
         {
@@ -92,9 +87,7 @@ namespace GProtobuf.Generator.V2.Handlers
             var keyType = member.MapKeyType;
             var valueType = member.MapValueType;
 
-            if (!RequiresVirtualType(keyType, valueType))
-                return null;
-
+            // Always register - we use KeyValue classes for all dictionaries now
             return _registry.RegisterMapEntry(
                 keyType, valueType,
                 member.MapKeyIsEnum, member.MapValueIsEnum,
@@ -132,27 +125,23 @@ namespace GProtobuf.Generator.V2.Handlers
         }
 
         /// <summary>
-        /// Generates code that calls the virtual type reader method.
+        /// Generates code that calls the KeyValue reader method.
         /// </summary>
         private void GenerateVirtualTypeRead(string targetVar, VirtualMapEntryInfo virtualInfo, ProtoMemberAttribute member)
         {
-            var methodName = $"Read{virtualInfo.TypeName}";
+            var keyValueClassName = GetKeyValueClassName(virtualInfo);
 
-            // Call the virtual reader method
-            _sb.AppendIndentedLine($"var entry = SpanReaders.{methodName}(ref reader);");
-            _sb.AppendIndentedLine("if (entry.success)");
-            _sb.StartNewBlock();
+            // Call the KeyValue reader method
+            _sb.AppendIndentedLine($"var keyValue = SpanReaders.Read{keyValueClassName}(ref reader);");
 
             if (TypeHelper.IsKeyValuePairCollection(member.Type))
             {
-                _sb.AppendIndentedLine($"{targetVar}.Add(new global::System.Collections.Generic.KeyValuePair<{member.MapKeyType}, {member.MapValueType}>(entry.key, entry.value));");
+                _sb.AppendIndentedLine($"{targetVar}.Add(new global::System.Collections.Generic.KeyValuePair<{member.MapKeyType}, {member.MapValueType}>(keyValue.Key, keyValue.Value));");
             }
             else
             {
-                _sb.AppendIndentedLine($"{targetVar}[entry.key] = entry.value;");
+                _sb.AppendIndentedLine($"{targetVar}[keyValue.Key] = keyValue.Value;");
             }
-
-            _sb.EndBlock();
         }
 
         /// <summary>
@@ -403,11 +392,11 @@ namespace GProtobuf.Generator.V2.Handlers
         }
 
         /// <summary>
-        /// Generates code that calls the virtual type writer method.
+        /// Generates code that calls the KeyValue writer method.
         /// </summary>
         private void GenerateVirtualTypeWrite(string sourceVar, VirtualMapEntryInfo virtualInfo, ProtoMemberAttribute member)
         {
-            var methodName = $"Write{virtualInfo.TypeName}";
+            var keyValueClassName = GetKeyValueClassName(virtualInfo);
 
             _sb.AppendIndentedLine($"foreach (var kvp in {sourceVar})");
             _sb.StartNewBlock();
@@ -421,8 +410,9 @@ namespace GProtobuf.Generator.V2.Handlers
             // Write tag
             TagCodeHelper.WriteTag(_sb, member.FieldId, WireType.Len);
 
-            // Call the virtual writer method
-            _sb.AppendIndentedLine($"{_writerClassName}.{methodName}(ref writer, kvp.Key, kvp.Value);");
+            // Create KeyValue struct and call the writer method
+            _sb.AppendIndentedLine($"var keyValue = new {keyValueClassName} {{ Key = kvp.Key, Value = kvp.Value }};");
+            _sb.AppendIndentedLine($"{_writerClassName}.Write{keyValueClassName}(ref writer, keyValue);");
 
             _sb.EndBlock(); // foreach
         }
@@ -646,11 +636,11 @@ namespace GProtobuf.Generator.V2.Handlers
         }
 
         /// <summary>
-        /// Generates code that calls the virtual type size calculator method.
+        /// Generates code that calls the KeyValue size calculator method.
         /// </summary>
         private void GenerateVirtualTypeSize(string sourceVar, VirtualMapEntryInfo virtualInfo, ProtoMemberAttribute member)
         {
-            var methodName = $"Calculate{virtualInfo.TypeName}Size";
+            var keyValueClassName = GetKeyValueClassName(virtualInfo);
             var (_, tagBytes) = TypeMapping.PrecomputeTagBytes(member.FieldId, WireType.Len);
 
             _sb.AppendIndentedLine("var entryCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
@@ -664,9 +654,10 @@ namespace GProtobuf.Generator.V2.Handlers
                 _sb.AppendIndentedLine("if (kvp.Value == null) continue;");
             }
 
-            // Reset and calculate entry size
+            // Create KeyValue struct and calculate size
+            _sb.AppendIndentedLine($"var keyValue = new {keyValueClassName} {{ Key = kvp.Key, Value = kvp.Value }};");
             _sb.AppendIndentedLine("entryCalc.Reset();");
-            _sb.AppendIndentedLine($"SizeCalculators.{methodName}(ref entryCalc, kvp.Key, kvp.Value);");
+            _sb.AppendIndentedLine($"SizeCalculators.Calculate{keyValueClassName}Size(ref entryCalc, keyValue);");
 
             // Add tag and length prefix size
             _sb.AppendIndentedLine($"calculator.AddByteLength({tagBytes});");
@@ -827,6 +818,52 @@ namespace GProtobuf.Generator.V2.Handlers
                 _sb.AppendIndentedLine($"{calcVar}.WriteVarUInt32((uint)nestedCalc.Length);");
                 _sb.AppendIndentedLine($"{calcVar}.AddByteLength(nestedCalc.Length);");
             }
+        }
+
+        #endregion
+
+        #region KeyValue Helpers
+
+        /// <summary>
+        /// Gets the KeyValue class name from map info.
+        /// Example: KeyValue_Int32_String
+        /// </summary>
+        private string GetKeyValueClassName(VirtualMapEntryInfo mapInfo)
+        {
+            var keyName = GetSafeTypeName(mapInfo.KeyTypeInfo.SafeName);
+            var valueName = GetSafeValueTypeName(mapInfo);
+
+            return $"KeyValue_{keyName}_{valueName}";
+        }
+
+        /// <summary>
+        /// Gets safe type name for value, handling dictionaries as ListOfKeyValue.
+        /// </summary>
+        private string GetSafeValueTypeName(VirtualMapEntryInfo mapInfo)
+        {
+            if (mapInfo.ValueTypeInfo.IsDictionary)
+            {
+                var nestedKeyName = GetSafeTypeName(mapInfo.ValueTypeInfo.DictionaryKeyType);
+                var nestedValueName = GetSafeTypeName(mapInfo.ValueTypeInfo.DictionaryValueType);
+                return $"ListOfKeyValue_{nestedKeyName}_{nestedValueName}";
+            }
+
+            return GetSafeTypeName(mapInfo.ValueTypeInfo.SafeName);
+        }
+
+        /// <summary>
+        /// Converts type name to safe identifier (removes dots, generics, etc).
+        /// </summary>
+        private string GetSafeTypeName(string typeName)
+        {
+            return typeName
+                .Replace(".", "")
+                .Replace("<", "")
+                .Replace(">", "")
+                .Replace(",", "")
+                .Replace(" ", "")
+                .Replace("[", "")
+                .Replace("]", "");
         }
 
         #endregion

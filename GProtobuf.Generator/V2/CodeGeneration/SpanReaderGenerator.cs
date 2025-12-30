@@ -26,12 +26,17 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         }
 
         public SpanReaderGenerator(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry)
+            : this(sb, registry, virtualMapRegistry, null)
+        {
+        }
+
+        public SpanReaderGenerator(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry, VirtualTupleTypeRegistry virtualTupleRegistry)
         {
             _sb = sb;
             _registry = registry;
             _primitiveHandler = new PrimitiveHandler();
             _collectionHandler = new CollectionHandler(sb);
-            _virtualTupleRegistry = new VirtualTupleTypeRegistry();
+            _virtualTupleRegistry = virtualTupleRegistry ?? new VirtualTupleTypeRegistry();
             _virtualMapRegistry = virtualMapRegistry ?? new VirtualMapTypeRegistry(_virtualTupleRegistry);
             _tupleHandler = new TupleHandler(sb, _virtualTupleRegistry);
         }
@@ -87,6 +92,10 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 generator.GenerateReader(virtualType);
             }
+
+            // Generate KeyValue methods that use MapEntry methods
+            var keyValueGenerator = new KeyValueClassGenerator(_sb, _virtualMapRegistry);
+            keyValueGenerator.GenerateKeyValueMethods("SpanReaders");
         }
 
         /// <summary>
@@ -105,6 +114,10 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 generator.GenerateReader(tupleInfo);
             }
+
+            // Generate TupleValue wrapper methods
+            var tupleValueGenerator = new TupleValueGenerator(_sb, _virtualTupleRegistry);
+            tupleValueGenerator.GenerateTupleValueMethods("SpanReaders");
         }
 
         #region Read Method

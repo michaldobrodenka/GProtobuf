@@ -25,22 +25,27 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         private readonly string _writerKind;
 
         public StreamWriterGenerator(StringBuilderWithIndent sb, TypeRegistry registry)
-            : this(sb, registry, null, "Stream")
+            : this(sb, registry, null, null, "Stream")
         {
         }
 
         public StreamWriterGenerator(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry)
-            : this(sb, registry, virtualMapRegistry, "Stream")
+            : this(sb, registry, virtualMapRegistry, null, "Stream")
         {
         }
 
-        protected StreamWriterGenerator(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry, string writerKind)
+        public StreamWriterGenerator(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry, VirtualTupleTypeRegistry virtualTupleRegistry)
+            : this(sb, registry, virtualMapRegistry, virtualTupleRegistry, "Stream")
+        {
+        }
+
+        protected StreamWriterGenerator(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry, VirtualTupleTypeRegistry virtualTupleRegistry, string writerKind)
         {
             _sb = sb;
             _registry = registry;
             _primitiveHandler = new PrimitiveHandler();
             _collectionHandler = new CollectionHandler(sb);
-            _virtualTupleRegistry = new VirtualTupleTypeRegistry();
+            _virtualTupleRegistry = virtualTupleRegistry ?? new VirtualTupleTypeRegistry();
             _virtualMapRegistry = virtualMapRegistry ?? new VirtualMapTypeRegistry(_virtualTupleRegistry);
             _tupleHandler = new TupleHandler(sb, _virtualTupleRegistry);
             _writerKind = writerKind;
@@ -97,6 +102,10 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 generator.GenerateWriter(virtualType);
             }
+
+            // Generate KeyValue methods that use MapEntry methods
+            var keyValueGenerator = new KeyValueClassGenerator(_sb, _virtualMapRegistry);
+            keyValueGenerator.GenerateKeyValueMethods(_className);
         }
 
         /// <summary>
@@ -115,6 +124,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 generator.GenerateWriter(tupleInfo);
             }
+
+            // Generate TupleValue wrapper methods
+            var tupleValueGenerator = new TupleValueGenerator(_sb, _virtualTupleRegistry);
+            var generatorClassName = _className; // "StreamWriters" or "BufferWriters"
+            tupleValueGenerator.GenerateTupleValueMethods(generatorClassName);
         }
 
         #region Write Method
@@ -411,7 +425,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
             else if (TupleHandler.IsTupleType(member.Type))
             {
-                _tupleHandler.GenerateTupleWrite(member.FieldId, sourceVar, member.Type);
+                _tupleHandler.GenerateTupleWrite(member.FieldId, sourceVar, member.Type, _className);
             }
             else if (_primitiveHandler.CanHandle(member.Type))
             {
@@ -485,7 +499,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 _tupleHandler.GenerateTupleCollectionWrite(
                     member.FieldId,
                     sourceVar,
-                    member.CollectionElementType);
+                    member.CollectionElementType,
+                    _className);
             }
             else
             {

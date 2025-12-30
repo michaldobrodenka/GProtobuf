@@ -10,12 +10,17 @@ namespace GProtobuf.Generator.V2.CodeGeneration
     internal class BufferWriterGenerator : StreamWriterGenerator
     {
         public BufferWriterGenerator(StringBuilderWithIndent sb, TypeRegistry registry)
-            : base(sb, registry, null, "Buffer")
+            : base(sb, registry, null, null, "Buffer")
         {
         }
 
         public BufferWriterGenerator(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry)
-            : base(sb, registry, virtualMapRegistry, "Buffer")
+            : base(sb, registry, virtualMapRegistry, null, "Buffer")
+        {
+        }
+
+        public BufferWriterGenerator(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry, VirtualTupleTypeRegistry virtualTupleRegistry)
+            : base(sb, registry, virtualMapRegistry, virtualTupleRegistry, "Buffer")
         {
         }
     }
