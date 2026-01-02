@@ -120,14 +120,14 @@ namespace GProtobuf.Core
         public void WriteFixed64(double value)
         {
             EnsureSpace(8);
-            Unsafe.WriteUnaligned(ref MemoryMarshal.GetReference(currentSpan.Slice(currentPosition)), value); // natívna endianita
+            Unsafe.WriteUnaligned(ref MemoryMarshal.GetReference(currentSpan.Slice(currentPosition)), value); // natï¿½vna endianita
             currentPosition += 8;
         }
 
         public void WriteFixed32(float value)
         {
             EnsureSpace(4);
-            Unsafe.WriteUnaligned(ref MemoryMarshal.GetReference(currentSpan.Slice(currentPosition)), value); // natívna endianita
+            Unsafe.WriteUnaligned(ref MemoryMarshal.GetReference(currentSpan.Slice(currentPosition)), value); // natï¿½vna endianita
             currentPosition += 4;
         }
 
@@ -302,6 +302,15 @@ namespace GProtobuf.Core
             EnsureSpace(16);
             value.TryWriteBytes(currentSpan.Slice(currentPosition));
             currentPosition += 16;
+        }
+
+        /// <summary>
+        /// Writes a TimeSpan value (serialized as Ticks - VarInt64).
+        /// Zero allocations, fast serialization.
+        /// </summary>
+        public void WriteTimeSpan(TimeSpan value)
+        {
+            WriteVarInt64(value.Ticks);
         }
 
         // Packed array methods

@@ -64,12 +64,52 @@ namespace GProtobuf.Generator.V2.Handlers
         {
             var shortElementType = TypeMapping.GetShortTypeName(elementTypeName);
 
+            // For arrays and IEnumerable, use temp list
+            // Arrays can't use Add(), and IEnumerable<T> doesn't have Add() method
+            string actualTargetVar = targetVar;
+            bool needsTempList = false;
+            string prefix = null;
+            string fieldName = null;
+
+            // Determine if this is from Populate (instance.) or ReadContent (result.)
+            if (targetVar.StartsWith("instance."))
+            {
+                prefix = "instance.";
+                fieldName = targetVar.Substring(prefix.Length);
+            }
+            else if (targetVar.StartsWith("result."))
+            {
+                prefix = "result.";
+                fieldName = targetVar.Substring(prefix.Length);
+            }
+
+            if (fieldName != null)
+            {
+                if (collectionKind == CollectionKind.Array)
+                {
+                    actualTargetVar = $"_tempList_{fieldName}";
+                    needsTempList = true;
+                }
+                else if (collectionKind == CollectionKind.InterfaceCollection && collectionTypeName != null)
+                {
+                    // Check if it's IEnumerable (not ICollection, IList, etc.)
+                    // For IEnumerable collections, we can't call Add() directly, need temp list
+                    if (collectionTypeName.Contains("IEnumerable<") &&
+                        !collectionTypeName.Contains("ICollection") &&
+                        !collectionTypeName.Contains("IList"))
+                    {
+                        actualTargetVar = $"_tempList_{fieldName}";
+                        needsTempList = true;
+                    }
+                }
+            }
+
             // Lazy init collection
-            _sb.AppendIndentedLine($"if ({targetVar} == null)");
+            _sb.AppendIndentedLine($"if ({actualTargetVar} == null)");
             _sb.StartNewBlock();
 
             var initExpr = GenerateCollectionInitialization(shortElementType, collectionKind, collectionTypeName);
-            _sb.AppendIndentedLine($"{targetVar} = {initExpr};");
+            _sb.AppendIndentedLine($"{actualTargetVar} = {initExpr};");
 
             _sb.EndBlock();
 
@@ -79,7 +119,7 @@ namespace GProtobuf.Generator.V2.Handlers
             _sb.AppendIndentedLine($"var item = Read{elementClassName}Content(ref nestedReader);");
 
             // Add to collection
-            _sb.AppendIndentedLine($"{targetVar}.Add(item);");
+            _sb.AppendIndentedLine($"{actualTargetVar}.Add(item);");
         }
 
         private string GenerateCollectionInitialization(string elementType, CollectionKind kind, string collectionTypeName)

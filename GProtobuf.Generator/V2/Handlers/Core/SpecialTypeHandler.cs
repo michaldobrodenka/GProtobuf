@@ -22,7 +22,11 @@ namespace GProtobuf.Generator.V2.Handlers.Core
                     return true;
 
                 case "System.Guid":
-                    sb.AppendIndentedLine($"{targetVar} = {readerVar}.ReadGuid();");
+                    sb.AppendIndentedLine($"{targetVar} = {readerVar}.ReadGuid(global::GProtobuf.Core.WireType.Len);");
+                    return true;
+
+                case "System.TimeSpan":
+                    sb.AppendIndentedLine($"{targetVar} = {readerVar}.ReadTimeSpan(global::GProtobuf.Core.WireType.VarInt);");
                     return true;
 
                 default:
@@ -76,8 +80,8 @@ namespace GProtobuf.Generator.V2.Handlers.Core
                     return true;
 
                 case "System.Guid":
-                    // Guid is 16 bytes + 2 bytes for length prefix
-                    sb.AppendIndentedLine($"{calculatorVar}.AddByteLength(18);");
+                    // Guid is 16 bytes + 1 byte for length prefix (varint 16)
+                    sb.AppendIndentedLine($"{calculatorVar}.AddByteLength(17);");
                     return true;
 
                 default:

@@ -174,6 +174,27 @@ namespace GProtobuf.Core
         }
 
         /// <summary>
+        /// Reads a Guid value (16 bytes).
+        /// </summary>
+        public static Guid ReadGuid(this ref SpanReader reader, WireType wireType)
+        {
+            int length = reader.ReadVarInt32();
+            if (length != 16)
+                throw new InvalidOperationException($"Expected Guid length of 16 bytes, got {length}");
+            return new Guid(reader.GetSlice(16));
+        }
+
+        /// <summary>
+        /// Reads a TimeSpan value (serialized as Ticks - VarInt64).
+        /// Zero allocations, fast serialization.
+        /// </summary>
+        public static TimeSpan ReadTimeSpan(this ref SpanReader reader, WireType wireType)
+        {
+            long ticks = reader.ReadVarInt64();
+            return new TimeSpan(ticks);
+        }
+
+        /// <summary>
         /// Reads a boolean value as a varint (0 = false, non-zero = true).
         /// </summary>
         public static bool ReadBool(this ref SpanReader reader)

@@ -12,6 +12,7 @@ namespace GProtobuf.Generator.V2
         private readonly Dictionary<string, List<TypeDefinition>> _byNamespace = new Dictionary<string, List<TypeDefinition>>();
         private readonly Dictionary<string, string> _parentOf = new Dictionary<string, string>();
         private readonly Dictionary<string, HashSet<string>> _childrenOf = new Dictionary<string, HashSet<string>>();
+        private readonly HashSet<string> _enumTypes = new HashSet<string>();
 
         private static readonly string[] EmptyStringArray = Array.Empty<string>();
         private static readonly TypeDefinition[] EmptyTypeArray = Array.Empty<TypeDefinition>();
@@ -48,6 +49,11 @@ namespace GProtobuf.Generator.V2
             }
         }
 
+        public void RegisterEnum(string enumTypeName)
+        {
+            _enumTypes.Add(enumTypeName);
+        }
+
         #endregion
 
         #region Lookups
@@ -65,6 +71,13 @@ namespace GProtobuf.Generator.V2
         public IEnumerable<string> GetAllNamespaces() => _byNamespace.Keys;
 
         public IEnumerable<TypeDefinition> GetAllTypes() => _byFullName.Values;
+
+        public bool IsEnum(string typeName)
+        {
+            return _enumTypes.Contains(typeName);
+        }
+
+        public IReadOnlyCollection<string> GetAllEnums() => _enumTypes;
 
         #endregion
 

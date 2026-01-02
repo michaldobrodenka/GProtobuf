@@ -11,7 +11,7 @@ namespace GProtobuf.Generator.V2
 
         /// <summary>
         /// Checks if type is a primitive that can be read/written directly.
-        /// Includes string but NOT Guid/TimeSpan (they need special handling).
+        /// Includes string, Guid, and TimeSpan.
         /// </summary>
         public static bool IsSimpleType(string typeName)
         {
@@ -22,6 +22,7 @@ namespace GProtobuf.Generator.V2
                 "System.Single" or "System.Double" => true,
                 "System.Boolean" or "System.String" or "System.Char" => true,
                 "System.Byte[]" => true,
+                "System.Guid" or "System.TimeSpan" => true,
                 _ => false
             };
         }
@@ -43,13 +44,17 @@ namespace GProtobuf.Generator.V2
         }
 
         /// <summary>
-        /// Checks if type can be used in non-packed repeated fields (includes string).
+        /// Checks if type can be used in non-packed repeated fields (includes string, byte, Guid, TimeSpan).
         /// Note: byte[] is NOT an element type - it's a field type. For List&lt;byte&gt;, element is byte (primitive).
         /// </summary>
         public static bool IsNonPackedArrayType(string elementTypeName)
         {
             var normalized = NormalizeTypeName(elementTypeName);
-            return IsPrimitiveArrayType(normalized) || normalized == "System.String";
+            return IsPrimitiveArrayType(normalized) ||
+                   normalized == "System.String" ||
+                   normalized == "System.Byte" ||
+                   normalized == "System.Guid" ||
+                   normalized == "System.TimeSpan";
         }
 
         /// <summary>
@@ -69,6 +74,8 @@ namespace GProtobuf.Generator.V2
                 "System.Char" => $"{valueExpr} != '\\0'",
                 "System.String" => $"{valueExpr} != null",
                 "System.Byte[]" => $"{valueExpr} != null",
+                "System.Guid" => $"{valueExpr} != global::System.Guid.Empty",
+                "System.TimeSpan" => $"{valueExpr} != global::System.TimeSpan.Zero",
                 _ => null
             };
         }
@@ -101,9 +108,10 @@ namespace GProtobuf.Generator.V2
                 "System.Int32" or "System.Int64" or "System.Int16" or "System.SByte" => WireType.VarInt,
                 "System.UInt32" or "System.UInt64" or "System.UInt16" or "System.Byte" => WireType.VarInt,
                 "System.Boolean" or "System.Char" => WireType.VarInt,
+                "System.TimeSpan" => WireType.VarInt, // Serialized as Ticks (long)
                 "System.Single" => WireType.Fixed32b,
                 "System.Double" => WireType.Fixed64b,
-                "System.String" or "System.Byte[]" => WireType.Len,
+                "System.String" or "System.Byte[]" or "System.Guid" => WireType.Len,
                 _ => WireType.Len
             };
         }
@@ -186,6 +194,8 @@ namespace GProtobuf.Generator.V2
                 "System.Char" => $"(char){readerVar}.ReadVarUInt32()",
                 "System.String" => $"{readerVar}.ReadString({wireTypeVar})",
                 "System.Byte[]" => $"{readerVar}.ReadByteArray()",
+                "System.Guid" => $"{readerVar}.ReadGuid({wireTypeVar})",
+                "System.TimeSpan" => $"{readerVar}.ReadTimeSpan({wireTypeVar})",
                 _ => null
             };
         }
@@ -292,6 +302,8 @@ namespace GProtobuf.Generator.V2
                 "System.Boolean" => $"{readerVar}.ReadBool(WireType.VarInt)",
                 "System.Char" => $"(char){readerVar}.ReadVarUInt32()",
                 "System.String" => $"{readerVar}.ReadString(WireType.Len)",
+                "System.Guid" => $"{readerVar}.ReadGuid(WireType.Len)",
+                "System.TimeSpan" => $"{readerVar}.ReadTimeSpan(WireType.VarInt)",
                 _ => null
             };
         }
@@ -358,6 +370,8 @@ namespace GProtobuf.Generator.V2
                 "System.Char" => $"{writerVar}.WriteVarUInt32((uint){valueExpr})",
                 "System.String" => $"{writerVar}.WriteString({valueExpr})",
                 "System.Byte[]" => $"{writerVar}.WriteVarUInt32((uint){valueExpr}.Length); {writerVar}.WriteBytes({valueExpr})",
+                "System.Guid" => $"{writerVar}.WriteGuid({valueExpr})",
+                "System.TimeSpan" => $"{writerVar}.WriteTimeSpan({valueExpr})",
                 _ => null
             };
         }
@@ -419,6 +433,8 @@ namespace GProtobuf.Generator.V2
                 "System.Boolean" => $"{writerVar}.WriteBool({valueExpr})",
                 "System.Char" => $"{writerVar}.WriteVarUInt32((uint){valueExpr})",
                 "System.String" => $"{writerVar}.WriteString({valueExpr})",
+                "System.Guid" => $"{writerVar}.WriteGuid({valueExpr})",
+                "System.TimeSpan" => $"{writerVar}.WriteTimeSpan({valueExpr})",
                 _ => null
             };
         }
@@ -485,6 +501,8 @@ namespace GProtobuf.Generator.V2
                 "System.Char" => $"{calculatorVar}.WriteVarUInt32((uint){valueExpr})",
                 "System.String" => $"{calculatorVar}.WriteString({valueExpr})",
                 "System.Byte[]" => $"{calculatorVar}.WriteBytes({valueExpr})",
+                "System.Guid" => $"{calculatorVar}.WriteGuid({valueExpr})",
+                "System.TimeSpan" => $"{calculatorVar}.WriteTimeSpan({valueExpr})",
                 _ => null
             };
         }
@@ -572,6 +590,8 @@ namespace GProtobuf.Generator.V2
                 "System.Char" => "char",
                 "System.Object" => "object",
                 "System.Byte[]" => "byte[]",
+                "System.Guid" => "Guid",
+                "System.TimeSpan" => "TimeSpan",
                 _ => typeName
             };
         }

@@ -116,8 +116,8 @@ namespace GProtobuf.Generator.V2.Handlers
             var elementReadExpr = TypeMapping.GetElementReadExpression(elementTypeName, format, readerVar);
             var expectedWireType = TypeMapping.GetWireTypeString(elementTypeName, format);
 
-            // For managed types (string), use List<T>
-            if (normalized == "System.String")
+            // For managed types (string, Guid, TimeSpan), use List<T>
+            if (normalized == "System.String" || normalized == "System.Guid" || normalized == "System.TimeSpan")
             {
                 sb.AppendIndentedLine($"var tempList = new global::System.Collections.Generic.List<{shortType}>();");
                 sb.AppendIndentedLine($"var wireType1 = wireType;");

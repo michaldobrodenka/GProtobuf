@@ -22,7 +22,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         private readonly VirtualTupleTypeRegistry _virtualTupleRegistry;
 
         public SizeCalculatorGenerator(StringBuilderWithIndent sb, TypeRegistry registry)
-            : this(sb, registry, null)
+            : this(sb, registry, null, null)
         {
         }
 
@@ -38,7 +38,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _primitiveHandler = new PrimitiveHandler();
             _collectionHandler = new CollectionHandler(sb);
             _virtualTupleRegistry = virtualTupleRegistry ?? new VirtualTupleTypeRegistry();
-            _virtualMapRegistry = virtualMapRegistry ?? new VirtualMapTypeRegistry(_virtualTupleRegistry);
+            _virtualMapRegistry = virtualMapRegistry ?? new VirtualMapTypeRegistry(_virtualTupleRegistry, _registry);
             _tupleHandler = new TupleHandler(sb, _virtualTupleRegistry);
         }
 
@@ -99,15 +99,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendNewLine();
             _sb.AppendIndentedLine("// Virtual Tuple Size Calculators");
 
-            var generator = new VirtualTupleGenerator(_sb);
+            var generator = new VirtualTupleGenerator(_sb, null, _registry);
             foreach (var tupleInfo in tupleTypes)
             {
                 generator.GenerateSizeCalculator(tupleInfo);
             }
-
-            // Generate TupleValue wrapper methods
-            var tupleValueGenerator = new TupleValueGenerator(_sb, _virtualTupleRegistry);
-            tupleValueGenerator.GenerateTupleValueMethods("SizeCalculators");
         }
 
         #region CalculateSize Method

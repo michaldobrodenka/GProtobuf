@@ -266,8 +266,16 @@ namespace GProtobuf.Core
 
         public void WriteGuid(Guid value)
         {
-            // Guid is always 16 bytes
-            Length += 16;
+            // Guid is 16 bytes + 1 byte for length prefix (varint 16)
+            Length += 17;
+        }
+
+        /// <summary>
+        /// Calculates size for TimeSpan (serialized as Ticks - VarInt64).
+        /// </summary>
+        public void WriteTimeSpan(TimeSpan value)
+        {
+            WriteVarInt64(value.Ticks);
         }
 
         // Packed array methods

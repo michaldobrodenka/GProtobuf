@@ -211,6 +211,27 @@ namespace GProtobuf.Generator.V2.Handlers
                 return;
             }
 
+            var normalized = TypeMapping.NormalizeTypeName(typeName);
+
+            // Special handling for types that need wireType parameter
+            if (normalized == "System.String")
+            {
+                _sb.AppendIndentedLine($"{targetVar} = reader.ReadString((WireType)entryWireType);");
+                return;
+            }
+
+            if (normalized == "System.Guid")
+            {
+                _sb.AppendIndentedLine($"{targetVar} = reader.ReadGuid((WireType)entryWireType);");
+                return;
+            }
+
+            if (normalized == "System.TimeSpan")
+            {
+                _sb.AppendIndentedLine($"{targetVar} = reader.ReadTimeSpan((WireType)entryWireType);");
+                return;
+            }
+
             // Use TypeMapping for centralized read expression
             var readExpr = TypeMapping.GetElementReadExpression(typeName, DataFormat.Default, "reader");
             if (readExpr != null)
@@ -219,7 +240,7 @@ namespace GProtobuf.Generator.V2.Handlers
                 return;
             }
 
-            // Try special types (String, Guid)
+            // Try special types
             if (SpecialTypeHandler.TryGenerateRead(_sb, targetVar, typeName))
             {
                 return;
@@ -236,6 +257,27 @@ namespace GProtobuf.Generator.V2.Handlers
                 return;
             }
 
+            var normalized = TypeMapping.NormalizeTypeName(valueType);
+
+            // Special handling for types that need wireType parameter
+            if (normalized == "System.String")
+            {
+                _sb.AppendIndentedLine($"value = reader.ReadString((WireType)entryWireType);");
+                return;
+            }
+
+            if (normalized == "System.Guid")
+            {
+                _sb.AppendIndentedLine($"value = reader.ReadGuid((WireType)entryWireType);");
+                return;
+            }
+
+            if (normalized == "System.TimeSpan")
+            {
+                _sb.AppendIndentedLine($"value = reader.ReadTimeSpan((WireType)entryWireType);");
+                return;
+            }
+
             // Check for primitive types using TypeMapping
             var readExpr = TypeMapping.GetElementReadExpression(valueType, DataFormat.Default, "reader");
             if (readExpr != null)
@@ -244,7 +286,7 @@ namespace GProtobuf.Generator.V2.Handlers
                 return;
             }
 
-            // Try special types (String, Guid)
+            // Try special types
             if (SpecialTypeHandler.TryGenerateRead(_sb, "value", valueType))
             {
                 return;

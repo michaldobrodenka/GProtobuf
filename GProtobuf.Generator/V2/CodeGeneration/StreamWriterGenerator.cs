@@ -46,7 +46,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _primitiveHandler = new PrimitiveHandler();
             _collectionHandler = new CollectionHandler(sb);
             _virtualTupleRegistry = virtualTupleRegistry ?? new VirtualTupleTypeRegistry();
-            _virtualMapRegistry = virtualMapRegistry ?? new VirtualMapTypeRegistry(_virtualTupleRegistry);
+            _virtualMapRegistry = virtualMapRegistry ?? new VirtualMapTypeRegistry(_virtualTupleRegistry, _registry);
             _tupleHandler = new TupleHandler(sb, _virtualTupleRegistry);
             _writerKind = writerKind;
             _writerType = $"global::GProtobuf.Core.{writerKind}Writer";
@@ -119,16 +119,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendNewLine();
             _sb.AppendIndentedLine("// Virtual Tuple Writers");
 
-            var generator = new VirtualTupleGenerator(_sb, _writerKind);
+            var generator = new VirtualTupleGenerator(_sb, _writerKind, _registry);
             foreach (var tupleInfo in tupleTypes)
             {
                 generator.GenerateWriter(tupleInfo);
             }
-
-            // Generate TupleValue wrapper methods
-            var tupleValueGenerator = new TupleValueGenerator(_sb, _virtualTupleRegistry);
-            var generatorClassName = _className; // "StreamWriters" or "BufferWriters"
-            tupleValueGenerator.GenerateTupleValueMethods(generatorClassName);
         }
 
         #region Write Method

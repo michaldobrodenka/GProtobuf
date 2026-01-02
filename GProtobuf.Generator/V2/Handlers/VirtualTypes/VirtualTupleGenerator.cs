@@ -13,11 +13,15 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
     {
         private readonly StringBuilderWithIndent _sb;
         private readonly string _writerKind; // "Stream" or "Buffer"
+        private readonly TypeRegistry _registry;
+        private readonly TupleItemTypeHandler _typeHandler;
 
-        public VirtualTupleGenerator(StringBuilderWithIndent sb, string writerKind = null)
+        public VirtualTupleGenerator(StringBuilderWithIndent sb, string writerKind, TypeRegistry registry)
         {
             _sb = sb;
             _writerKind = writerKind;
+            _registry = registry;
+            _typeHandler = new TupleItemTypeHandler(_registry);
         }
 
         #region Reader
@@ -79,21 +83,31 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
 
         private void GenerateItemRead(string targetVar, string itemType)
         {
-            // Try primitive/string/byte[]/Guid/enum first
-            var readExpr = TypeMapping.GetReadExpression(itemType, DataFormat.Default, "reader", "wireType");
+            var typeInfo = _typeHandler.AnalyzeType(itemType);
 
-            if (readExpr != null)
+            // For nullable types, just read the value (no HasValue check needed during deserialization)
+            var actualType = typeInfo.UnderlyingType;
+
+            switch (typeInfo.Category)
             {
-                // Primitive type, string, byte[], Guid, or enum - TypeMapping handles all
-                _sb.AppendIndentedLine($"{targetVar} = {readExpr};");
-            }
-            else
-            {
-                // Complex type - read as length-prefixed message
-                var className = TypeNameHelper.GetSafeMethodName(itemType);
-                _sb.AppendIndentedLine("var itemLength = reader.ReadVarInt32();");
-                _sb.AppendIndentedLine("var itemReader = new SpanReader(reader.GetSlice(itemLength));");
-                _sb.AppendIndentedLine($"{targetVar} = SpanReaders.Read{className}Content(ref itemReader);");
+                case TypeCategory.Primitive:
+                    // Primitive type, string, byte[], Guid - TypeMapping handles all
+                    var readExpr = TypeMapping.GetReadExpression(actualType, DataFormat.Default, "reader", "wireType");
+                    _sb.AppendIndentedLine($"{targetVar} = {readExpr};");
+                    break;
+
+                case TypeCategory.Enum:
+                    // Enum type - read as VarInt32 and cast
+                    _sb.AppendIndentedLine($"{targetVar} = ({actualType})reader.ReadVarInt32();");
+                    break;
+
+                case TypeCategory.Complex:
+                    // Complex type - read as length-prefixed message
+                    var className = TypeNameHelper.GetSafeMethodName(actualType);
+                    _sb.AppendIndentedLine("var itemLength = reader.ReadVarInt32();");
+                    _sb.AppendIndentedLine("var itemReader = new SpanReader(reader.GetSlice(itemLength));");
+                    _sb.AppendIndentedLine($"{targetVar} = SpanReaders.Read{className}Content(ref itemReader);");
+                    break;
             }
         }
 
@@ -112,12 +126,17 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             _sb.AppendIndentedLine($"public static void Write{tupleInfo.SafeName}Content(ref {writerType} writer, {tupleInfo.OriginalTypeName} instance)");
             _sb.StartNewBlock();
 
+            // Pre-declare WriteSizeCalculator for reuse across complex items (ref struct - stack allocated)
+            // This avoids declaring it multiple times inside the loop
+            _sb.AppendIndentedLine("global::GProtobuf.Core.WriteSizeCalculator itemCalc;");
+            _sb.AppendNewLine();
+
             // Write each item
             for (int i = 0; i < tupleInfo.Arity; i++)
             {
                 var itemType = tupleInfo.ItemTypes[i];
                 var fieldId = i + 1;
-                var sourceVar = $"instance.Item{fieldId}";
+                var sourceVar = GetTupleItemAccessor(fieldId, "instance");
 
                 GenerateItemWrite(sourceVar, itemType, fieldId);
             }
@@ -128,27 +147,51 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
 
         private void GenerateItemWrite(string sourceVar, string itemType, int fieldId)
         {
-            // Write tag
-            TagCodeHelper.WriteTag(_sb, fieldId, GetWireType(itemType));
+            var typeInfo = _typeHandler.AnalyzeType(itemType);
 
-            // Write value
-            var writeExpr = TypeMapping.GetWriteExpression(itemType, sourceVar, DataFormat.Default, "writer");
-
-            if (writeExpr != null)
+            // For nullable types, wrap in HasValue check
+            if (typeInfo.IsNullable)
             {
-                // Primitive type, string, byte[], Guid, or enum - TypeMapping handles all
-                _sb.AppendIndentedLine($"{writeExpr};");
+                _sb.AppendIndentedLine($"if ({sourceVar}.HasValue)");
+                _sb.StartNewBlock();
+                GenerateItemWriteCore($"{sourceVar}.Value", typeInfo.UnderlyingType, typeInfo.Category, fieldId);
+                _sb.EndBlock();
             }
             else
             {
-                // Complex type - write as length-prefixed message
-                var className = TypeNameHelper.GetSafeMethodName(itemType);
-                _sb.AppendIndentedLine("var itemCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
-                _sb.AppendIndentedLine($"SizeCalculators.Calculate{className}ContentSize(ref itemCalc, {sourceVar});");
-                _sb.AppendIndentedLine("writer.WriteVarUInt32((uint)itemCalc.Length);");
+                GenerateItemWriteCore(sourceVar, typeInfo.UnderlyingType, typeInfo.Category, fieldId);
+            }
+        }
 
-                var writerClass = _writerKind != null ? $"{_writerKind}Writers" : "StreamWriters";
-                _sb.AppendIndentedLine($"{writerClass}.Write{className}Content(ref writer, {sourceVar});");
+        private void GenerateItemWriteCore(string sourceVar, string actualType, TypeCategory category, int fieldId)
+        {
+            // Write tag
+            TagCodeHelper.WriteTag(_sb, fieldId, GetWireType(actualType));
+
+            switch (category)
+            {
+                case TypeCategory.Primitive:
+                    // Primitive type, string, byte[], Guid - TypeMapping handles all
+                    var writeExpr = TypeMapping.GetWriteExpression(actualType, sourceVar, DataFormat.Default, "writer");
+                    _sb.AppendIndentedLine($"{writeExpr};");
+                    break;
+
+                case TypeCategory.Enum:
+                    // Enum type - write as VarInt32
+                    _sb.AppendIndentedLine($"writer.WriteVarInt32((int){sourceVar});");
+                    break;
+
+                case TypeCategory.Complex:
+                    // Complex type - write as length-prefixed message
+                    var className = TypeNameHelper.GetSafeMethodName(actualType);
+                    // Reuse pre-declared itemCalc (ref struct reinitializes on assignment)
+                    _sb.AppendIndentedLine("itemCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+                    _sb.AppendIndentedLine($"SizeCalculators.Calculate{className}ContentSize(ref itemCalc, {sourceVar});");
+                    _sb.AppendIndentedLine("writer.WriteVarUInt32((uint)itemCalc.Length);");
+
+                    var writerClass = _writerKind != null ? $"{_writerKind}Writers" : "StreamWriters";
+                    _sb.AppendIndentedLine($"{writerClass}.Write{className}Content(ref writer, {sourceVar});");
+                    break;
             }
         }
 
@@ -165,12 +208,17 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             _sb.AppendIndentedLine($"public static void Calculate{tupleInfo.SafeName}ContentSize(ref global::GProtobuf.Core.WriteSizeCalculator calculator, {tupleInfo.OriginalTypeName} instance)");
             _sb.StartNewBlock();
 
+            // Pre-declare WriteSizeCalculator for reuse across complex items (ref struct - stack allocated)
+            // This avoids declaring it multiple times inside the loop
+            _sb.AppendIndentedLine("global::GProtobuf.Core.WriteSizeCalculator itemCalc;");
+            _sb.AppendNewLine();
+
             // Calculate size for each item
             for (int i = 0; i < tupleInfo.Arity; i++)
             {
                 var itemType = tupleInfo.ItemTypes[i];
                 var fieldId = i + 1;
-                var sourceVar = $"instance.Item{fieldId}";
+                var sourceVar = GetTupleItemAccessor(fieldId, "instance");
 
                 GenerateItemSize(sourceVar, itemType, fieldId);
             }
@@ -181,31 +229,75 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
 
         private void GenerateItemSize(string sourceVar, string itemType, int fieldId)
         {
-            // Add tag size
-            TagCodeHelper.AddTagSize(_sb, fieldId, GetWireType(itemType), "calculator");
+            var typeInfo = _typeHandler.AnalyzeType(itemType);
 
-            // Add value size
-            var sizeExpr = TypeMapping.GetSizeExpression(itemType, sourceVar, DataFormat.Default, "calculator");
-
-            if (sizeExpr != null)
+            // For nullable types, wrap in HasValue check
+            if (typeInfo.IsNullable)
             {
-                // Primitive type, string, byte[], Guid, or enum - TypeMapping handles all
-                _sb.AppendIndentedLine($"{sizeExpr};");
+                _sb.AppendIndentedLine($"if ({sourceVar}.HasValue)");
+                _sb.StartNewBlock();
+                GenerateItemSizeCore($"{sourceVar}.Value", typeInfo.UnderlyingType, typeInfo.Category, fieldId);
+                _sb.EndBlock();
             }
             else
             {
-                // Complex type
-                var className = TypeNameHelper.GetSafeMethodName(itemType);
-                _sb.AppendIndentedLine("var itemCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
-                _sb.AppendIndentedLine($"SizeCalculators.Calculate{className}ContentSize(ref itemCalc, {sourceVar});");
-                _sb.AppendIndentedLine("calculator.WriteVarUInt32((uint)itemCalc.Length);");
-                _sb.AppendIndentedLine("calculator.AddByteLength(itemCalc.Length);");
+                GenerateItemSizeCore(sourceVar, typeInfo.UnderlyingType, typeInfo.Category, fieldId);
+            }
+        }
+
+        private void GenerateItemSizeCore(string sourceVar, string actualType, TypeCategory category, int fieldId)
+        {
+            // Add tag size
+            TagCodeHelper.AddTagSize(_sb, fieldId, GetWireType(actualType), "calculator");
+
+            switch (category)
+            {
+                case TypeCategory.Primitive:
+                    // Primitive type, string, byte[], Guid - TypeMapping handles all
+                    var sizeExpr = TypeMapping.GetSizeExpression(actualType, sourceVar, DataFormat.Default, "calculator");
+                    _sb.AppendIndentedLine($"{sizeExpr};");
+                    break;
+
+                case TypeCategory.Enum:
+                    // Enum type - calculate as VarInt32
+                    _sb.AppendIndentedLine($"calculator.WriteVarInt32((int){sourceVar});");
+                    break;
+
+                case TypeCategory.Complex:
+                    // Complex type
+                    var className = TypeNameHelper.GetSafeMethodName(actualType);
+                    // Reuse pre-declared itemCalc (ref struct reinitializes on assignment)
+                    _sb.AppendIndentedLine("itemCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+                    _sb.AppendIndentedLine($"SizeCalculators.Calculate{className}ContentSize(ref itemCalc, {sourceVar});");
+                    _sb.AppendIndentedLine("calculator.WriteVarUInt32((uint)itemCalc.Length);");
+                    _sb.AppendIndentedLine("calculator.AddByteLength(itemCalc.Length);");
+                    break;
             }
         }
 
         #endregion
 
         #region Helpers
+
+        /// <summary>
+        /// Gets the proper accessor for a Tuple item, handling Rest property for 8+ elements.
+        /// For items 1-7: instance.Item1, instance.Item2, etc.
+        /// For item 8: instance.Rest (the Rest property IS the 8th element, which is TRest)
+        /// </summary>
+        private string GetTupleItemAccessor(int itemIndex, string instanceVar)
+        {
+            if (itemIndex <= 7)
+            {
+                return $"{instanceVar}.Item{itemIndex}";
+            }
+            else
+            {
+                // For Tuple<T1,T2,T3,T4,T5,T6,T7,TRest>, the Rest property IS TRest
+                // For example: Tuple<int,int,int,int,int,int,int,Tuple<int,int>>
+                // Item 8 is instance.Rest (which is of type Tuple<int,int>), not instance.Rest.Item1
+                return $"{instanceVar}.Rest";
+            }
+        }
 
         private WireType GetWireType(string typeName)
         {

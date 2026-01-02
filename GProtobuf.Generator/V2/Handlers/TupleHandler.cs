@@ -131,12 +131,20 @@ namespace GProtobuf.Generator.V2.Handlers
             var tupleInfo = _tupleRegistry.Register(elementTypeName, itemTypes);
             var shortElementType = TypeMapping.GetShortTypeName(elementTypeName);
 
+            // For arrays in Populate methods, use temp list
+            string actualTargetVar = targetVar;
+            if (collectionKind == CollectionKind.Array && targetVar.StartsWith("instance."))
+            {
+                var fieldName = targetVar.Substring("instance.".Length);
+                actualTargetVar = $"_tempList_{fieldName}";
+            }
+
             // Lazy init collection
-            _sb.AppendIndentedLine($"if ({targetVar} == null)");
+            _sb.AppendIndentedLine($"if ({actualTargetVar} == null)");
             _sb.StartNewBlock();
 
             var initExpr = GenerateCollectionInitialization(shortElementType, collectionKind, collectionTypeName);
-            _sb.AppendIndentedLine($"{targetVar} = {initExpr};");
+            _sb.AppendIndentedLine($"{actualTargetVar} = {initExpr};");
 
             _sb.EndBlock();
 
@@ -144,7 +152,7 @@ namespace GProtobuf.Generator.V2.Handlers
             _sb.AppendIndentedLine($"var length = {readerVar}.ReadVarInt32();");
             _sb.AppendIndentedLine($"var nestedReader = new SpanReader({readerVar}.GetSlice(length));");
             _sb.AppendIndentedLine($"var item = SpanReaders.Read{tupleInfo.SafeName}Content(ref nestedReader);");
-            _sb.AppendIndentedLine($"{targetVar}.Add(item);");
+            _sb.AppendIndentedLine($"{actualTargetVar}.Add(item);");
         }
 
         #endregion

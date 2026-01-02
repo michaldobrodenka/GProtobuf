@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using GProtobuf.Generator.V2.CodeGeneration.Core;
 using GProtobuf.Generator.V2.Handlers;
 using GProtobuf.Generator.V2.Handlers.VirtualTypes;
@@ -21,7 +22,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         private readonly VirtualTupleTypeRegistry _virtualTupleRegistry;
 
         public SpanReaderGenerator(StringBuilderWithIndent sb, TypeRegistry registry)
-            : this(sb, registry, null)
+            : this(sb, registry, null, null)
         {
         }
 
@@ -37,7 +38,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _primitiveHandler = new PrimitiveHandler();
             _collectionHandler = new CollectionHandler(sb);
             _virtualTupleRegistry = virtualTupleRegistry ?? new VirtualTupleTypeRegistry();
-            _virtualMapRegistry = virtualMapRegistry ?? new VirtualMapTypeRegistry(_virtualTupleRegistry);
+            _virtualMapRegistry = virtualMapRegistry ?? new VirtualMapTypeRegistry(_virtualTupleRegistry, _registry);
             _tupleHandler = new TupleHandler(sb, _virtualTupleRegistry);
         }
 
@@ -109,15 +110,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendNewLine();
             _sb.AppendIndentedLine("// Virtual Tuple Readers");
 
-            var generator = new VirtualTupleGenerator(_sb);
+            var generator = new VirtualTupleGenerator(_sb, null, _registry);
             foreach (var tupleInfo in tupleTypes)
             {
                 generator.GenerateReader(tupleInfo);
             }
-
-            // Generate TupleValue wrapper methods
-            var tupleValueGenerator = new TupleValueGenerator(_sb, _virtualTupleRegistry);
-            tupleValueGenerator.GenerateTupleValueMethods("SpanReaders");
         }
 
         #region Read Method
@@ -471,6 +468,27 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine($"global::{type.FullName} result = new global::{type.FullName}();");
             _sb.AppendNewLine();
 
+            // Declare temp lists for array fields and IEnumerable interface fields (same as in Populate)
+            var fieldsNeedingTempList = type.ProtoMembers?
+                .Where(m => m.IsCollection && (
+                    m.CollectionKind == CollectionKind.Array ||
+                    (m.CollectionKind == CollectionKind.InterfaceCollection && m.Type != null &&
+                     TypeMapping.NormalizeTypeName(m.Type).StartsWith("System.Collections.Generic.IEnumerable<") &&
+                     !m.Type.Contains("ICollection") &&
+                     !m.Type.Contains("IList"))
+                ))
+                .ToList();
+
+            if (fieldsNeedingTempList != null && fieldsNeedingTempList.Count > 0)
+            {
+                foreach (var member in fieldsNeedingTempList)
+                {
+                    var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType);
+                    _sb.AppendIndentedLine($"global::System.Collections.Generic.List<{elementType}> _tempList_{member.Name} = null;");
+                }
+                _sb.AppendNewLine();
+            }
+
             // Read loop
             _sb.AppendIndentedLine("while (!reader.IsEnd)");
             _sb.StartNewBlock();
@@ -505,6 +523,82 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             _sb.EndBlock();
 
+            // Convert temp lists to arrays or assign to IEnumerable properties
+            if (fieldsNeedingTempList != null && fieldsNeedingTempList.Count > 0)
+            {
+                _sb.AppendNewLine();
+                foreach (var member in fieldsNeedingTempList)
+                {
+                    _sb.AppendIndentedLine($"if (_tempList_{member.Name} != null)");
+                    _sb.StartNewBlock();
+
+                    if (member.CollectionKind == CollectionKind.Array)
+                    {
+                        // Arrays need ToArray() conversion
+                        _sb.AppendIndentedLine($"result.{member.Name} = _tempList_{member.Name}.ToArray();");
+                    }
+                    else
+                    {
+                        // IEnumerable can be assigned List directly (List implements IEnumerable)
+                        _sb.AppendIndentedLine($"result.{member.Name} = _tempList_{member.Name};");
+                    }
+
+                    _sb.EndBlock();
+                }
+            }
+
+            // Initialize null collection properties to empty collections
+            if (type.ProtoMembers != null)
+            {
+                var collectionMembers = type.ProtoMembers
+                    .Where(m => m.IsCollection || m.IsMap)
+                    .ToList();
+
+                if (collectionMembers.Count > 0)
+                {
+                    _sb.AppendNewLine();
+                    _sb.AppendIndentedLine("// Initialize any null collections to prevent null reference exceptions");
+
+                    foreach (var member in collectionMembers)
+                    {
+                        // Skip arrays (remain null if no data)
+                        if (member.CollectionKind == CollectionKind.Array)
+                            continue;
+
+                        // Skip custom concrete collection types (can't safely initialize)
+                        if (member.CollectionKind == CollectionKind.ConcreteCollection)
+                            continue;
+
+                        if (member.IsMap)
+                        {
+                            // Check if this is a standard Dictionary (not a derived type like DerivedDictionary)
+                            var normalizedType = TypeMapping.NormalizeTypeName(member.Type ?? "");
+                            if (normalizedType.StartsWith("System.Collections.Generic.Dictionary<") ||
+                                normalizedType.StartsWith("System.Collections.Generic.IDictionary<"))
+                            {
+                                // Initialize Dictionary if null
+                                var keyType = TypeMapping.GetShortTypeName(member.MapKeyType);
+                                var valueType = TypeMapping.GetShortTypeName(member.MapValueType);
+                                _sb.AppendIndentedLine($"result.{member.Name} ??= new global::System.Collections.Generic.Dictionary<{keyType}, {valueType}>();");
+                            }
+                            // Otherwise skip (custom derived dictionary type)
+                        }
+                        else if (member.Type != null && member.Type.Contains("HashSet"))
+                        {
+                            // Initialize HashSet if null
+                            var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType);
+                            _sb.AppendIndentedLine($"result.{member.Name} ??= new global::System.Collections.Generic.HashSet<{elementType}>();");
+                        }
+                        else if (member.IsCollection)
+                        {
+                            // Initialize List if null (covers List, IList, ICollection, IEnumerable)
+                            var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType);
+                            _sb.AppendIndentedLine($"result.{member.Name} ??= new global::System.Collections.Generic.List<{elementType}>();");
+                        }
+                    }
+                }
+            }
+
             _sb.AppendIndentedLine("return result;");
         }
 
@@ -520,6 +614,27 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 _sb.AppendIndentedLine($"global::{type.FullName} result = new global::{type.FullName}();");
             }
             _sb.AppendNewLine();
+
+            // Declare temp lists for array fields and IEnumerable interface fields (same as in Populate)
+            var fieldsNeedingTempList = type.ProtoMembers?
+                .Where(m => m.IsCollection && (
+                    m.CollectionKind == CollectionKind.Array ||
+                    (m.CollectionKind == CollectionKind.InterfaceCollection && m.Type != null &&
+                     TypeMapping.NormalizeTypeName(m.Type).StartsWith("System.Collections.Generic.IEnumerable<") &&
+                     !m.Type.Contains("ICollection") &&
+                     !m.Type.Contains("IList"))
+                ))
+                .ToList();
+
+            if (fieldsNeedingTempList != null && fieldsNeedingTempList.Count > 0)
+            {
+                foreach (var member in fieldsNeedingTempList)
+                {
+                    var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType);
+                    _sb.AppendIndentedLine($"global::System.Collections.Generic.List<{elementType}> _tempList_{member.Name} = null;");
+                }
+                _sb.AppendNewLine();
+            }
 
             // Read loop
             _sb.AppendIndentedLine("while (!reader.IsEnd)");
@@ -558,6 +673,82 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             _sb.EndBlock();
             _sb.EndBlock();
+
+            // Convert temp lists to arrays or assign to IEnumerable properties
+            if (fieldsNeedingTempList != null && fieldsNeedingTempList.Count > 0)
+            {
+                _sb.AppendNewLine();
+                foreach (var member in fieldsNeedingTempList)
+                {
+                    _sb.AppendIndentedLine($"if (_tempList_{member.Name} != null)");
+                    _sb.StartNewBlock();
+
+                    if (member.CollectionKind == CollectionKind.Array)
+                    {
+                        // Arrays need ToArray() conversion
+                        _sb.AppendIndentedLine($"result.{member.Name} = _tempList_{member.Name}.ToArray();");
+                    }
+                    else
+                    {
+                        // IEnumerable can be assigned List directly (List implements IEnumerable)
+                        _sb.AppendIndentedLine($"result.{member.Name} = _tempList_{member.Name};");
+                    }
+
+                    _sb.EndBlock();
+                }
+            }
+
+            // Initialize null collection properties to empty collections
+            if (type.ProtoMembers != null)
+            {
+                var collectionMembers = type.ProtoMembers
+                    .Where(m => m.IsCollection || m.IsMap)
+                    .ToList();
+
+                if (collectionMembers.Count > 0)
+                {
+                    _sb.AppendNewLine();
+                    _sb.AppendIndentedLine("// Initialize any null collections to prevent null reference exceptions");
+
+                    foreach (var member in collectionMembers)
+                    {
+                        // Skip arrays (remain null if no data)
+                        if (member.CollectionKind == CollectionKind.Array)
+                            continue;
+
+                        // Skip custom concrete collection types (can't safely initialize)
+                        if (member.CollectionKind == CollectionKind.ConcreteCollection)
+                            continue;
+
+                        if (member.IsMap)
+                        {
+                            // Check if this is a standard Dictionary (not a derived type like DerivedDictionary)
+                            var normalizedType = TypeMapping.NormalizeTypeName(member.Type ?? "");
+                            if (normalizedType.StartsWith("System.Collections.Generic.Dictionary<") ||
+                                normalizedType.StartsWith("System.Collections.Generic.IDictionary<"))
+                            {
+                                // Initialize Dictionary if null
+                                var keyType = TypeMapping.GetShortTypeName(member.MapKeyType);
+                                var valueType = TypeMapping.GetShortTypeName(member.MapValueType);
+                                _sb.AppendIndentedLine($"result.{member.Name} ??= new global::System.Collections.Generic.Dictionary<{keyType}, {valueType}>();");
+                            }
+                            // Otherwise skip (custom derived dictionary type)
+                        }
+                        else if (member.Type != null && member.Type.Contains("HashSet"))
+                        {
+                            // Initialize HashSet if null
+                            var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType);
+                            _sb.AppendIndentedLine($"result.{member.Name} ??= new global::System.Collections.Generic.HashSet<{elementType}>();");
+                        }
+                        else if (member.IsCollection)
+                        {
+                            // Initialize List if null (covers List, IList, ICollection, IEnumerable)
+                            var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType);
+                            _sb.AppendIndentedLine($"result.{member.Name} ??= new global::System.Collections.Generic.List<{elementType}>();");
+                        }
+                    }
+                }
+            }
 
             _sb.AppendIndentedLine("return result;");
         }
@@ -600,6 +791,28 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateSimplePopulate(TypeDefinition type, string className)
         {
+            // Declare temp lists for array fields and IEnumerable interface fields
+            // Arrays can't use Add(), and IEnumerable<T> doesn't have Add() method
+            var fieldsNeedingTempList = type.ProtoMembers?
+                .Where(m => m.IsCollection && (
+                    m.CollectionKind == CollectionKind.Array ||
+                    (m.CollectionKind == CollectionKind.InterfaceCollection && m.Type != null &&
+                     TypeMapping.NormalizeTypeName(m.Type).StartsWith("System.Collections.Generic.IEnumerable<") &&
+                     !m.Type.Contains("ICollection") &&
+                     !m.Type.Contains("IList"))
+                ))
+                .ToList();
+
+            if (fieldsNeedingTempList != null && fieldsNeedingTempList.Count > 0)
+            {
+                foreach (var member in fieldsNeedingTempList)
+                {
+                    var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType);
+                    _sb.AppendIndentedLine($"global::System.Collections.Generic.List<{elementType}> _tempList_{member.Name} = null;");
+                }
+                _sb.AppendNewLine();
+            }
+
             // Read loop
             _sb.AppendIndentedLine("while (!reader.IsEnd)");
             _sb.StartNewBlock();
@@ -633,6 +846,30 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
 
             _sb.EndBlock();
+
+            // Convert temp lists to arrays or assign to IEnumerable properties
+            if (fieldsNeedingTempList != null && fieldsNeedingTempList.Count > 0)
+            {
+                _sb.AppendNewLine();
+                foreach (var member in fieldsNeedingTempList)
+                {
+                    _sb.AppendIndentedLine($"if (_tempList_{member.Name} != null)");
+                    _sb.StartNewBlock();
+
+                    if (member.CollectionKind == CollectionKind.Array)
+                    {
+                        // Arrays need ToArray() conversion
+                        _sb.AppendIndentedLine($"instance.{member.Name} = _tempList_{member.Name}.ToArray();");
+                    }
+                    else
+                    {
+                        // IEnumerable can be assigned List directly (List implements IEnumerable)
+                        _sb.AppendIndentedLine($"instance.{member.Name} = _tempList_{member.Name};");
+                    }
+
+                    _sb.EndBlock();
+                }
+            }
         }
 
         /// <summary>

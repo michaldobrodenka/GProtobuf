@@ -166,6 +166,47 @@ namespace GProtobuf.Generator.V2.Handlers.Core
 
         #endregion
 
+        #region Nullable Helpers
+
+        /// <summary>
+        /// Checks if a type is Nullable (Nullable<T> or T?).
+        /// </summary>
+        public static bool IsNullableType(string typeName)
+        {
+            if (string.IsNullOrEmpty(typeName))
+                return false;
+
+            return typeName.Contains("Nullable<") || typeName.EndsWith("?");
+        }
+
+        /// <summary>
+        /// Gets the underlying type from a Nullable type.
+        /// Example: "int?" → "int", "Nullable<int>" → "int"
+        /// </summary>
+        public static string GetNullableUnderlyingType(string nullableTypeName)
+        {
+            if (!IsNullableType(nullableTypeName))
+                return nullableTypeName;
+
+            // Handle T? syntax
+            if (nullableTypeName.EndsWith("?"))
+            {
+                return nullableTypeName.Substring(0, nullableTypeName.Length - 1);
+            }
+
+            // Handle Nullable<T> syntax
+            var startIndex = nullableTypeName.IndexOf('<') + 1;
+            var endIndex = nullableTypeName.LastIndexOf('>');
+            if (startIndex > 0 && endIndex > startIndex)
+            {
+                return nullableTypeName.Substring(startIndex, endIndex - startIndex);
+            }
+
+            return nullableTypeName;
+        }
+
+        #endregion
+
         #region Dictionary Helpers
 
         /// <summary>
@@ -176,6 +217,23 @@ namespace GProtobuf.Generator.V2.Handlers.Core
             // Already has global:: prefix
             if (typeName.StartsWith("global::"))
                 return typeName;
+
+            // Handle arrays
+            if (typeName.EndsWith("[]"))
+            {
+                var elementType = typeName.Substring(0, typeName.Length - 2);
+
+                // Primitive arrays (int[], string[], byte[]) don't need global::
+                if (IsPrimitiveType(elementType))
+                    return typeName;
+
+                // System type arrays (System.Int32[], System.String[]) don't need global::
+                if (elementType.StartsWith("System."))
+                    return typeName;
+
+                // Custom type arrays need global:: before the element type
+                return $"global::{elementType}[]";
+            }
 
             // Primitive types and system types don't need global:: prefix
             if (IsPrimitiveType(typeName) || typeName.StartsWith("System."))

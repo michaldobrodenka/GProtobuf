@@ -260,14 +260,24 @@ namespace GProtobuf.Core
         //    }
         //}
 
-        //public void WriteGuid(Guid value)
-        //{
-        //    // Write Guid as 16-byte array (same as protobuf-net)
-        //    EnsureBufferSpace(16);
-        //    if (!value.TryWriteBytes(buffer.Slice(bufferPosition, 16)))
-        //        throw new InvalidOperationException("Failed to write Guid to buffer");
-        //    bufferPosition += 16;
-        //}
+        public void WriteGuid(Guid value)
+        {
+            // Write Guid as 16-byte length-delimited value (same as protobuf-net)
+            WriteVarUInt32(16); // Length
+            EnsureBufferSpace(16);
+            if (!value.TryWriteBytes(buffer.Slice(bufferPosition, 16)))
+                throw new InvalidOperationException("Failed to write Guid to buffer");
+            bufferPosition += 16;
+        }
+
+        /// <summary>
+        /// Writes a TimeSpan value (serialized as Ticks - VarInt64).
+        /// Zero allocations, fast serialization.
+        /// </summary>
+        public void WriteTimeSpan(TimeSpan value)
+        {
+            WriteVarInt64(value.Ticks);
+        }
 
 
 

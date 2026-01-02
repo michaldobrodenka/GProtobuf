@@ -22,6 +22,34 @@ public sealed class SerializerGenerator : IIncrementalGenerator
         var configOptions = context.AnalyzerConfigOptionsProvider
             .Select((provider, _) => provider.GlobalOptions.TryGetValue("build_property.GenerateRefactored", out var _));
 
+        // Collect all enums from compilation
+        var enumTypesProvider = context.CompilationProvider
+            .Select(static (compilation, _) =>
+            {
+                var enumTypes = new HashSet<string>();
+
+                foreach (var syntaxTree in compilation.SyntaxTrees)
+                {
+                    var semanticModel = compilation.GetSemanticModel(syntaxTree);
+                    var root = syntaxTree.GetRoot();
+
+                    var enumDeclarations = root.DescendantNodes()
+                        .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.EnumDeclarationSyntax>();
+
+                    foreach (var enumDecl in enumDeclarations)
+                    {
+                        var symbol = semanticModel.GetDeclaredSymbol(enumDecl);
+                        if (symbol != null)
+                        {
+                            // Store fully qualified name
+                            enumTypes.Add(symbol.ToDisplayString());
+                        }
+                    }
+                }
+
+                return enumTypes;
+            });
+
         var pipeline = context.SyntaxProvider.ForAttributeWithMetadataName(
             fullyQualifiedMetadataName: "ProtoBuf.ProtoContractAttribute",
             predicate: static (node, _) => node is ClassDeclarationSyntax,
@@ -42,11 +70,12 @@ public sealed class SerializerGenerator : IIncrementalGenerator
             });
         
         context.RegisterSourceOutput(
-            pipeline.Collect().Combine(configOptions),
+            pipeline.Collect().Combine(configOptions).Combine(enumTypesProvider),
             static (context, provider) =>
             {
-                var typeDefinitions = provider.Left;
-                var shouldUsedRefactored = provider.Right;
+                var typeDefinitions = provider.Left.Left;
+                var shouldUsedRefactored = provider.Left.Right;
+                var enumTypes = provider.Right;
 
                 //if (shouldUsedRefactored)
                 //{
@@ -63,8 +92,8 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                 //    }
                 //    return;
                 //}
-                
-                var objectTree = new ObjectTreeV2();
+
+                var objectTree = new ObjectTreeV2(enumTypes);
                 foreach (var (namespaceName, typeDefinition) in typeDefinitions)
                 {
                     objectTree.AddType(namespaceName, typeDefinition);
@@ -126,7 +155,8 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                     {
                         isEnum = true;
                         var enumType = (INamedTypeSymbol)checkType;
-                        enumUnderlyingType = enumType.EnumUnderlyingType?.ToDisplayString() ?? "System.Int32";
+                        var rawUnderlyingType = enumType.EnumUnderlyingType?.ToDisplayString() ?? "System.Int32";
+                        enumUnderlyingType = TypeMapping.NormalizeTypeName(rawUnderlyingType);
                     }
 
                     // Vytvoríme inštanciu s FieldId
@@ -138,11 +168,11 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                         Interfaces = property.Type.AllInterfaces.Select(i => i.ToDisplayString()).ToList(),
                         IsNullable = isNullable,
                         IsCollection = collectionInfo.IsCollection,
-                        CollectionElementType = collectionInfo.ElementType,
+                        CollectionElementType = collectionInfo.ElementType != null ? TypeMapping.NormalizeTypeName(collectionInfo.ElementType) : null,
                         CollectionKind = collectionInfo.Kind,
                         IsMap = isMap,
-                        MapKeyType = keyType,
-                        MapValueType = valueType,
+                        MapKeyType = keyType != null ? TypeMapping.NormalizeTypeName(keyType) : null,
+                        MapValueType = valueType != null ? TypeMapping.NormalizeTypeName(valueType) : null,
                         MapKeyIsEnum = keyIsEnum,
                         MapKeyEnumUnderlyingType = keyEnumType,
                         MapValueIsEnum = valueIsEnum,
@@ -321,14 +351,14 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                 
                 var keyType = keyTypeSymbol.ToDisplayString();
                 var valueType = valueTypeSymbol.ToDisplayString();
-                
+
                 // Check if key is enum
                 bool keyIsEnum = keyTypeSymbol.TypeKind == TypeKind.Enum;
-                string keyEnumUnderlyingType = keyIsEnum ? ((INamedTypeSymbol)keyTypeSymbol).EnumUnderlyingType?.ToDisplayString() ?? "System.Int32" : null;
-                
+                string keyEnumUnderlyingType = keyIsEnum ? TypeMapping.NormalizeTypeName(((INamedTypeSymbol)keyTypeSymbol).EnumUnderlyingType?.ToDisplayString() ?? "System.Int32") : null;
+
                 // Check if value is enum
                 bool valueIsEnum = valueTypeSymbol.TypeKind == TypeKind.Enum;
-                string valueEnumUnderlyingType = valueIsEnum ? ((INamedTypeSymbol)valueTypeSymbol).EnumUnderlyingType?.ToDisplayString() ?? "System.Int32" : null;
+                string valueEnumUnderlyingType = valueIsEnum ? TypeMapping.NormalizeTypeName(((INamedTypeSymbol)valueTypeSymbol).EnumUnderlyingType?.ToDisplayString() ?? "System.Int32") : null;
                 
                 // Arrays as keys are supported in Protocol Buffers - they're treated as byte arrays or repeated fields
                 // Remove the check that prevented collections as keys

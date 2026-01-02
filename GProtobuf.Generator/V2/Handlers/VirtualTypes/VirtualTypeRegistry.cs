@@ -12,10 +12,12 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         private readonly Dictionary<string, VirtualMapEntryInfo> _registeredTypes = new();
         private readonly List<VirtualMapEntryInfo> _orderedTypes = new();
         private readonly VirtualTupleTypeRegistry _tupleRegistry;
+        private readonly TypeRegistry _typeRegistry;
 
-        public VirtualMapTypeRegistry(VirtualTupleTypeRegistry tupleRegistry = null)
+        public VirtualMapTypeRegistry(VirtualTupleTypeRegistry tupleRegistry = null, TypeRegistry typeRegistry = null)
         {
             _tupleRegistry = tupleRegistry;
+            _typeRegistry = typeRegistry;
         }
 
         /// <summary>
@@ -141,10 +143,10 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             }
 
             // Check for primitive
-            if (TypeMapping.IsSimpleType(typeName))
+            if (TypeMapping.IsSimpleType(normalized))
             {
                 info.IsPrimitive = true;
-                info.ShortTypeName = TypeMapping.GetShortTypeName(typeName);
+                info.ShortTypeName = TypeMapping.GetShortTypeName(normalized);
                 return info;
             }
 
@@ -161,7 +163,9 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             if (typeName.EndsWith("[]"))
             {
                 info.IsArray = true;
-                info.CollectionElementType = typeName.Substring(0, typeName.Length - 2);
+                var elementType = typeName.Substring(0, typeName.Length - 2);
+                // Normalize element type (e.g., "byte" -> "System.Byte")
+                info.CollectionElementType = TypeMapping.NormalizeTypeName(elementType);
                 info.CollectionElementTypeInfo = AnalyzeType(info.CollectionElementType);
                 return info;
             }
@@ -175,9 +179,11 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             {
                 info.IsCollection = true;
                 info.IsList = true;
-                info.CollectionElementType = ParseSingleGenericArg(typeName);
-                if (info.CollectionElementType != null)
+                var elementType = ParseSingleGenericArg(typeName);
+                if (elementType != null)
                 {
+                    // Normalize element type (e.g., "byte" -> "System.Byte")
+                    info.CollectionElementType = TypeMapping.NormalizeTypeName(elementType);
                     info.CollectionElementTypeInfo = AnalyzeType(info.CollectionElementType);
                 }
                 return info;
@@ -188,9 +194,11 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             {
                 info.IsCollection = true;
                 info.IsHashSet = true;
-                info.CollectionElementType = ParseSingleGenericArg(typeName);
-                if (info.CollectionElementType != null)
+                var elementType = ParseSingleGenericArg(typeName);
+                if (elementType != null)
                 {
+                    // Normalize element type (e.g., "byte" -> "System.Byte")
+                    info.CollectionElementType = TypeMapping.NormalizeTypeName(elementType);
                     info.CollectionElementTypeInfo = AnalyzeType(info.CollectionElementType);
                 }
                 return info;
@@ -201,9 +209,18 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             {
                 info.IsDictionary = true;
                 var (keyType, valueType) = ParseTwoGenericArgs(typeName);
-                info.DictionaryKeyType = keyType;
-                info.DictionaryValueType = valueType;
-                info.MapEntryTypeName = VirtualTypeNameGenerator.GetMapEntryTypeName(keyType, valueType);
+                // Normalize types (e.g., "byte" -> "System.Byte")
+                info.DictionaryKeyType = TypeMapping.NormalizeTypeName(keyType);
+                info.DictionaryValueType = TypeMapping.NormalizeTypeName(valueType);
+                info.MapEntryTypeName = VirtualTypeNameGenerator.GetMapEntryTypeName(info.DictionaryKeyType, info.DictionaryValueType);
+                return info;
+            }
+
+            // Check for enum type (before IsCustomType check)
+            if (_typeRegistry != null && _typeRegistry.IsEnum(normalized))
+            {
+                info.IsEnum = true;
+                info.ShortTypeName = TypeNameHelper.GetClassName(typeName);
                 return info;
             }
 
@@ -309,6 +326,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         public bool IsPrimitive { get; set; }
         public bool IsString { get; set; }
         public bool IsGuid { get; set; }
+        public bool IsEnum { get; set; }
         public bool IsArray { get; set; }
         public bool IsCollection { get; set; }
         public bool IsList { get; set; }

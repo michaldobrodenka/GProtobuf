@@ -16,6 +16,18 @@ namespace GProtobuf.Generator.V2
 
         #region Type Registration
 
+        public ObjectTreeV2(HashSet<string> enumTypes)
+        {
+            // Register all enum types in the TypeRegistry
+            if (enumTypes != null)
+            {
+                foreach (var enumType in enumTypes)
+                {
+                    _registry.RegisterEnum(enumType);
+                }
+            }
+        }
+
         public void AddType(string @namespace, TypeDefinition type)
         {
             _registry.Register(@namespace, type);
@@ -34,7 +46,7 @@ namespace GProtobuf.Generator.V2
 
                 // Create shared virtual registries
                 var virtualTupleRegistry = new VirtualTupleTypeRegistry();
-                var virtualMapRegistry = new VirtualMapTypeRegistry(virtualTupleRegistry);
+                var virtualMapRegistry = new VirtualMapTypeRegistry(virtualTupleRegistry, _registry);
 
                 WriteHeader(sb, ns);
 
@@ -64,10 +76,6 @@ namespace GProtobuf.Generator.V2
                 // Generate KeyValue structs AFTER all types are registered
                 var keyValueGenerator = new KeyValueClassGenerator(sb, virtualMapRegistry);
                 keyValueGenerator.GenerateAllKeyValueClasses();
-
-                // Generate TupleValue structs AFTER all types are registered
-                var tupleValueGenerator = new TupleValueGenerator(sb, virtualTupleRegistry);
-                tupleValueGenerator.GenerateAllTupleValueStructs();
 
                 WriteFooter(sb);
 

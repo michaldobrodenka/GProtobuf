@@ -222,6 +222,23 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             if (typeName.StartsWith("global::"))
                 return typeName;
 
+            // Handle arrays
+            if (typeName.EndsWith("[]"))
+            {
+                var elementType = typeName.Substring(0, typeName.Length - 2);
+
+                // Primitive arrays (int[], string[], byte[]) don't need global::
+                if (IsPrimitiveType(elementType))
+                    return typeName;
+
+                // System type arrays (System.Int32[], System.String[]) don't need global::
+                if (elementType.StartsWith("System."))
+                    return typeName;
+
+                // Custom type arrays need global:: before the element type
+                return $"global::{elementType}[]";
+            }
+
             // Primitive types don't need global::
             if (IsPrimitiveType(typeName))
                 return typeName;
