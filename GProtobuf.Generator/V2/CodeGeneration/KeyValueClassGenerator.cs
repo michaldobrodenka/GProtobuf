@@ -139,7 +139,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         /// <summary>
         /// Generates the Value property with ProtoMember(2).
-        /// For nested dictionaries, Value becomes List<KeyValue>.
+        /// APPROACH A: Nested dictionaries keep their Dictionary&lt;K,V&gt; type (no conversion to List).
         /// </summary>
         private void GenerateValueProperty(VirtualMapEntryInfo mapInfo)
         {
@@ -149,23 +149,24 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         }
 
         /// <summary>
-        /// Determines the property type. For dictionaries, converts to List<KeyValue>.
+        /// Determines the property type.
+        /// APPROACH A: Nested dictionaries remain as Dictionary&lt;K,V&gt;, NOT converted to List&lt;KeyValue&gt;.
+        ///
+        /// RATIONALE:
+        /// - Native Dictionary provides O(1) lookups after deserialization
+        /// - No conversion overhead from List → Dictionary
+        /// - Simpler API for users (direct access)
+        /// - Matches protobuf spec semantics
         /// </summary>
         private string GetPropertyType(string originalType, TypeAnalysisInfo typeInfo)
         {
-            // If the type is a dictionary, replace it with List<KeyValue_xxx>
+            // For dictionaries, keep the original Dictionary<K,V> type
+            // Virtual map readers return (bool, K, Dictionary<K2,V2>) directly
             if (typeInfo.IsDictionary)
             {
-                var nestedMapInfo = _mapRegistry.GetTypeInfo(
-                    VirtualTypeNameGenerator.GetMapEntryTypeName(
-                        typeInfo.DictionaryKeyType,
-                        typeInfo.DictionaryValueType));
-
-                if (nestedMapInfo != null)
-                {
-                    var nestedClassName = GetKeyValueClassName(nestedMapInfo);
-                    return $"global::System.Collections.Generic.List<{nestedClassName}>";
-                }
+                var keyType = EnsureGlobalPrefix(typeInfo.DictionaryKeyType);
+                var valueType = EnsureGlobalPrefix(typeInfo.DictionaryValueType);
+                return $"global::System.Collections.Generic.Dictionary<{keyType}, {valueType}>";
             }
 
             // For all other types, use as-is with global:: prefix
@@ -175,43 +176,14 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// <summary>
         /// Gets the KeyValue class name from map info.
         /// Example: KeyValue_Int32_String
+        /// Uses VirtualTypeNameGenerator for consistent naming.
         /// </summary>
         private string GetKeyValueClassName(VirtualMapEntryInfo mapInfo)
         {
-            var keyName = GetSafeTypeName(mapInfo.KeyTypeInfo.SafeName);
-            var valueName = GetSafeValueTypeName(mapInfo);
+            var keyName = VirtualTypeNameGenerator.GetSafeTypeName(mapInfo.KeyType);
+            var valueName = VirtualTypeNameGenerator.GetSafeTypeName(mapInfo.ValueType);
 
             return $"KeyValue_{keyName}_{valueName}";
-        }
-
-        /// <summary>
-        /// Gets safe type name for value, handling dictionaries as ListOfKeyValue.
-        /// </summary>
-        private string GetSafeValueTypeName(VirtualMapEntryInfo mapInfo)
-        {
-            if (mapInfo.ValueTypeInfo.IsDictionary)
-            {
-                var nestedKeyName = GetSafeTypeName(mapInfo.ValueTypeInfo.DictionaryKeyType);
-                var nestedValueName = GetSafeTypeName(mapInfo.ValueTypeInfo.DictionaryValueType);
-                return $"ListOfKeyValue_{nestedKeyName}_{nestedValueName}";
-            }
-
-            return GetSafeTypeName(mapInfo.ValueTypeInfo.SafeName);
-        }
-
-        /// <summary>
-        /// Converts type name to safe identifier (removes dots, generics, etc).
-        /// </summary>
-        private string GetSafeTypeName(string typeName)
-        {
-            return typeName
-                .Replace(".", "")
-                .Replace("<", "")
-                .Replace(">", "")
-                .Replace(",", "")
-                .Replace(" ", "")
-                .Replace("[", "")
-                .Replace("]", "");
         }
 
         /// <summary>

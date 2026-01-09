@@ -314,12 +314,12 @@ namespace GProtobuf.Tests
         {
             // Arrange
             var original = CreateTestModel();
-            
+
             // Act - Serialize with protobuf-net
             var ms = new MemoryStream();
             ProtoBuf.Serializer.Serialize(ms, original);
             var protobufNetBytes = ms.ToArray();
-            
+
             // Deserialize with GProtobuf
             var gprotobufDeserialized = Deserializers.DeserializeGuidMapTestModel(protobufNetBytes);
             

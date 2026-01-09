@@ -21,7 +21,7 @@ namespace GProtobuf.Generator.V2.Helpers
 
         /// <summary>
         /// Gets a valid C# method name from a full type name.
-        /// Handles nullable types, value tuples, and generic types.
+        /// Handles nullable types, value tuples, arrays, and generic types.
         /// </summary>
         public static string GetClassName(string fullName)
         {
@@ -41,8 +41,8 @@ namespace GProtobuf.Generator.V2.Helpers
             // Get simple name without namespace (careful with dots inside generics)
             var simpleName = GetSimpleTypeName(fullName);
 
-            // Sanitize generic type names for method naming
-            if (simpleName.Contains("<"))
+            // Sanitize generic type names and arrays for method naming
+            if (simpleName.Contains("<") || simpleName.Contains("["))
             {
                 return SanitizeGenericTypeName(simpleName);
             }
@@ -180,7 +180,7 @@ namespace GProtobuf.Generator.V2.Helpers
 
         private static string SanitizePrimitiveName(string typeName)
         {
-            return typeName switch
+            var result = typeName switch
             {
                 "string" or "String" => "string",
                 "int" or "Int32" => "int",
@@ -196,8 +196,19 @@ namespace GProtobuf.Generator.V2.Helpers
                 "sbyte" or "SByte" => "sbyte",
                 "decimal" or "Decimal" => "decimal",
                 "char" or "Char" => "char",
+                "Guid" => "Guid",
+                "DateTime" => "DateTime",
+                "TimeSpan" => "TimeSpan",
                 _ => typeName
             };
+
+            // If not a primitive and contains namespace, extract simple name
+            if (result == typeName && typeName.Contains("."))
+            {
+                return GetSimpleTypeName(typeName);
+            }
+
+            return result;
         }
     }
 }

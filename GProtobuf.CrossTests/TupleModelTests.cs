@@ -184,9 +184,17 @@ namespace GProtobuf.CrossTests
             global::GProtobuf.Tests.TestModel.Serialization.Serializers.SerializeTupleModel(ms, original);
             var bytes = ms.ToArray();
 
+            // Debug: Compare with protobuf-net serialization
+            using var ms2 = new MemoryStream();
+            ProtoBuf.Serializer.Serialize(ms2, original);
+            var pbnetBytes = ms2.ToArray();
+
+            Console.WriteLine($"GProtobuf ({bytes.Length} bytes): {BitConverter.ToString(bytes.Take(100).ToArray())}");
+            Console.WriteLine($"protobuf-net ({pbnetBytes.Length} bytes): {BitConverter.ToString(pbnetBytes.Take(100).ToArray())}");
+
             ms.Position = 0;
             var deserialized = ProtoBuf.Serializer.Deserialize<TupleModel>(ms);
-            
+
             AssertTupleModelsEqual(original, deserialized);
         }
 

@@ -33,10 +33,25 @@ namespace GProtobuf.Generator.V2
 
             typeName = typeName.Trim();
 
-            // Handle nullable types
+            // Remove global:: prefix if present
+            if (typeName.StartsWith("global::"))
+            {
+                typeName = typeName.Substring(8);
+            }
+
+            // Handle nullable types - "int?" syntax
             if (typeName.EndsWith("?"))
             {
                 var innerType = typeName.Substring(0, typeName.Length - 1);
+                return $"Nullable{GetSafeTypeName(innerType)}";
+            }
+
+            // Handle nullable types - "System.Nullable<int>" or "Nullable<int>" syntax
+            if ((typeName.StartsWith("System.Nullable<") || typeName.StartsWith("Nullable<")) && typeName.EndsWith(">"))
+            {
+                int startIdx = typeName.IndexOf('<') + 1;
+                int endIdx = typeName.LastIndexOf('>');
+                string innerType = typeName.Substring(startIdx, endIdx - startIdx).Trim();
                 return $"Nullable{GetSafeTypeName(innerType)}";
             }
 

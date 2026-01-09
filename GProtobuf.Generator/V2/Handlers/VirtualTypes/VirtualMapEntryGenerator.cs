@@ -31,6 +31,54 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         #region SpanReader Generation
 
         /// <summary>
+        /// Generates the EstimateMapCapacity helper method (generated once, used by all map readers).
+        /// </summary>
+        public void GenerateEstimateMapCapacityHelper()
+        {
+            _sb.AppendIndentedLine("/// <summary>");
+            _sb.AppendIndentedLine("/// Estimates dictionary capacity from length-delimited bytes.");
+            _sb.AppendIndentedLine("///");
+            _sb.AppendIndentedLine("/// RATIONALE:");
+            _sb.AppendIndentedLine("/// - Protobuf maps don't have entry count metadata in the wire format");
+            _sb.AppendIndentedLine("/// - We estimate based on total byte length of the serialized dictionary");
+            _sb.AppendIndentedLine("/// - Average entry size varies by type:");
+            _sb.AppendIndentedLine("///   * Primitives (int->int): ~12 bytes per entry");
+            _sb.AppendIndentedLine("///   * String maps (string->string): ~32+ bytes per entry");
+            _sb.AppendIndentedLine("///   * Complex types: ~48+ bytes per entry");
+            _sb.AppendIndentedLine("///");
+            _sb.AppendIndentedLine("/// TRADE-OFF:");
+            _sb.AppendIndentedLine("/// - Over-estimating wastes memory (~25% overhead is acceptable)");
+            _sb.AppendIndentedLine("/// - Under-estimating causes expensive resizes (2x cost: copy + re-hash)");
+            _sb.AppendIndentedLine("/// - Conservative estimate (16 bytes/entry) minimizes resizes while limiting waste");
+            _sb.AppendIndentedLine("///");
+            _sb.AppendIndentedLine("/// SAFETY:");
+            _sb.AppendIndentedLine("/// - Caps at 1024 entries to prevent huge allocations from malformed data");
+            _sb.AppendIndentedLine("/// - Beyond 1024, dictionary will auto-resize as needed during parsing");
+            _sb.AppendIndentedLine("/// </summary>");
+            _sb.AppendIndentedLine("[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
+            _sb.AppendIndentedLine("private static int EstimateMapCapacity(uint lengthBytes)");
+            _sb.StartNewBlock();
+
+            _sb.AppendIndentedLine("// Empty or single entry");
+            _sb.AppendIndentedLine("if (lengthBytes < 16) return 1;");
+            _sb.AppendNewLine();
+
+            _sb.AppendIndentedLine("// Cap at 1024 to prevent huge allocations from malformed/malicious data");
+            _sb.AppendIndentedLine("// Beyond 1024 entries, dictionary will auto-resize as needed");
+            _sb.AppendIndentedLine("if (lengthBytes > 16384) return 1024;");
+            _sb.AppendNewLine();
+
+            _sb.AppendIndentedLine("// Heuristic: 16 bytes per entry (conservative average)");
+            _sb.AppendIndentedLine("// - Simple types (int->int): ~12 bytes (tag:1 + len:1 + tag:1 + key:4 + tag:1 + value:4)");
+            _sb.AppendIndentedLine("// - String maps: ~32+ bytes (varies with string length)");
+            _sb.AppendIndentedLine("// - Complex types: ~48+ bytes");
+            _sb.AppendIndentedLine("return (int)(lengthBytes / 16);");
+
+            _sb.EndBlock(); // method
+            _sb.AppendNewLine();
+        }
+
+        /// <summary>
         /// Generates a reader method for a virtual map entry type.
         /// </summary>
         public void GenerateReader(VirtualMapEntryInfo info)
@@ -137,6 +185,18 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
 
         private void GenerateFieldRead(string targetVar, string typeName, TypeAnalysisInfo typeInfo, bool isEnum, string fieldPrefix = "")
         {
+            // byte[] is a primitive type (bytes), not a collection - check this FIRST before anything else
+            var normalizedType = TypeMapping.NormalizeTypeName(typeName);
+            if (normalizedType == "System.Byte[]")
+            {
+                var readExpr = TypeMapping.GetReadExpression(typeName, DataFormat.Default, "reader");
+                if (readExpr != null)
+                {
+                    _sb.AppendIndentedLine($"{targetVar} = {readExpr};");
+                }
+                return;
+            }
+
             if (isEnum)
             {
                 _sb.AppendIndentedLine($"{targetVar} = ({typeName})reader.ReadVarInt32();");
@@ -153,18 +213,6 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
 
                 // Use TypeMapping for other primitives
                 var readExpr = TypeMapping.GetElementReadExpression(typeName, DataFormat.Default, "reader");
-                if (readExpr != null)
-                {
-                    _sb.AppendIndentedLine($"{targetVar} = {readExpr};");
-                }
-                return;
-            }
-
-            // byte[] is a primitive type (bytes), not a collection
-            var normalizedType = TypeMapping.NormalizeTypeName(typeName);
-            if (normalizedType == "System.Byte[]")
-            {
-                var readExpr = TypeMapping.GetReadExpression(typeName, DataFormat.Default, "reader");
                 if (readExpr != null)
                 {
                     _sb.AppendIndentedLine($"{targetVar} = {readExpr};");
@@ -193,40 +241,41 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 _sb.AppendIndentedLine($"{tempListVar} ??= new global::System.Collections.Generic.List<{shortElementType}>();");
 
                 // Generate array-specific reading logic (inline, not calling GenerateCollectionFieldRead)
-                if (elemInfo.IsPrimitive)
-                {
-                    var normalizedElem = TypeMapping.NormalizeTypeName(elementType);
+                var normalizedElem = TypeMapping.NormalizeTypeName(elementType);
 
-                    // String and Guid are always non-packed
-                    if (normalizedElem == "System.String")
+                // Check for special non-packable types first (String, Guid, TimeSpan)
+                if (normalizedElem == "System.String")
+                {
+                    _sb.AppendIndentedLine($"{tempListVar}.Add(global::GProtobuf.Core.SpanReaders.ReadString(ref reader, global::GProtobuf.Core.WireType.Len));");
+                }
+                else if (normalizedElem == "System.Guid")
+                {
+                    _sb.AppendIndentedLine($"{tempListVar}.Add(reader.ReadGuid(global::GProtobuf.Core.WireType.Len));");
+                }
+                else if (normalizedElem == "System.TimeSpan")
+                {
+                    _sb.AppendIndentedLine($"{tempListVar}.Add(reader.ReadTimeSpan(global::GProtobuf.Core.WireType.VarInt));");
+                }
+                else if (elemInfo.IsPrimitive)
+                {
+                    // Numeric primitives - packed format reads entire array at once
+                    _sb.AppendIndentedLine($"if (entryWireType == 2) // Len - packed format");
+                    _sb.StartNewBlock();
+                    var packedReadExpr = TypeMapping.GetPackedArrayReadExpression(elementType, DataFormat.Default, "reader");
+                    if (packedReadExpr != null)
                     {
-                        _sb.AppendIndentedLine($"{tempListVar}.Add(global::GProtobuf.Core.SpanReaders.ReadString(ref reader, global::GProtobuf.Core.WireType.Len));");
+                        // For packed arrays, AddRange is more efficient than foreach
+                        _sb.AppendIndentedLine($"{tempListVar}.AddRange({packedReadExpr});");
                     }
-                    else if (normalizedElem == "System.Guid")
+                    _sb.EndBlock();
+                    _sb.AppendIndentedLine("else // Non-packed - single element");
+                    _sb.StartNewBlock();
+                    var readExpr = TypeMapping.GetElementReadExpression(elementType, DataFormat.Default, "reader");
+                    if (readExpr != null)
                     {
-                        _sb.AppendIndentedLine($"{tempListVar}.Add(reader.ReadGuid(global::GProtobuf.Core.WireType.Len));");
+                        _sb.AppendIndentedLine($"{tempListVar}.Add({readExpr});");
                     }
-                    else
-                    {
-                        // Numeric primitives - packed format reads entire array at once
-                        _sb.AppendIndentedLine($"if (entryWireType == 2) // Len - packed format");
-                        _sb.StartNewBlock();
-                        var packedReadExpr = TypeMapping.GetPackedArrayReadExpression(elementType, DataFormat.Default, "reader");
-                        if (packedReadExpr != null)
-                        {
-                            // For packed arrays, AddRange is more efficient than foreach
-                            _sb.AppendIndentedLine($"{tempListVar}.AddRange({packedReadExpr});");
-                        }
-                        _sb.EndBlock();
-                        _sb.AppendIndentedLine("else // Non-packed - single element");
-                        _sb.StartNewBlock();
-                        var readExpr = TypeMapping.GetElementReadExpression(elementType, DataFormat.Default, "reader");
-                        if (readExpr != null)
-                        {
-                            _sb.AppendIndentedLine($"{tempListVar}.Add({readExpr});");
-                        }
-                        _sb.EndBlock();
-                    }
+                    _sb.EndBlock();
                 }
                 else if (elemInfo.IsEnum)
                 {
@@ -294,9 +343,22 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             var valueType = typeInfo.DictionaryValueType;
             var mapEntryTypeName = typeInfo.MapEntryTypeName;
 
-            _sb.AppendIndentedLine($"{targetVar} ??= new global::System.Collections.Generic.Dictionary<{keyType}, {valueType}>();");
+            // Read inner dictionary length for adaptive capacity
+            _sb.AppendIndentedLine("var innerDictLength = reader.ReadVarUInt32();");
+            _sb.AppendIndentedLine("var innerDictEnd = reader.Position + (int)innerDictLength;");
+            _sb.AppendNewLine();
+
+            _sb.AppendIndentedLine("// OPTIMIZATION: adaptive capacity estimation");
+            _sb.AppendIndentedLine("int estimatedCapacity = EstimateMapCapacity(innerDictLength);");
+            _sb.AppendIndentedLine($"{targetVar} = new global::System.Collections.Generic.Dictionary<{keyType}, {valueType}>(estimatedCapacity);");
+            _sb.AppendNewLine();
+
+            _sb.AppendIndentedLine("// Read inner dictionary entries");
+            _sb.AppendIndentedLine("while (reader.Position < innerDictEnd)");
+            _sb.StartNewBlock();
             _sb.AppendIndentedLine($"var entry = Read{mapEntryTypeName}(ref reader);");
             _sb.AppendIndentedLine($"if (entry.success) {targetVar}[entry.key] = entry.value;");
+            _sb.EndBlock();
         }
 
         private void GenerateCollectionFieldRead(string targetVar, TypeAnalysisInfo typeInfo, string wireTypeVar, string fieldPrefix = "")
@@ -334,7 +396,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             {
                 var normalizedElem = TypeMapping.NormalizeTypeName(elementType);
 
-                // String and Guid are always non-packed (each element has its own tag)
+                // String, Guid, and TimeSpan are always non-packed (each element has its own tag)
                 if (normalizedElem == "System.String")
                 {
                     _sb.AppendIndentedLine($"{targetVar}.Add(global::GProtobuf.Core.SpanReaders.ReadString(ref reader, global::GProtobuf.Core.WireType.Len));");
@@ -342,6 +404,10 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 else if (normalizedElem == "System.Guid")
                 {
                     _sb.AppendIndentedLine($"{targetVar}.Add(reader.ReadGuid(global::GProtobuf.Core.WireType.Len));");
+                }
+                else if (normalizedElem == "System.TimeSpan")
+                {
+                    _sb.AppendIndentedLine($"{targetVar}.Add(reader.ReadTimeSpan(global::GProtobuf.Core.WireType.VarInt));");
                 }
                 else
                 {
@@ -370,8 +436,21 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             }
             else if (elemInfo.IsEnum)
             {
-                // Collection of enum types - read as VarInt32 and cast
+                // Enum types can be packed (wire type Len) or non-packed (wire type VarInt)
+                _sb.AppendIndentedLine($"if ({wireTypeVar} == 2) // Len - packed format");
+                _sb.StartNewBlock();
+                // Read packed enums: length prefix followed by all enum values
+                _sb.AppendIndentedLine("var packedLength = reader.ReadVarUInt32();");
+                _sb.AppendIndentedLine("var packedEnd = reader.Position + (int)packedLength;");
+                _sb.AppendIndentedLine("while (reader.Position < packedEnd)");
+                _sb.StartNewBlock();
                 _sb.AppendIndentedLine($"{targetVar}.Add(({elementType})reader.ReadVarInt32());");
+                _sb.EndBlock();
+                _sb.EndBlock();
+                _sb.AppendIndentedLine("else // Non-packed - single element");
+                _sb.StartNewBlock();
+                _sb.AppendIndentedLine($"{targetVar}.Add(({elementType})reader.ReadVarInt32());");
+                _sb.EndBlock();
             }
             else if (TupleHandler.IsTupleType(elementType))
             {
@@ -454,7 +533,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         private void GenerateFieldSizeCalculation(string sourceVar, string typeName, TypeAnalysisInfo typeInfo,
             bool isEnum, string calcVar, int fieldId, string lengthCacheVar = null)
         {
-            // byte[] is a primitive type (bytes), not a collection - check this FIRST
+            // byte[] is a primitive type (bytes), not a collection - check this FIRST before anything else
             var normalizedType = TypeMapping.NormalizeTypeName(typeName);
             bool isByteArray = (normalizedType == "System.Byte[]");
 
@@ -466,6 +545,17 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             if (!typeInfo.IsCollection && (!typeInfo.IsArray || isByteArray))
             {
                 _sb.AppendIndentedLine($"{calcVar}.AddByteLength({tagBytes}); // tag for field {fieldId}");
+            }
+
+            // byte[] is a primitive type (bytes), not a collection - handle BEFORE other checks
+            if (isByteArray)
+            {
+                var sizeExpr = TypeMapping.GetSizeExpression(typeName, sourceVar, DataFormat.Default, calcVar);
+                if (sizeExpr != null)
+                {
+                    _sb.AppendIndentedLine($"{sizeExpr};");
+                }
+                return;
             }
 
             if (isEnum)
@@ -483,17 +573,6 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 }
 
                 // Use TypeMapping for other primitives
-                var sizeExpr = TypeMapping.GetSizeExpression(typeName, sourceVar, DataFormat.Default, calcVar);
-                if (sizeExpr != null)
-                {
-                    _sb.AppendIndentedLine($"{sizeExpr};");
-                }
-                return;
-            }
-
-            // byte[] is a primitive type (bytes), not a collection
-            if (isByteArray)
-            {
                 var sizeExpr = TypeMapping.GetSizeExpression(typeName, sourceVar, DataFormat.Default, calcVar);
                 if (sizeExpr != null)
                 {
@@ -555,23 +634,38 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         private void GenerateDictionaryFieldSize(string sourceVar, TypeAnalysisInfo typeInfo, string calcVar)
         {
             var mapEntryTypeName = typeInfo.MapEntryTypeName;
+            var keyType = typeInfo.DictionaryKeyType;
+            var valueType = typeInfo.DictionaryValueType;
 
-            _sb.AppendIndentedLine($"if ({sourceVar} != null)");
+            _sb.AppendIndentedLine("// INVARIANT: treat null as empty dictionary");
+            _sb.AppendIndentedLine($"var nestedDict = {sourceVar} ?? new global::System.Collections.Generic.Dictionary<{keyType}, {valueType}>();");
+            _sb.AppendNewLine();
+
+            _sb.AppendIndentedLine("if (nestedDict.Count == 0)");
             _sb.StartNewBlock();
-            _sb.AppendIndentedLine($"foreach (var kvp in {sourceVar})");
+            _sb.AppendIndentedLine("// Empty dictionary: length = varint(0) = 1 byte");
+            _sb.AppendIndentedLine($"{calcVar}.WriteVarUInt32(0);");
+            _sb.EndBlock();
+            _sb.AppendIndentedLine("else");
             _sb.StartNewBlock();
-            _sb.AppendIndentedLine($"var innerCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
-            _sb.AppendIndentedLine($"Calculate{mapEntryTypeName}Size(ref innerCalc, kvp.Key, kvp.Value);");
+            _sb.AppendIndentedLine("// Non-empty: calculate actual size INCLUDING per-entry length prefixes");
+            _sb.AppendIndentedLine("var innerCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+            _sb.AppendIndentedLine("foreach (var kvp in nestedDict)");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine("var innerEntryCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+            _sb.AppendIndentedLine($"SizeCalculators.Calculate{mapEntryTypeName}Size(ref innerEntryCalc, kvp.Key, kvp.Value);");
+            _sb.AppendIndentedLine("// Each entry is written as: length_prefix + content");
+            _sb.AppendIndentedLine("innerCalc.WriteVarUInt32((uint)innerEntryCalc.Length);  // size of length prefix");
+            _sb.AppendIndentedLine("innerCalc.AddByteLength(innerEntryCalc.Length);         // size of content");
+            _sb.EndBlock();
             _sb.AppendIndentedLine($"{calcVar}.WriteVarUInt32((uint)innerCalc.Length);");
             _sb.AppendIndentedLine($"{calcVar}.AddByteLength(innerCalc.Length);");
-            _sb.EndBlock();
             _sb.EndBlock();
         }
 
         private void GenerateCollectionFieldSize(string sourceVar, TypeAnalysisInfo typeInfo, string calcVar, int fieldId)
         {
             var elemInfo = typeInfo.CollectionElementTypeInfo;
-            var (_, tagBytes) = TypeMapping.PrecomputeTagBytes(fieldId, WireType.Len);
 
             _sb.AppendIndentedLine($"if ({sourceVar} != null)");
             _sb.StartNewBlock();
@@ -579,14 +673,19 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             if (elemInfo.IsDictionary)
             {
                 // Collection of dictionaries - each dictionary is a repeated field
-                _sb.AppendIndentedLine($"foreach (var innerDict in {sourceVar})");
+                var (_, dictTagBytes) = TypeMapping.PrecomputeTagBytes(fieldId, WireType.Len);
+                _sb.AppendIndentedLine($"foreach (var collectionDict in {sourceVar})");
                 _sb.StartNewBlock();
                 // Add tag for each element in collection
-                _sb.AppendIndentedLine($"{calcVar}.AddByteLength({tagBytes}); // tag for repeated field {fieldId}");
+                _sb.AppendIndentedLine($"{calcVar}.AddByteLength({dictTagBytes}); // tag for repeated field {fieldId}");
                 _sb.AppendIndentedLine("var dictCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
-                _sb.AppendIndentedLine("foreach (var kvp in innerDict)");
+                _sb.AppendIndentedLine("foreach (var kvp in collectionDict)");
                 _sb.StartNewBlock();
-                _sb.AppendIndentedLine($"Calculate{elemInfo.MapEntryTypeName}Size(ref dictCalc, kvp.Key, kvp.Value);");
+                _sb.AppendIndentedLine("var innerEntryCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+                _sb.AppendIndentedLine($"SizeCalculators.Calculate{elemInfo.MapEntryTypeName}Size(ref innerEntryCalc, kvp.Key, kvp.Value);");
+                _sb.AppendIndentedLine("// Each entry is written as: length_prefix + content");
+                _sb.AppendIndentedLine("dictCalc.WriteVarUInt32((uint)innerEntryCalc.Length);  // size of length prefix");
+                _sb.AppendIndentedLine("dictCalc.AddByteLength(innerEntryCalc.Length);         // size of content");
                 _sb.EndBlock();
                 _sb.AppendIndentedLine($"{calcVar}.WriteVarUInt32((uint)dictCalc.Length);");
                 _sb.AppendIndentedLine($"{calcVar}.AddByteLength(dictCalc.Length);");
@@ -596,27 +695,39 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             {
                 var normalizedElem = TypeMapping.NormalizeTypeName(typeInfo.CollectionElementType);
 
-                // String and Guid are NOT packed - each element needs a tag
+                // String, Guid, and TimeSpan are NOT packed - each element needs a tag
                 if (normalizedElem == "System.String")
                 {
+                    var (_, strTagBytes) = TypeMapping.PrecomputeTagBytes(fieldId, WireType.Len);
                     _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
                     _sb.StartNewBlock();
-                    _sb.AppendIndentedLine($"{calcVar}.AddByteLength({tagBytes}); // tag for repeated field {fieldId}");
+                    _sb.AppendIndentedLine($"{calcVar}.AddByteLength({strTagBytes}); // tag for repeated field {fieldId}");
                     _sb.AppendIndentedLine($"{calcVar}.WriteString(item);");
                     _sb.EndBlock();
                 }
                 else if (normalizedElem == "System.Guid")
                 {
+                    var (_, guidTagBytes) = TypeMapping.PrecomputeTagBytes(fieldId, WireType.Len);
                     _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
                     _sb.StartNewBlock();
-                    _sb.AppendIndentedLine($"{calcVar}.AddByteLength({tagBytes}); // tag for repeated field {fieldId}");
+                    _sb.AppendIndentedLine($"{calcVar}.AddByteLength({guidTagBytes}); // tag for repeated field {fieldId}");
                     _sb.AppendIndentedLine($"{calcVar}.AddByteLength(17);"); // Guid is 16 bytes + 1 byte for length prefix (varint 16)
+                    _sb.EndBlock();
+                }
+                else if (normalizedElem == "System.TimeSpan")
+                {
+                    var (_, tsTagBytes) = TypeMapping.PrecomputeTagBytes(fieldId, WireType.VarInt);
+                    _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
+                    _sb.StartNewBlock();
+                    _sb.AppendIndentedLine($"{calcVar}.AddByteLength({tsTagBytes}); // tag for repeated field {fieldId}");
+                    _sb.AppendIndentedLine($"{calcVar}.WriteTimeSpan(item);");
                     _sb.EndBlock();
                 }
                 else
                 {
                     // Numeric primitives use packed encoding: single tag + length + all elements
-                    _sb.AppendIndentedLine($"{calcVar}.AddByteLength({tagBytes}); // tag for packed field {fieldId}");
+                    var (_, packedTagBytes) = TypeMapping.PrecomputeTagBytes(fieldId, WireType.Len);
+                    _sb.AppendIndentedLine($"{calcVar}.AddByteLength({packedTagBytes}); // tag for packed field {fieldId}");
                     _sb.AppendIndentedLine("var packedCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
                     _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
                     _sb.StartNewBlock();
@@ -633,7 +744,8 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             else if (elemInfo.IsEnum)
             {
                 // Enum types - use packed encoding like numeric primitives
-                _sb.AppendIndentedLine($"{calcVar}.AddByteLength({tagBytes}); // tag for packed field {fieldId}");
+                var (_, enumTagBytes) = TypeMapping.PrecomputeTagBytes(fieldId, WireType.Len);
+                _sb.AppendIndentedLine($"{calcVar}.AddByteLength({enumTagBytes}); // tag for packed field {fieldId}");
                 _sb.AppendIndentedLine("var packedCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
                 _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
                 _sb.StartNewBlock();
@@ -645,10 +757,11 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             else if (elemInfo.IsCustomType)
             {
                 // Custom types - each element is a repeated field with tag
+                var (_, customTagBytes) = TypeMapping.PrecomputeTagBytes(fieldId, WireType.Len);
                 var sizeCalcClass = NamespaceHelper.GetSizeCalculatorsClass(typeInfo.CollectionElementType);
                 _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
                 _sb.StartNewBlock();
-                _sb.AppendIndentedLine($"{calcVar}.AddByteLength({tagBytes}); // tag for repeated field {fieldId}");
+                _sb.AppendIndentedLine($"{calcVar}.AddByteLength({customTagBytes}); // tag for repeated field {fieldId}");
                 _sb.AppendIndentedLine("var itemCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
                 _sb.AppendIndentedLine($"{sizeCalcClass}.Calculate{elemInfo.ShortTypeName}ContentSize(ref itemCalc, item);");
                 _sb.AppendIndentedLine($"{calcVar}.WriteVarUInt32((uint)itemCalc.Length);");
@@ -662,7 +775,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         private void GenerateFieldWrite(string sourceVar, string typeName, TypeAnalysisInfo typeInfo,
             bool isEnum, int fieldId, string cachedLengthVar = null)
         {
-            // byte[] is a primitive type (bytes), not a collection - check this FIRST
+            // byte[] is a primitive type (bytes), not a collection - check this FIRST before anything else
             var normalizedType = TypeMapping.NormalizeTypeName(typeName);
             bool isByteArray = (normalizedType == "System.Byte[]");
 
@@ -675,6 +788,17 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             {
                 // Write tag
                 _sb.AppendIndentedLine($"writer.WriteSingleByte({bytesString}); // field {fieldId}");
+            }
+
+            // byte[] is a primitive type (bytes), not a collection - handle BEFORE other checks
+            if (isByteArray)
+            {
+                var writeExpr = TypeMapping.GetWriteExpression(typeName, sourceVar, DataFormat.Default, "writer");
+                if (writeExpr != null)
+                {
+                    _sb.AppendIndentedLine($"{writeExpr};");
+                }
+                return;
             }
 
             if (isEnum)
@@ -693,17 +817,6 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
 
                 // Use TypeMapping for other primitives
                 var writeExpr = TypeMapping.GetElementWriteExpression(typeName, sourceVar, DataFormat.Default, "writer");
-                if (writeExpr != null)
-                {
-                    _sb.AppendIndentedLine($"{writeExpr};");
-                }
-                return;
-            }
-
-            // byte[] is a primitive type (bytes), not a collection
-            if (isByteArray)
-            {
-                var writeExpr = TypeMapping.GetWriteExpression(typeName, sourceVar, DataFormat.Default, "writer");
                 if (writeExpr != null)
                 {
                     _sb.AppendIndentedLine($"{writeExpr};");
@@ -765,12 +878,35 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         private void GenerateDictionaryFieldWrite(string sourceVar, TypeAnalysisInfo typeInfo)
         {
             var mapEntryTypeName = typeInfo.MapEntryTypeName;
+            var keyType = typeInfo.DictionaryKeyType;
+            var valueType = typeInfo.DictionaryValueType;
 
-            _sb.AppendIndentedLine($"if ({sourceVar} != null)");
+            // NOTE: nestedDict variable already created in size calculation phase
+            // Just use it directly here
+
+            _sb.AppendIndentedLine("if (nestedDict.Count == 0)");
             _sb.StartNewBlock();
-            _sb.AppendIndentedLine($"foreach (var kvp in {sourceVar})");
+            _sb.AppendIndentedLine("// Empty dictionary: write length = 0");
+            _sb.AppendIndentedLine("writer.WriteVarUInt32(0);");
+            _sb.EndBlock();
+            _sb.AppendIndentedLine("else");
             _sb.StartNewBlock();
-            _sb.AppendIndentedLine($"Write{mapEntryTypeName}(ref writer, kvp.Key, kvp.Value);");
+            _sb.AppendIndentedLine("// Non-empty: calculate and write actual size INCLUDING per-entry length prefixes");
+            _sb.AppendIndentedLine("var innerCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+            _sb.AppendIndentedLine("foreach (var kvp in nestedDict)");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine("var innerEntryCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+            _sb.AppendIndentedLine($"SizeCalculators.Calculate{mapEntryTypeName}Size(ref innerEntryCalc, kvp.Key, kvp.Value);");
+            _sb.AppendIndentedLine("// Each entry is written as: length_prefix + content");
+            _sb.AppendIndentedLine("innerCalc.WriteVarUInt32((uint)innerEntryCalc.Length);  // size of length prefix");
+            _sb.AppendIndentedLine("innerCalc.AddByteLength(innerEntryCalc.Length);         // size of content");
+            _sb.EndBlock();
+            _sb.AppendIndentedLine("writer.WriteVarUInt32((uint)innerCalc.Length);");
+            _sb.AppendNewLine();
+            _sb.AppendIndentedLine("// Write inner dictionary entries");
+            _sb.AppendIndentedLine("foreach (var kvp in nestedDict)");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine($"{_writerClassName}.Write{mapEntryTypeName}(ref writer, kvp.Key, kvp.Value);");
             _sb.EndBlock();
             _sb.EndBlock();
         }
@@ -778,7 +914,6 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         private void GenerateCollectionFieldWrite(string sourceVar, TypeAnalysisInfo typeInfo, int fieldId)
         {
             var elemInfo = typeInfo.CollectionElementTypeInfo;
-            var (bytesString, _) = TypeMapping.PrecomputeTagBytes(fieldId, WireType.Len);
 
             _sb.AppendIndentedLine($"if ({sourceVar} != null)");
             _sb.StartNewBlock();
@@ -786,20 +921,25 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             if (elemInfo.IsDictionary)
             {
                 // Collection of dictionaries - each dictionary is a repeated field
-                _sb.AppendIndentedLine($"foreach (var innerDict in {sourceVar})");
+                var (dictBytesString, _) = TypeMapping.PrecomputeTagBytes(fieldId, WireType.Len);
+                _sb.AppendIndentedLine($"foreach (var collectionDict in {sourceVar})");
                 _sb.StartNewBlock();
                 // Write tag for each element in collection
-                _sb.AppendIndentedLine($"writer.WriteSingleByte({bytesString}); // tag for repeated field {fieldId}");
-                _sb.AppendIndentedLine("// Write inner dictionary as packed entries");
+                _sb.AppendIndentedLine($"writer.WriteSingleByte({dictBytesString}); // tag for repeated field {fieldId}");
+                _sb.AppendIndentedLine("// Write inner dictionary as packed entries INCLUDING per-entry length prefixes");
                 _sb.AppendIndentedLine("var dictCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
-                _sb.AppendIndentedLine("foreach (var kvp in innerDict)");
+                _sb.AppendIndentedLine("foreach (var kvp in collectionDict)");
                 _sb.StartNewBlock();
-                _sb.AppendIndentedLine($"Calculate{elemInfo.MapEntryTypeName}Size(ref dictCalc, kvp.Key, kvp.Value);");
+                _sb.AppendIndentedLine("var innerEntryCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+                _sb.AppendIndentedLine($"SizeCalculators.Calculate{elemInfo.MapEntryTypeName}Size(ref innerEntryCalc, kvp.Key, kvp.Value);");
+                _sb.AppendIndentedLine("// Each entry is written as: length_prefix + content");
+                _sb.AppendIndentedLine("dictCalc.WriteVarUInt32((uint)innerEntryCalc.Length);  // size of length prefix");
+                _sb.AppendIndentedLine("dictCalc.AddByteLength(innerEntryCalc.Length);         // size of content");
                 _sb.EndBlock();
                 _sb.AppendIndentedLine("writer.WriteVarUInt32((uint)dictCalc.Length);");
-                _sb.AppendIndentedLine("foreach (var kvp in innerDict)");
+                _sb.AppendIndentedLine("foreach (var kvp in collectionDict)");
                 _sb.StartNewBlock();
-                _sb.AppendIndentedLine($"Write{elemInfo.MapEntryTypeName}(ref writer, kvp.Key, kvp.Value);");
+                _sb.AppendIndentedLine($"{_writerClassName}.Write{elemInfo.MapEntryTypeName}(ref writer, kvp.Key, kvp.Value);");
                 _sb.EndBlock();
                 _sb.EndBlock();
             }
@@ -807,27 +947,39 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             {
                 var normalizedElem = TypeMapping.NormalizeTypeName(typeInfo.CollectionElementType);
 
-                // String and Guid are NOT packed - each element needs a tag
+                // String, Guid, and TimeSpan are NOT packed - each element needs a tag
                 if (normalizedElem == "System.String")
                 {
+                    var (strBytesString, _) = TypeMapping.PrecomputeTagBytes(fieldId, WireType.Len);
                     _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
                     _sb.StartNewBlock();
-                    _sb.AppendIndentedLine($"writer.WriteSingleByte({bytesString}); // tag for repeated field {fieldId}");
+                    _sb.AppendIndentedLine($"writer.WriteSingleByte({strBytesString}); // tag for repeated field {fieldId}");
                     _sb.AppendIndentedLine("writer.WriteString(item);");
                     _sb.EndBlock();
                 }
                 else if (normalizedElem == "System.Guid")
                 {
+                    var (guidBytesString, _) = TypeMapping.PrecomputeTagBytes(fieldId, WireType.Len);
                     _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
                     _sb.StartNewBlock();
-                    _sb.AppendIndentedLine($"writer.WriteSingleByte({bytesString}); // tag for repeated field {fieldId}");
+                    _sb.AppendIndentedLine($"writer.WriteSingleByte({guidBytesString}); // tag for repeated field {fieldId}");
                     _sb.AppendIndentedLine("writer.WriteGuid(item);");
+                    _sb.EndBlock();
+                }
+                else if (normalizedElem == "System.TimeSpan")
+                {
+                    var (tsBytesString, _) = TypeMapping.PrecomputeTagBytes(fieldId, WireType.VarInt);
+                    _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
+                    _sb.StartNewBlock();
+                    _sb.AppendIndentedLine($"writer.WriteSingleByte({tsBytesString}); // tag for repeated field {fieldId}");
+                    _sb.AppendIndentedLine("writer.WriteTimeSpan(item);");
                     _sb.EndBlock();
                 }
                 else
                 {
                     // Numeric primitives use packed encoding: single tag + length + all elements
-                    _sb.AppendIndentedLine($"writer.WriteSingleByte({bytesString}); // tag for packed field {fieldId}");
+                    var (packedBytesString, _) = TypeMapping.PrecomputeTagBytes(fieldId, WireType.Len);
+                    _sb.AppendIndentedLine($"writer.WriteSingleByte({packedBytesString}); // tag for packed field {fieldId}");
                     _sb.AppendIndentedLine("var packedCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
                     _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
                     _sb.StartNewBlock();
@@ -851,7 +1003,8 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             else if (elemInfo.IsEnum)
             {
                 // Enum types - use packed encoding like numeric primitives
-                _sb.AppendIndentedLine($"writer.WriteSingleByte({bytesString}); // tag for packed field {fieldId}");
+                var (enumBytesString, _) = TypeMapping.PrecomputeTagBytes(fieldId, WireType.Len);
+                _sb.AppendIndentedLine($"writer.WriteSingleByte({enumBytesString}); // tag for packed field {fieldId}");
                 _sb.AppendIndentedLine("var packedCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
                 _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
                 _sb.StartNewBlock();
@@ -866,11 +1019,12 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             else if (elemInfo.IsCustomType)
             {
                 // Custom types - each element is a repeated field with tag
+                var (customBytesString, _) = TypeMapping.PrecomputeTagBytes(fieldId, WireType.Len);
                 var sizeCalcClass = NamespaceHelper.GetSizeCalculatorsClass(typeInfo.CollectionElementType);
                 var writersClass = NamespaceHelper.GetWritersClass(typeInfo.CollectionElementType, _writerClassName);
                 _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
                 _sb.StartNewBlock();
-                _sb.AppendIndentedLine($"writer.WriteSingleByte({bytesString}); // tag for repeated field {fieldId}");
+                _sb.AppendIndentedLine($"writer.WriteSingleByte({customBytesString}); // tag for repeated field {fieldId}");
                 _sb.AppendIndentedLine("var itemCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
                 _sb.AppendIndentedLine($"{sizeCalcClass}.Calculate{elemInfo.ShortTypeName}ContentSize(ref itemCalc, item);");
                 _sb.AppendIndentedLine("writer.WriteVarUInt32((uint)itemCalc.Length);");

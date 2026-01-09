@@ -32,6 +32,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         /// </summary>
         public void GenerateReader(TupleTypeInfo tupleInfo)
         {
+            _sb.AppendIndentedLine("[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
             _sb.AppendIndentedLine($"public static {tupleInfo.OriginalTypeName} Read{tupleInfo.SafeName}Content(ref SpanReader reader)");
             _sb.StartNewBlock();
 
@@ -118,11 +119,12 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         /// <summary>
         /// Generates Write{TupleName}Content method.
         /// Example: WriteTupleOfIntAndStringContent(ref StreamWriter writer, Tuple&lt;int, string&gt; instance)
-        /// </summary>
+       /// </summary>
         public void GenerateWriter(TupleTypeInfo tupleInfo)
         {
             var writerType = _writerKind != null ? $"global::GProtobuf.Core.{_writerKind}Writer" : "global::GProtobuf.Core.StreamWriter";
 
+            _sb.AppendIndentedLine("[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
             _sb.AppendIndentedLine($"public static void Write{tupleInfo.SafeName}Content(ref {writerType} writer, {tupleInfo.OriginalTypeName} instance)");
             _sb.StartNewBlock();
 
@@ -205,6 +207,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         /// </summary>
         public void GenerateSizeCalculator(TupleTypeInfo tupleInfo)
         {
+            _sb.AppendIndentedLine("[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
             _sb.AppendIndentedLine($"public static void Calculate{tupleInfo.SafeName}ContentSize(ref global::GProtobuf.Core.WriteSizeCalculator calculator, {tupleInfo.OriginalTypeName} instance)");
             _sb.StartNewBlock();
 

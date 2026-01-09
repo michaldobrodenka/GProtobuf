@@ -36,6 +36,15 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 return existing;
             }
 
+            // VALIDATE NESTING DEPTH: Ensure dictionary nesting doesn't exceed safety limits
+            // This check applies to the VALUE type (key can't be a dictionary in protobuf maps)
+            // Example: Dictionary<string, Dictionary<int, Dictionary<long, double>>>
+            //          Level 0: outer dict, Level 1: first inner dict, Level 2: second inner dict
+            int nestingDepth = NestingLimits.AnalyzeAndValidateDictionaryNestingDepth(valueType);
+
+            // Log depth for diagnostic purposes (optional, can be removed in production)
+            // System.Diagnostics.Debug.WriteLine($"Registering map entry: {typeName}, nesting depth: {nestingDepth}");
+
             var info = new VirtualMapEntryInfo
             {
                 TypeName = typeName,
@@ -164,8 +173,8 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             {
                 info.IsArray = true;
                 var elementType = typeName.Substring(0, typeName.Length - 2);
-                // Normalize element type (e.g., "byte" -> "System.Byte")
-                info.CollectionElementType = TypeMapping.NormalizeTypeName(elementType);
+                // Normalize element type recursively
+                info.CollectionElementType = TypeMapping.NormalizeGenericTypeName(elementType);
                 info.CollectionElementTypeInfo = AnalyzeType(info.CollectionElementType);
                 return info;
             }
@@ -182,8 +191,8 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 var elementType = ParseSingleGenericArg(typeName);
                 if (elementType != null)
                 {
-                    // Normalize element type (e.g., "byte" -> "System.Byte")
-                    info.CollectionElementType = TypeMapping.NormalizeTypeName(elementType);
+                    // Normalize element type recursively (e.g., "KeyValuePair<int, string>" -> "System.Collections.Generic.KeyValuePair<System.Int32, System.String>")
+                    info.CollectionElementType = TypeMapping.NormalizeGenericTypeName(elementType);
                     info.CollectionElementTypeInfo = AnalyzeType(info.CollectionElementType);
                 }
                 return info;
@@ -197,8 +206,8 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 var elementType = ParseSingleGenericArg(typeName);
                 if (elementType != null)
                 {
-                    // Normalize element type (e.g., "byte" -> "System.Byte")
-                    info.CollectionElementType = TypeMapping.NormalizeTypeName(elementType);
+                    // Normalize element type recursively
+                    info.CollectionElementType = TypeMapping.NormalizeGenericTypeName(elementType);
                     info.CollectionElementTypeInfo = AnalyzeType(info.CollectionElementType);
                 }
                 return info;
@@ -209,9 +218,8 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             {
                 info.IsDictionary = true;
                 var (keyType, valueType) = ParseTwoGenericArgs(typeName);
-                // Normalize types (e.g., "byte" -> "System.Byte")
-                info.DictionaryKeyType = TypeMapping.NormalizeTypeName(keyType);
-                info.DictionaryValueType = TypeMapping.NormalizeTypeName(valueType);
+                info.DictionaryKeyType = keyType;
+                info.DictionaryValueType = valueType;
                 info.MapEntryTypeName = VirtualTypeNameGenerator.GetMapEntryTypeName(info.DictionaryKeyType, info.DictionaryValueType);
                 return info;
             }

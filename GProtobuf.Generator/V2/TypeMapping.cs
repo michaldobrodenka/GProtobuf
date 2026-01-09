@@ -524,6 +524,61 @@ namespace GProtobuf.Generator.V2
 
         #region Type Name Utilities
 
+        /// <summary>
+        /// Recursively normalizes generic type arguments.
+        /// Example: "KeyValuePair<int, string>" -> "System.Collections.Generic.KeyValuePair<System.Int32, System.String>"
+        /// </summary>
+        public static string NormalizeGenericTypeName(string typeName)
+        {
+            if (string.IsNullOrEmpty(typeName))
+                return typeName;
+
+            // Check if it has generic arguments
+            int openBracket = typeName.IndexOf('<');
+            if (openBracket < 0)
+            {
+                // No generic arguments - just normalize the base type
+                return NormalizeTypeName(typeName);
+            }
+
+            int closeBracket = typeName.LastIndexOf('>');
+            if (closeBracket <= openBracket)
+                return NormalizeTypeName(typeName);
+
+            // Extract base type and generic arguments
+            string baseType = typeName.Substring(0, openBracket);
+            string argsString = typeName.Substring(openBracket + 1, closeBracket - openBracket - 1);
+
+            // Parse and normalize each generic argument (handling nested generics)
+            var normalizedArgs = new System.Collections.Generic.List<string>();
+            int depth = 0;
+            int start = 0;
+
+            for (int i = 0; i < argsString.Length; i++)
+            {
+                char c = argsString[i];
+                if (c == '<') depth++;
+                else if (c == '>') depth--;
+                else if (c == ',' && depth == 0)
+                {
+                    var arg = argsString.Substring(start, i - start).Trim();
+                    normalizedArgs.Add(NormalizeGenericTypeName(arg)); // Recursive call
+                    start = i + 1;
+                }
+            }
+
+            // Add the last argument
+            if (start < argsString.Length)
+            {
+                var arg = argsString.Substring(start).Trim();
+                normalizedArgs.Add(NormalizeGenericTypeName(arg)); // Recursive call
+            }
+
+            // Rebuild the type with normalized arguments
+            var normalizedBaseType = NormalizeTypeName(baseType);
+            return $"{normalizedBaseType}<{string.Join(", ", normalizedArgs)}>";
+        }
+
         public static string NormalizeTypeName(string typeName)
         {
             if (string.IsNullOrEmpty(typeName))
@@ -572,7 +627,12 @@ namespace GProtobuf.Generator.V2
 
         public static string GetShortTypeName(string typeName)
         {
-            return NormalizeTypeName(typeName) switch
+            if (string.IsNullOrEmpty(typeName))
+                return typeName;
+
+            var normalized = NormalizeTypeName(typeName);
+
+            return normalized switch
             {
                 "System.Int32" => "int",
                 "System.Int64" => "long",

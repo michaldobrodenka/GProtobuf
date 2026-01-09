@@ -299,6 +299,90 @@ namespace GProtobuf.Generator.V2.Handlers.Core
                    mapType.Contains("KeyValuePair<");
         }
 
+        /// <summary>
+        /// Parses a Dictionary type string to extract key and value types.
+        /// Example: "Dictionary&lt;string, Dictionary&lt;int, double&gt;&gt;" -> ("string", "Dictionary&lt;int, double&gt;")
+        /// </summary>
+        /// <param name="dictionaryTypeName">Full dictionary type name</param>
+        /// <returns>Tuple of (keyType, valueType)</returns>
+        public static (string keyType, string valueType) ParseDictionaryTypes(string dictionaryTypeName)
+        {
+            if (!IsDictionaryType(dictionaryTypeName))
+                throw new System.ArgumentException($"Type '{dictionaryTypeName}' is not a Dictionary type", nameof(dictionaryTypeName));
+
+            // Find the opening angle bracket
+            var startIndex = dictionaryTypeName.IndexOf('<');
+            if (startIndex < 0)
+                throw new System.ArgumentException($"Invalid dictionary type format: '{dictionaryTypeName}'", nameof(dictionaryTypeName));
+
+            startIndex++; // Skip the '<'
+
+            // Parse key and value types, handling nested generics
+            int depth = 0;
+            int commaIndex = -1;
+
+            for (int i = startIndex; i < dictionaryTypeName.Length; i++)
+            {
+                char c = dictionaryTypeName[i];
+
+                if (c == '<')
+                {
+                    depth++;
+                }
+                else if (c == '>')
+                {
+                    if (depth == 0)
+                    {
+                        // End of dictionary type arguments
+                        break;
+                    }
+                    depth--;
+                }
+                else if (c == ',' && depth == 0)
+                {
+                    // Found the comma separating key and value at top level
+                    commaIndex = i;
+                    break;
+                }
+            }
+
+            if (commaIndex < 0)
+                throw new System.ArgumentException($"Could not find key-value separator in dictionary type: '{dictionaryTypeName}'", nameof(dictionaryTypeName));
+
+            // Extract key type
+            string keyType = dictionaryTypeName.Substring(startIndex, commaIndex - startIndex).Trim();
+
+            // Find the end of the dictionary type (matching closing '>')
+            depth = 0;
+            int endIndex = -1;
+            for (int i = commaIndex + 1; i < dictionaryTypeName.Length; i++)
+            {
+                char c = dictionaryTypeName[i];
+
+                if (c == '<')
+                {
+                    depth++;
+                }
+                else if (c == '>')
+                {
+                    if (depth == 0)
+                    {
+                        endIndex = i;
+                        break;
+                    }
+                    depth--;
+                }
+            }
+
+            if (endIndex < 0)
+                throw new System.ArgumentException($"Could not find closing '>' in dictionary type: '{dictionaryTypeName}'", nameof(dictionaryTypeName));
+
+            // Extract value type
+            string valueType = dictionaryTypeName.Substring(commaIndex + 1, endIndex - commaIndex - 1).Trim();
+
+            return (keyType, valueType);
+        }
+
         #endregion
     }
 }

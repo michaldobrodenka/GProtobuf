@@ -130,13 +130,13 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                     var propertyType = property.Type.ToDisplayString();
                     var propertyName = property.Name;
                     var nmspace = typeSymbol.ContainingNamespace?.ToDisplayString() ?? string.Empty;
-                    
+
                     // Detect if this is a nullable value type (Nullable<T>)
                     bool isNullable = property.Type.OriginalDefinition?.SpecialType == SpecialType.System_Nullable_T;
 
                     // Analyze collection information
                     var collectionInfo = AnalyzeCollectionType(property.Type);
-                    
+
                     // Analyze map/dictionary information
                     var (isMap, keyType, valueType, keyIsEnum, keyEnumType, valueIsEnum, valueEnumType) = AnalyzeMapType(property.Type);
 
@@ -339,7 +339,7 @@ public sealed class SerializerGenerator : IIncrementalGenerator
     {
         if (typeSymbol is not INamedTypeSymbol namedType)
             return (false, null, null, false, null, false, null);
-        
+
         // Check for Dictionary<TKey, TValue>
         if (namedType.OriginalDefinition?.ToDisplayString() == "System.Collections.Generic.Dictionary<TKey, TValue>" ||
             namedType.OriginalDefinition?.ToDisplayString() == "System.Collections.Generic.SortedDictionary<TKey, TValue>")
@@ -348,7 +348,7 @@ public sealed class SerializerGenerator : IIncrementalGenerator
             {
                 var keyTypeSymbol = namedType.TypeArguments[0];
                 var valueTypeSymbol = namedType.TypeArguments[1];
-                
+
                 var keyType = keyTypeSymbol.ToDisplayString();
                 var valueType = valueTypeSymbol.ToDisplayString();
 

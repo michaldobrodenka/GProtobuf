@@ -87,8 +87,18 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             _sb.AppendNewLine();
             _sb.AppendIndentedLine("// Virtual Map Entry Readers");
+            _sb.AppendNewLine();
 
             var generator = new VirtualMapEntryGenerator(_sb, _virtualMapRegistry);
+
+            // Generate EstimateMapCapacity helper (once, used by all map readers)
+            _sb.AppendIndentedLine("#region Map Capacity Estimation");
+            _sb.AppendNewLine();
+            generator.GenerateEstimateMapCapacityHelper();
+            _sb.AppendIndentedLine("#endregion");
+            _sb.AppendNewLine();
+
+            // Generate individual map entry readers
             foreach (var virtualType in virtualTypes)
             {
                 generator.GenerateReader(virtualType);
@@ -547,58 +557,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 }
             }
 
-            // Initialize null collection properties to empty collections
-            if (type.ProtoMembers != null)
-            {
-                var collectionMembers = type.ProtoMembers
-                    .Where(m => m.IsCollection || m.IsMap)
-                    .ToList();
-
-                if (collectionMembers.Count > 0)
-                {
-                    _sb.AppendNewLine();
-                    _sb.AppendIndentedLine("// Initialize any null collections to prevent null reference exceptions");
-
-                    foreach (var member in collectionMembers)
-                    {
-                        // Skip arrays (remain null if no data)
-                        if (member.CollectionKind == CollectionKind.Array)
-                            continue;
-
-                        // Skip custom concrete collection types (can't safely initialize)
-                        if (member.CollectionKind == CollectionKind.ConcreteCollection)
-                            continue;
-
-                        if (member.IsMap)
-                        {
-                            // Check if this is a standard Dictionary (not a derived type like DerivedDictionary)
-                            var normalizedType = TypeMapping.NormalizeTypeName(member.Type ?? "");
-                            if (normalizedType.StartsWith("System.Collections.Generic.Dictionary<") ||
-                                normalizedType.StartsWith("System.Collections.Generic.IDictionary<"))
-                            {
-                                // Initialize Dictionary if null
-                                var keyType = TypeMapping.GetShortTypeName(member.MapKeyType);
-                                var valueType = TypeMapping.GetShortTypeName(member.MapValueType);
-                                _sb.AppendIndentedLine($"result.{member.Name} ??= new global::System.Collections.Generic.Dictionary<{keyType}, {valueType}>();");
-                            }
-                            // Otherwise skip (custom derived dictionary type)
-                        }
-                        else if (member.Type != null && member.Type.Contains("HashSet"))
-                        {
-                            // Initialize HashSet if null
-                            var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType);
-                            _sb.AppendIndentedLine($"result.{member.Name} ??= new global::System.Collections.Generic.HashSet<{elementType}>();");
-                        }
-                        else if (member.IsCollection)
-                        {
-                            // Initialize List if null (covers List, IList, ICollection, IEnumerable)
-                            var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType);
-                            _sb.AppendIndentedLine($"result.{member.Name} ??= new global::System.Collections.Generic.List<{elementType}>();");
-                        }
-                    }
-                }
-            }
-
             _sb.AppendIndentedLine("return result;");
         }
 
@@ -698,57 +656,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 }
             }
 
-            // Initialize null collection properties to empty collections
-            if (type.ProtoMembers != null)
-            {
-                var collectionMembers = type.ProtoMembers
-                    .Where(m => m.IsCollection || m.IsMap)
-                    .ToList();
-
-                if (collectionMembers.Count > 0)
-                {
-                    _sb.AppendNewLine();
-                    _sb.AppendIndentedLine("// Initialize any null collections to prevent null reference exceptions");
-
-                    foreach (var member in collectionMembers)
-                    {
-                        // Skip arrays (remain null if no data)
-                        if (member.CollectionKind == CollectionKind.Array)
-                            continue;
-
-                        // Skip custom concrete collection types (can't safely initialize)
-                        if (member.CollectionKind == CollectionKind.ConcreteCollection)
-                            continue;
-
-                        if (member.IsMap)
-                        {
-                            // Check if this is a standard Dictionary (not a derived type like DerivedDictionary)
-                            var normalizedType = TypeMapping.NormalizeTypeName(member.Type ?? "");
-                            if (normalizedType.StartsWith("System.Collections.Generic.Dictionary<") ||
-                                normalizedType.StartsWith("System.Collections.Generic.IDictionary<"))
-                            {
-                                // Initialize Dictionary if null
-                                var keyType = TypeMapping.GetShortTypeName(member.MapKeyType);
-                                var valueType = TypeMapping.GetShortTypeName(member.MapValueType);
-                                _sb.AppendIndentedLine($"result.{member.Name} ??= new global::System.Collections.Generic.Dictionary<{keyType}, {valueType}>();");
-                            }
-                            // Otherwise skip (custom derived dictionary type)
-                        }
-                        else if (member.Type != null && member.Type.Contains("HashSet"))
-                        {
-                            // Initialize HashSet if null
-                            var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType);
-                            _sb.AppendIndentedLine($"result.{member.Name} ??= new global::System.Collections.Generic.HashSet<{elementType}>();");
-                        }
-                        else if (member.IsCollection)
-                        {
-                            // Initialize List if null (covers List, IList, ICollection, IEnumerable)
-                            var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType);
-                            _sb.AppendIndentedLine($"result.{member.Name} ??= new global::System.Collections.Generic.List<{elementType}>();");
-                        }
-                    }
-                }
-            }
 
             _sb.AppendIndentedLine("return result;");
         }
