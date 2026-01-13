@@ -168,6 +168,30 @@ namespace GProtobuf.Generator.V2
             return null;
         }
 
+        /// <summary>
+        /// Gets ALL transitive derived types (direct and indirect children).
+        /// Example: For A with B:A and C:B, returns [B, C] (not just [B]).
+        /// </summary>
+        public List<string> GetAllDerivedTypes(string typeName)
+        {
+            var result = new List<string>();
+            CollectAllDerivedTypes(typeName, result);
+            return result;
+        }
+
+        private void CollectAllDerivedTypes(string typeName, List<string> result)
+        {
+            if (!_childrenOf.TryGetValue(typeName, out var children))
+                return;
+
+            foreach (var child in children)
+            {
+                result.Add(child);
+                // Recursively collect children of this child
+                CollectAllDerivedTypes(child, result);
+            }
+        }
+
         #endregion
     }
 }

@@ -9,10 +9,12 @@ namespace GProtobuf.Generator.V2.Handlers
     internal class CollectionHandler
     {
         private readonly StringBuilderWithIndent _sb;
+        private readonly TypeRegistry _registry;
 
-        public CollectionHandler(StringBuilderWithIndent sb)
+        public CollectionHandler(StringBuilderWithIndent sb, TypeRegistry registry)
         {
             _sb = sb;
+            _registry = registry;
         }
 
         #region Write (Serialization)
@@ -24,7 +26,9 @@ namespace GProtobuf.Generator.V2.Handlers
         public void GenerateComplexCollectionWrite(
             int fieldId,
             string sourceVar,
-            string elementClassName)
+            string elementTypeName,
+            string elementClassName,
+            string writerClassName = "StreamWriters")
         {
             _sb.AppendIndentedLine($"if ({sourceVar} != null)");
             _sb.StartNewBlock();
@@ -36,11 +40,13 @@ namespace GProtobuf.Generator.V2.Handlers
 
             // Calculate and write length
             _sb.AppendIndentedLine("var itemCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
-            _sb.AppendIndentedLine($"SizeCalculators.Calculate{elementClassName}ContentSize(ref itemCalc, item);");
+            var qualifiedSizeCall = GetQualifiedCalculateContentSizeCall(elementTypeName, elementClassName);
+            _sb.AppendIndentedLine($"{qualifiedSizeCall}(ref itemCalc, item);");
             _sb.AppendIndentedLine("writer.WriteVarUInt32((uint)itemCalc.Length);");
 
             // Write content
-            _sb.AppendIndentedLine($"Write{elementClassName}Content(ref writer, item);");
+            var qualifiedWriteCall = GetQualifiedWriteContentCall(elementTypeName, elementClassName, writerClassName);
+            _sb.AppendIndentedLine($"{qualifiedWriteCall}(ref writer, item);");
 
             _sb.EndBlock(); // foreach
             _sb.EndBlock(); // if
@@ -116,7 +122,10 @@ namespace GProtobuf.Generator.V2.Handlers
             // Read length-prefixed item
             _sb.AppendIndentedLine($"var length = {readerVar}.ReadVarInt32();");
             _sb.AppendIndentedLine($"var nestedReader = new SpanReader({readerVar}.GetSlice(length));");
-            _sb.AppendIndentedLine($"var item = Read{elementClassName}Content(ref nestedReader);");
+
+            // Generate fully qualified call to Read{ClassName}Content
+            var qualifiedCall = GetQualifiedReadContentCall(elementTypeName, elementClassName);
+            _sb.AppendIndentedLine($"var item = {qualifiedCall}(ref nestedReader);");
 
             // Add to collection
             _sb.AppendIndentedLine($"{actualTargetVar}.Add(item);");
@@ -169,6 +178,7 @@ namespace GProtobuf.Generator.V2.Handlers
         public void GenerateComplexCollectionSize(
             int fieldId,
             string sourceVar,
+            string elementTypeName,
             string elementClassName,
             string calculatorVar = "calculator")
         {
@@ -182,7 +192,8 @@ namespace GProtobuf.Generator.V2.Handlers
 
             // Calculate item content size
             _sb.AppendIndentedLine("var itemCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
-            _sb.AppendIndentedLine($"SizeCalculators.Calculate{elementClassName}ContentSize(ref itemCalc, item);");
+            var qualifiedSizeCall = GetQualifiedCalculateContentSizeCall(elementTypeName, elementClassName);
+            _sb.AppendIndentedLine($"{qualifiedSizeCall}(ref itemCalc, item);");
 
             // Add length varint size + content size
             _sb.AppendIndentedLine($"{calculatorVar}.WriteVarUInt32((uint)itemCalc.Length);");
@@ -190,6 +201,76 @@ namespace GProtobuf.Generator.V2.Handlers
 
             _sb.EndBlock(); // foreach
             _sb.EndBlock(); // if
+        }
+
+        #endregion
+
+        #region Helper Methods
+
+        /// <summary>
+        /// Builds fully qualified call to SpanReaders.Read{ClassName}Content method.
+        /// </summary>
+        private string GetQualifiedReadContentCall(string elementTypeName, string elementClassName)
+        {
+            var ns = GetTypeNamespace(elementTypeName);
+            if (ns == null)
+            {
+                // No namespace, call directly
+                return $"Read{elementClassName}Content";
+            }
+            return $"global::{ns}.Serialization.SpanReaders.Read{elementClassName}Content";
+        }
+
+        /// <summary>
+        /// Builds fully qualified call to StreamWriters/BufferWriters.Write{ClassName}Content method.
+        /// </summary>
+        private string GetQualifiedWriteContentCall(string elementTypeName, string elementClassName, string writerClassName)
+        {
+            var ns = GetTypeNamespace(elementTypeName);
+            if (ns == null)
+            {
+                return $"Write{elementClassName}Content";
+            }
+            return $"global::{ns}.Serialization.{writerClassName}.Write{elementClassName}Content";
+        }
+
+        /// <summary>
+        /// Builds fully qualified call to SizeCalculators.Calculate{ClassName}ContentSize method.
+        /// </summary>
+        private string GetQualifiedCalculateContentSizeCall(string elementTypeName, string elementClassName)
+        {
+            var ns = GetTypeNamespace(elementTypeName);
+            if (ns == null)
+            {
+                return $"SizeCalculators.Calculate{elementClassName}ContentSize";
+            }
+            return $"global::{ns}.Serialization.SizeCalculators.Calculate{elementClassName}ContentSize";
+        }
+
+        /// <summary>
+        /// Extracts namespace from full type name.
+        /// Returns null if no namespace or if it's a primitive type.
+        /// </summary>
+        private string GetTypeNamespace(string fullTypeName)
+        {
+            if (string.IsNullOrEmpty(fullTypeName))
+                return null;
+
+            // Check if it's a registered type in registry
+            if (_registry != null)
+            {
+                var type = _registry.GetByFullName(fullTypeName);
+                if (type != null)
+                {
+                    // Extract namespace from FullName
+                    var lastDot = fullTypeName.LastIndexOf('.');
+                    return lastDot > 0 ? fullTypeName.Substring(0, lastDot) : null;
+                }
+            }
+
+            // Fallback: check if typename contains dot
+            var dotIndex = fullTypeName.LastIndexOf('.');
+            return dotIndex > 0 ? fullTypeName.Substring(0, dotIndex) : null;
         }
 
         #endregion

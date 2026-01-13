@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using GProtobuf.Generator.V2.CodeGeneration.Core;
 using GProtobuf.Generator.V2.Handlers;
 using GProtobuf.Generator.V2.Handlers.Core;
@@ -44,7 +45,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb = sb;
             _registry = registry;
             _primitiveHandler = new PrimitiveHandler();
-            _collectionHandler = new CollectionHandler(sb);
+            _collectionHandler = new CollectionHandler(sb, registry);
             _virtualTupleRegistry = virtualTupleRegistry ?? new VirtualTupleTypeRegistry();
             _virtualMapRegistry = virtualMapRegistry ?? new VirtualMapTypeRegistry(_virtualTupleRegistry, _registry);
             _tupleHandler = new TupleHandler(sb, _virtualTupleRegistry);
@@ -159,33 +160,31 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             // Generate WriteContent method (for nested serialization without tag)
             GenerateWriteContentMethod(type, className);
+
+            // Generate Write{Type}_As{Parent} methods for polymorphic serialization
+            if (_registry.IsDerivedType(type.FullName))
+            {
+                GenerateWriteAsParentMethods(type, className);
+            }
         }
 
         /// <summary>
-        /// Generates WriteXxxContent method that writes just the field content without tag.
-        /// Used for nested messages.
+        /// Generates WriteXxxContent method that writes ONLY THIS TYPE'S OWN FIELDS.
+        /// NO parent fields, NO wrappers, NO nested types.
+        ///
+        /// Examples:
+        /// - WriteAContent writes StringA
+        /// - WriteBContent writes StringB (not StringA)
+        /// - WriteCContent writes StringC (not StringA, not StringB)
+        ///
+        /// Wrapper generation is handled by Write{Type}_As{Parent} methods.
         /// </summary>
         private void GenerateWriteContentMethod(TypeDefinition type, string className)
         {
             _sb.AppendIndentedLine($"public static void Write{className}Content(ref {_writerType} writer, global::{type.FullName} instance)");
             _sb.StartNewBlock();
 
-            // For derived types, write all inherited fields first
-            bool isDerived = _registry.IsDerivedType(type.FullName);
-            if (isDerived)
-            {
-                var rootTypeName = _registry.GetRootType(type.FullName);
-                var rootType = _registry.GetByFullName(rootTypeName);
-                if (rootType?.ProtoMembers != null)
-                {
-                    foreach (var member in rootType.ProtoMembers)
-                    {
-                        GenerateFieldWrite(member, "instance");
-                    }
-                }
-            }
-
-            // Write own fields
+            // Write ONLY own fields (not inherited fields)
             if (type.ProtoMembers != null)
             {
                 foreach (var member in type.ProtoMembers)
@@ -196,6 +195,202 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             _sb.EndBlock();
             _sb.AppendNewLine();
+        }
+
+        /// <summary>
+        /// Generates Write{Type}_As{Parent} methods for all ancestors.
+        /// For C:B:A, generates WriteC_AsA and WriteC_AsB.
+        /// These methods handle wrapper generation for polymorphic serialization.
+        /// </summary>
+        private void GenerateWriteAsParentMethods(TypeDefinition type, string className)
+        {
+            var inheritanceChain = _registry.GetInheritanceChain(type.FullName);
+
+            // Generate method for each ancestor (excluding the type itself)
+            for (int ancestorIndex = 0; ancestorIndex < inheritanceChain.Count - 1; ancestorIndex++)
+            {
+                var ancestorTypeName = inheritanceChain[ancestorIndex];
+                var ancestorClassName = TypeNameHelper.GetClassName(ancestorTypeName);
+
+                GenerateWriteAsSpecificParent(type, className, ancestorTypeName, ancestorClassName, inheritanceChain, ancestorIndex);
+            }
+        }
+
+        /// <summary>
+        /// Generates Write{Type}_As{Ancestor} method for a specific ancestor.
+        /// </summary>
+        private void GenerateWriteAsSpecificParent(
+            TypeDefinition type,
+            string className,
+            string ancestorTypeName,
+            string ancestorClassName,
+            IReadOnlyList<string> inheritanceChain,
+            int ancestorIndex)
+        {
+            var typeIndex = inheritanceChain.Count - 1;
+
+            _sb.AppendIndentedLine($"private static void Write{className}_As{ancestorClassName}(ref {_writerType} writer, global::{type.FullName} instance)");
+            _sb.StartNewBlock();
+
+            // Walk from ancestor down to type, generating nested wrappers
+            // For WriteC_AsA with chain [A, B, C]:
+            //   ancestorIndex = 0 (A)
+            //   typeIndex = 2 (C)
+            //   Need to generate: wrapper for B (field 5) containing wrapper for C (field 10)
+
+            GenerateNestedWrappersForAsParent(inheritanceChain, ancestorIndex + 1, typeIndex);
+
+            _sb.EndBlock();
+            _sb.AppendNewLine();
+        }
+
+        /// <summary>
+        /// Recursively generates nested wrappers from currentIndex to targetIndex.
+        /// </summary>
+        private void GenerateNestedWrappersForAsParent(
+            IReadOnlyList<string> chain,
+            int currentIndex,
+            int targetIndex)
+        {
+            if (currentIndex > targetIndex)
+                return;
+
+            var currentTypeName = chain[currentIndex];
+            var currentClassName = TypeNameHelper.GetClassName(currentTypeName);
+            var parentTypeName = chain[currentIndex - 1];
+            var parentType = _registry.GetByFullName(parentTypeName);
+
+            // Find ProtoInclude field ID for current type in parent
+            var protoInclude = parentType?.ProtoIncludes?.FirstOrDefault(p => p.Type == currentTypeName);
+            if (protoInclude == null)
+                return;
+
+            // Write tag for wrapper
+            TagCodeHelper.WriteTag(_sb, protoInclude.FieldId, WireType.Len);
+
+            // Calculate size for this wrapper
+            var calcVar = $"calc{currentIndex}";
+            _sb.AppendIndentedLine($"var {calcVar} = new global::GProtobuf.Core.WriteSizeCalculator();");
+
+            // If this is the target type, calculate own fields
+            // Otherwise, calculate parent fields + nested wrapper
+            if (currentIndex == targetIndex)
+            {
+                // This is the innermost level - calculate own fields
+                _sb.AppendIndentedLine($"SizeCalculators.Calculate{currentClassName}ContentSize(ref {calcVar}, instance);");
+            }
+            else
+            {
+                // This is intermediate level - calculate own fields + nested wrapper
+                var currentType = _registry.GetByFullName(currentTypeName);
+
+                // Calculate current level's fields
+                if (currentType?.ProtoMembers != null)
+                {
+                    foreach (var member in currentType.ProtoMembers)
+                    {
+                        // Generate size calculation for this field
+                        GenerateFieldSizeCalculation(member, "instance", calcVar);
+                    }
+                }
+
+                // Add nested wrapper size
+                var nextTypeName = chain[currentIndex + 1];
+                var nextProtoInclude = currentType?.ProtoIncludes?.FirstOrDefault(p => p.Type == nextTypeName);
+                if (nextProtoInclude != null)
+                {
+                    // Add tag size
+                    TagCodeHelper.AddTagSize(_sb, nextProtoInclude.FieldId, WireType.Len, calcVar);
+
+                    // Calculate nested content
+                    var nestedCalcVar = $"nested{currentIndex}";
+                    _sb.AppendIndentedLine($"var {nestedCalcVar} = new global::GProtobuf.Core.WriteSizeCalculator();");
+
+                    // Recursively calculate nested size
+                    GenerateNestedSizeCalculationForAsParent(chain, currentIndex + 1, targetIndex, nestedCalcVar);
+
+                    // Add length prefix + content size
+                    _sb.AppendIndentedLine($"{calcVar}.WriteVarUInt32((uint){nestedCalcVar}.Length);");
+                    _sb.AppendIndentedLine($"{calcVar}.AddByteLength({nestedCalcVar}.Length);");
+                }
+            }
+
+            // Write length prefix
+            _sb.AppendIndentedLine($"writer.WriteVarUInt32((uint){calcVar}.Length);");
+
+            // Write content
+            if (currentIndex == targetIndex)
+            {
+                // Write own fields
+                _sb.AppendIndentedLine($"Write{currentClassName}Content(ref writer, instance);");
+            }
+            else
+            {
+                // Write parent fields + nested wrapper
+                var currentType = _registry.GetByFullName(currentTypeName);
+                if (currentType?.ProtoMembers != null)
+                {
+                    foreach (var member in currentType.ProtoMembers)
+                    {
+                        GenerateFieldWrite(member, "instance");
+                    }
+                }
+
+                // Recursively write nested wrapper
+                GenerateNestedWrappersForAsParent(chain, currentIndex + 1, targetIndex);
+            }
+        }
+
+        /// <summary>
+        /// Recursively calculates size for nested wrappers.
+        /// </summary>
+        private void GenerateNestedSizeCalculationForAsParent(
+            IReadOnlyList<string> chain,
+            int currentIndex,
+            int targetIndex,
+            string calcVar)
+        {
+            if (currentIndex > targetIndex)
+                return;
+
+            var currentTypeName = chain[currentIndex];
+            var currentClassName = TypeNameHelper.GetClassName(currentTypeName);
+
+            if (currentIndex == targetIndex)
+            {
+                // Innermost level - just own fields
+                _sb.AppendIndentedLine($"SizeCalculators.Calculate{currentClassName}ContentSize(ref {calcVar}, instance);");
+            }
+            else
+            {
+                // Intermediate level - own fields + nested wrapper
+                var currentType = _registry.GetByFullName(currentTypeName);
+
+                // Calculate current level fields
+                if (currentType?.ProtoMembers != null)
+                {
+                    foreach (var member in currentType.ProtoMembers)
+                    {
+                        GenerateFieldSizeCalculation(member, "instance", calcVar);
+                    }
+                }
+
+                // Add nested wrapper
+                var nextTypeName = chain[currentIndex + 1];
+                var nextProtoInclude = currentType?.ProtoIncludes?.FirstOrDefault(p => p.Type == nextTypeName);
+                if (nextProtoInclude != null)
+                {
+                    TagCodeHelper.AddTagSize(_sb, nextProtoInclude.FieldId, WireType.Len, calcVar);
+
+                    var nestedCalcVar = $"n{currentIndex}";
+                    _sb.AppendIndentedLine($"var {nestedCalcVar} = new global::GProtobuf.Core.WriteSizeCalculator();");
+
+                    GenerateNestedSizeCalculationForAsParent(chain, currentIndex + 1, targetIndex, nestedCalcVar);
+
+                    _sb.AppendIndentedLine($"{calcVar}.WriteVarUInt32((uint){nestedCalcVar}.Length);");
+                    _sb.AppendIndentedLine($"{calcVar}.AddByteLength({nestedCalcVar}.Length);");
+                }
+            }
         }
 
         private void GenerateSimpleWriteMethod(TypeDefinition type, string className)
@@ -212,34 +407,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateWriteMethodWithInheritance(TypeDefinition type, string className)
         {
-            // Handle ProtoIncludes with switch on derived types
-            _sb.AppendIndentedLine("switch (instance)");
-            _sb.StartNewBlock();
-
-            foreach (var include in type.ProtoIncludes)
-            {
-                var derivedClassName = TypeNameHelper.GetClassName(include.Type);
-                _sb.AppendIndentedLine($"case global::{include.Type} derived:");
-                _sb.IncreaseIndent();
-
-                // Write tag for ProtoInclude
-                TagCodeHelper.WriteTag(_sb, include.FieldId, WireType.Len);
-
-                // Calculate and write length
-                _sb.AppendIndentedLine("var calculator = new global::GProtobuf.Core.WriteSizeCalculator();");
-                _sb.AppendIndentedLine($"SizeCalculators.Calculate{derivedClassName}ContentSize(ref calculator, derived);");
-                _sb.AppendIndentedLine("writer.WriteVarUInt32((uint)calculator.Length);");
-
-                // Write content
-                _sb.AppendIndentedLine($"Write{derivedClassName}Content(ref writer, derived);");
-                _sb.AppendIndentedLine("break;");
-                _sb.DecreaseIndent();
-            }
-
-            _sb.EndBlock();
-            _sb.AppendNewLine();
-
-            // Write base class fields
+            // Wire format requires parent fields come before derived type wrappers
             if (type.ProtoMembers != null)
             {
                 foreach (var member in type.ProtoMembers)
@@ -247,20 +415,100 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     GenerateFieldWrite(member, "instance");
                 }
             }
+
+            // For A with B:A and C:B, we need cases for both B and C in WriteA
+            var allDerivedTypes = _registry.GetAllDerivedTypes(type.FullName);
+            if (allDerivedTypes.Count == 0)
+                return;
+
+            // Build list of (Type, ImmediateParentFieldId) for switch cases
+            var derivedCases = new List<(string Type, int FieldId)>();
+            foreach (var derivedType in allDerivedTypes)
+            {
+                // Find immediate parent's ProtoInclude field for this derived type
+                var parent = _registry.GetParent(derivedType);
+
+                // If parent is current type, use direct ProtoInclude field
+                // Otherwise, use parent's ProtoInclude field (for transitive derived)
+                int fieldId;
+                if (parent == type.FullName)
+                {
+                    // Direct child - use ProtoInclude from current type
+                    fieldId = type.ProtoIncludes.First(p => p.Type == derivedType).FieldId;
+                }
+                else
+                {
+                    // Transitive child - find field ID that connects to immediate child of current type
+                    // Walk up from derivedType until we find immediate child of current type
+                    var current = derivedType;
+                    while (current != null)
+                    {
+                        var currentParent = _registry.GetParent(current);
+                        if (currentParent == type.FullName)
+                        {
+                            // current is immediate child of type
+                            fieldId = type.ProtoIncludes.First(p => p.Type == current).FieldId;
+                            break;
+                        }
+                        current = currentParent;
+                    }
+                    fieldId = type.ProtoIncludes.First(p => p.Type == current).FieldId;
+                }
+
+                derivedCases.Add((derivedType, fieldId));
+            }
+
+            // Sort by depth (most derived first) to ensure C is checked before B
+            derivedCases = derivedCases
+                .OrderByDescending(d =>
+                {
+                    var chain = _registry.GetInheritanceChain(d.Type);
+                    return chain?.Count ?? 0;
+                })
+                .ToList();
+
+            // Generate switch with all derived types
+            _sb.AppendIndentedLine("switch (instance)");
+            _sb.StartNewBlock();
+
+            foreach (var (derivedType, fieldId) in derivedCases)
+            {
+                var derivedClassName = TypeNameHelper.GetClassName(derivedType);
+                _sb.AppendIndentedLine($"case global::{derivedType} derived:");
+                _sb.IncreaseIndent();
+
+                // Call Write{Type}_As{CurrentType} method
+                // For WriteA with derived C, call WriteC_AsA
+                _sb.AppendIndentedLine($"Write{derivedClassName}_As{className}(ref writer, derived);");
+                _sb.AppendIndentedLine("return;");
+                _sb.DecreaseIndent();
+            }
+
+            _sb.EndBlock();
+        }
+
+        /// <summary>
+        /// Sorts ProtoIncludes from most derived to base to ensure proper type checking.
+        /// Example: [C, B] so that "instance is C" is checked before "instance is B"
+        /// </summary>
+        private List<ProtoIncludeAttribute> SortProtoIncludesByDepth(List<ProtoIncludeAttribute> includes)
+        {
+            if (includes == null || includes.Count <= 1)
+                return includes;
+
+            // Sort by depth in inheritance chain (deepest first)
+            var sorted = includes.OrderByDescending(inc =>
+            {
+                var chain = _registry.GetInheritanceChain(inc.Type);
+                return chain?.Count ?? 0;
+            }).ToList();
+
+            return sorted;
         }
 
         private void GenerateWriteMethodForDerived(TypeDefinition type, string className)
         {
-            // For derived types, we need to wrap in ProtoInclude from parent
-            var inheritanceChain = _registry.GetInheritanceChain(type.FullName);
-
-            if (inheritanceChain.Count >= 2)
-            {
-                // Write ProtoInclude wrappers from root to this type
-                GenerateProtoIncludeWrappers(type, inheritanceChain);
-            }
-
-            // Write root type fields
+            // Wire format requires parent fields come before derived type wrappers
             var rootTypeName = _registry.GetRootType(type.FullName);
             var rootType = _registry.GetByFullName(rootTypeName);
             if (rootType?.ProtoMembers != null)
@@ -269,6 +517,13 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 {
                     GenerateFieldWrite(member, "instance");
                 }
+            }
+
+            // Then write ProtoInclude wrappers from root to this type
+            var inheritanceChain = _registry.GetInheritanceChain(type.FullName);
+            if (inheritanceChain.Count >= 2)
+            {
+                GenerateProtoIncludeWrappers(type, inheritanceChain);
             }
         }
 
@@ -504,7 +759,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 _collectionHandler.GenerateComplexCollectionWrite(
                     member.FieldId,
                     sourceVar,
-                    elementClassName);
+                    member.CollectionElementType,
+                    elementClassName,
+                    _className);
             }
         }
 
@@ -524,6 +781,140 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             // Write content
             _sb.AppendIndentedLine($"Write{typeName}Content(ref writer, {sourceVar});");
+
+            _sb.EndBlock();
+        }
+
+        /// <summary>
+        /// Generates code to calculate size of a single field into a specified calculator variable.
+        /// Similar to GenerateFieldWrite but for size calculation.
+        /// </summary>
+        private void GenerateFieldSizeCalculation(ProtoMemberAttribute member, string objectName, string calculatorVar)
+        {
+            string sourceVar = $"{objectName}.{member.Name}";
+
+            // Route to appropriate handler based on field type
+            if (member.IsMap)
+            {
+                GenerateMapFieldSizeCalculation(member, sourceVar, calculatorVar);
+            }
+            else if (member.IsCollection)
+            {
+                GenerateCollectionFieldSizeCalculation(member, sourceVar, calculatorVar);
+            }
+            else if (member.IsEnum)
+            {
+                GenerateEnumFieldSizeCalculation(member, sourceVar, calculatorVar);
+            }
+            else if (TupleHandler.IsTupleType(member.Type))
+            {
+                _tupleHandler.GenerateTupleSize(member.FieldId, sourceVar, member.Type, calculatorVar);
+            }
+            else if (_primitiveHandler.CanHandle(member.Type))
+            {
+                _primitiveHandler.GenerateSize(
+                    _sb,
+                    sourceVar,
+                    member.Type,
+                    member.DataFormat,
+                    member.FieldId,
+                    member.IsNullable,
+                    calculatorVar);
+            }
+            else
+            {
+                // Complex type - nested message
+                GenerateComplexTypeSizeCalculation(member, sourceVar, calculatorVar);
+            }
+        }
+
+        private void GenerateEnumFieldSizeCalculation(ProtoMemberAttribute member, string sourceVar, string calculatorVar)
+        {
+            if (member.IsNullable)
+            {
+                _sb.AppendIndentedLine($"if ({sourceVar}.HasValue)");
+                _sb.StartNewBlock();
+                TagCodeHelper.AddTagSize(_sb, member.FieldId, WireType.VarInt, calculatorVar);
+                _sb.AppendIndentedLine($"{calculatorVar}.WriteVarInt32((int){sourceVar}.Value);");
+                _sb.EndBlock();
+            }
+            else
+            {
+                _sb.AppendIndentedLine($"if ((int){sourceVar} != 0)");
+                _sb.StartNewBlock();
+                TagCodeHelper.AddTagSize(_sb, member.FieldId, WireType.VarInt, calculatorVar);
+                _sb.AppendIndentedLine($"{calculatorVar}.WriteVarInt32((int){sourceVar});");
+                _sb.EndBlock();
+            }
+        }
+
+        private void GenerateMapFieldSizeCalculation(ProtoMemberAttribute member, string sourceVar, string calculatorVar)
+        {
+            var mapHandler = new MapHandler(_sb, _virtualMapRegistry);
+            mapHandler.GenerateSize(member, sourceVar, calculatorVar);
+        }
+
+        private void GenerateCollectionFieldSizeCalculation(ProtoMemberAttribute member, string sourceVar, string calculatorVar)
+        {
+            if (_primitiveHandler.CanHandleCollection(member.CollectionElementType))
+            {
+                if (member.IsPacked)
+                {
+                    _primitiveHandler.GeneratePackedArraySize(
+                        _sb,
+                        sourceVar,
+                        member.CollectionElementType,
+                        member.DataFormat,
+                        member.FieldId,
+                        calculatorVar);
+                }
+                else
+                {
+                    _primitiveHandler.GenerateNonPackedArraySize(
+                        _sb,
+                        sourceVar,
+                        member.CollectionElementType,
+                        member.DataFormat,
+                        member.FieldId,
+                        calculatorVar);
+                }
+            }
+            else if (TupleHandler.IsTupleType(member.CollectionElementType))
+            {
+                // Tuple collection - generate inline
+                _tupleHandler.GenerateTupleCollectionSize(
+                    member.FieldId,
+                    sourceVar,
+                    member.CollectionElementType,
+                    calculatorVar);
+            }
+            else
+            {
+                // Complex type collection
+                var elementClassName = TypeNameHelper.GetClassName(member.CollectionElementType);
+                _collectionHandler.GenerateComplexCollectionSize(
+                    member.FieldId,
+                    sourceVar,
+                    member.CollectionElementType,
+                    elementClassName,
+                    calculatorVar);
+            }
+        }
+
+        private void GenerateComplexTypeSizeCalculation(ProtoMemberAttribute member, string sourceVar, string calculatorVar)
+        {
+            var typeName = TypeNameHelper.GetClassName(member.Type);
+
+            _sb.AppendIndentedLine($"if ({sourceVar} != null)");
+            _sb.StartNewBlock();
+
+            TagCodeHelper.AddTagSize(_sb, member.FieldId, WireType.Len, calculatorVar);
+
+            // Calculate content size first
+            _sb.AppendIndentedLine($"var lengthBefore = {calculatorVar}.Length;");
+            _sb.AppendIndentedLine($"SizeCalculators.Calculate{typeName}ContentSize(ref {calculatorVar}, {sourceVar});");
+            _sb.AppendIndentedLine($"var contentLength = {calculatorVar}.Length - lengthBefore;");
+            _sb.AppendIndentedLine($"{calculatorVar}.WriteVarUInt32((uint)contentLength);");
 
             _sb.EndBlock();
         }

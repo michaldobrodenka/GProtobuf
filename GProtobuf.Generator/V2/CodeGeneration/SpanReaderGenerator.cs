@@ -36,7 +36,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb = sb;
             _registry = registry;
             _primitiveHandler = new PrimitiveHandler();
-            _collectionHandler = new CollectionHandler(sb);
+            _collectionHandler = new CollectionHandler(sb, registry);
             _virtualTupleRegistry = virtualTupleRegistry ?? new VirtualTupleTypeRegistry();
             _virtualMapRegistry = virtualMapRegistry ?? new VirtualMapTypeRegistry(_virtualTupleRegistry, _registry);
             _tupleHandler = new TupleHandler(sb, _virtualTupleRegistry);
@@ -193,7 +193,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 foreach (var include in type.ProtoIncludes)
                 {
-                    GenerateProtoIncludeReadCase(include);
+                    GenerateProtoIncludeReadCase(type, include);
                 }
             }
 
@@ -609,7 +609,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 foreach (var include in type.ProtoIncludes)
                 {
-                    GenerateProtoIncludeReadCase(include);
+                    GenerateProtoIncludeReadCase(type, include);
                 }
             }
 
@@ -1014,7 +1014,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
         }
 
-        private void GenerateProtoIncludeReadCase(ProtoIncludeAttribute include)
+        private void GenerateProtoIncludeReadCase(TypeDefinition parentType, ProtoIncludeAttribute include)
         {
             var derivedClassName = TypeNameHelper.GetClassName(include.Type);
 
@@ -1024,7 +1024,31 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.IncreaseIndent();
             _sb.AppendIndentedLine("var length = reader.ReadVarInt32();");
             _sb.AppendIndentedLine("var nestedReader = new SpanReader(reader.GetSlice(length));");
+
+            // Save current result to copy fields from
+            _sb.AppendIndentedLine("var oldResult = result;");
+
+            // Read derived content
             _sb.AppendIndentedLine($"result = Read{derivedClassName}Content(ref nestedReader);");
+
+            // Copy parent fields from old result to new derived result
+            // Get all fields that need to be copied (from root to current type)
+            var rootTypeName = _registry.GetRootType(parentType.FullName);
+            var inheritanceChain = _registry.GetInheritanceChain(parentType.FullName);
+
+            // Generate field copying for all types in the chain
+            foreach (var typeName in inheritanceChain)
+            {
+                var typeInChain = _registry.GetByFullName(typeName);
+                if (typeInChain?.ProtoMembers != null)
+                {
+                    foreach (var member in typeInChain.ProtoMembers)
+                    {
+                        _sb.AppendIndentedLine($"if (oldResult != null) result.{member.Name} = oldResult.{member.Name};");
+                    }
+                }
+            }
+
             _sb.AppendIndentedLine("break;");
             _sb.DecreaseIndent();
             _sb.AppendIndentedLine("}");

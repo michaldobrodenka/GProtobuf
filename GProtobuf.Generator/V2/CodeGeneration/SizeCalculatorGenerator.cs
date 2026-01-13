@@ -36,7 +36,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb = sb;
             _registry = registry;
             _primitiveHandler = new PrimitiveHandler();
-            _collectionHandler = new CollectionHandler(sb);
+            _collectionHandler = new CollectionHandler(sb, registry);
             _virtualTupleRegistry = virtualTupleRegistry ?? new VirtualTupleTypeRegistry();
             _virtualMapRegistry = virtualMapRegistry ?? new VirtualMapTypeRegistry(_virtualTupleRegistry, _registry);
             _tupleHandler = new TupleHandler(sb, _virtualTupleRegistry);
@@ -152,10 +152,20 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateCalculateSizeWithInheritance(TypeDefinition type, string className)
         {
+            // Wire format requires parent fields come before derived type wrappers
+            if (type.ProtoMembers != null)
+            {
+                foreach (var member in type.ProtoMembers)
+                {
+                    GenerateFieldSize(member, "obj");
+                }
+            }
+
             // Handle ProtoIncludes with switch on derived types
             _sb.AppendIndentedLine("switch (obj)");
             _sb.StartNewBlock();
 
+            int caseIndex = 0;
             foreach (var include in type.ProtoIncludes)
             {
                 var derivedClassName = TypeNameHelper.GetClassName(include.Type);
@@ -165,40 +175,24 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 // Add tag size for ProtoInclude
                 TagCodeHelper.AddTagSize(_sb, include.FieldId, WireType.Len);
 
-                // Calculate content size first
-                _sb.AppendIndentedLine("var lengthBefore = calculator.Length;");
-                _sb.AppendIndentedLine($"Calculate{derivedClassName}Size(ref calculator, derived);");
-                _sb.AppendIndentedLine("var contentLength = calculator.Length - lengthBefore;");
-                _sb.AppendIndentedLine("calculator.WriteVarUInt32((uint)contentLength);");
+                // Calculate content size in separate calculator with unique name
+                var tempCalcVar = $"tempCalc{caseIndex}";
+                _sb.AppendIndentedLine($"var {tempCalcVar} = new global::GProtobuf.Core.WriteSizeCalculator();");
+                _sb.AppendIndentedLine($"Calculate{derivedClassName}ContentSize(ref {tempCalcVar}, derived);");
+                _sb.AppendIndentedLine($"calculator.WriteVarUInt32((uint){tempCalcVar}.Length);");
+                _sb.AppendIndentedLine($"calculator.AddByteLength({tempCalcVar}.Length);");
 
-                _sb.AppendIndentedLine("break;");
+                _sb.AppendIndentedLine("return;");  // CRITICAL FIX: return instead of break to exit method
                 _sb.DecreaseIndent();
+                caseIndex++;
             }
 
             _sb.EndBlock();
-            _sb.AppendNewLine();
-
-            // Calculate base class fields
-            if (type.ProtoMembers != null)
-            {
-                foreach (var member in type.ProtoMembers)
-                {
-                    GenerateFieldSize(member, "obj");
-                }
-            }
         }
 
         private void GenerateCalculateSizeForDerived(TypeDefinition type, string className)
         {
-            // For derived types, we need to add ProtoInclude wrapper sizes
-            var inheritanceChain = _registry.GetInheritanceChain(type.FullName);
-
-            if (inheritanceChain.Count >= 2)
-            {
-                GenerateProtoIncludeWrapperSizes(type, inheritanceChain);
-            }
-
-            // Add root type fields
+            // Wire format requires parent fields come before derived type wrappers
             var rootTypeName = _registry.GetRootType(type.FullName);
             var rootType = _registry.GetByFullName(rootTypeName);
             if (rootType?.ProtoMembers != null)
@@ -207,6 +201,13 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 {
                     GenerateFieldSize(member, "obj");
                 }
+            }
+
+            // Then add ProtoInclude wrapper sizes
+            var inheritanceChain = _registry.GetInheritanceChain(type.FullName);
+            if (inheritanceChain.Count >= 2)
+            {
+                GenerateProtoIncludeWrapperSizes(type, inheritanceChain);
             }
         }
 
@@ -434,6 +435,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 _collectionHandler.GenerateComplexCollectionSize(
                     member.FieldId,
                     sourceVar,
+                    member.CollectionElementType,
                     elementClassName);
             }
         }

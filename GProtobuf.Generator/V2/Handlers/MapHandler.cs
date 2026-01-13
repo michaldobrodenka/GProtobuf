@@ -698,6 +698,15 @@ namespace GProtobuf.Generator.V2.Handlers
         /// </summary>
         public void GenerateSize(ProtoMemberAttribute member, string sourceVar)
         {
+            GenerateSize(member, sourceVar, "calculator");
+        }
+
+        /// <summary>
+        /// Generates code to calculate size of a map field into a specified calculator variable.
+        /// Uses virtual type methods for complex types, inline code for simple types.
+        /// </summary>
+        public void GenerateSize(ProtoMemberAttribute member, string sourceVar, string calculatorVar)
+        {
             var valueType = member.MapValueType;
 
             // Check if we should use virtual type
@@ -709,12 +718,12 @@ namespace GProtobuf.Generator.V2.Handlers
             if (virtualInfo != null)
             {
                 // Use virtual type size calculator
-                GenerateVirtualTypeSize(sourceVar, virtualInfo, member);
+                GenerateVirtualTypeSize(sourceVar, virtualInfo, member, calculatorVar);
             }
             else
             {
                 // Use inline size calculation for simple types
-                GenerateInlineSize(sourceVar, valueType, member);
+                GenerateInlineSize(sourceVar, valueType, member, calculatorVar);
             }
 
             _sb.EndBlock(); // if
@@ -723,7 +732,7 @@ namespace GProtobuf.Generator.V2.Handlers
         /// <summary>
         /// Generates code that calls the KeyValue size calculator method.
         /// </summary>
-        private void GenerateVirtualTypeSize(string sourceVar, VirtualMapEntryInfo virtualInfo, ProtoMemberAttribute member)
+        private void GenerateVirtualTypeSize(string sourceVar, VirtualMapEntryInfo virtualInfo, ProtoMemberAttribute member, string calculatorVar = "calculator")
         {
             var keyValueClassName = GetKeyValueClassName(virtualInfo);
             var (_, tagBytes) = TypeMapping.PrecomputeTagBytes(member.FieldId, WireType.Len);
@@ -745,9 +754,9 @@ namespace GProtobuf.Generator.V2.Handlers
             _sb.AppendIndentedLine($"SizeCalculators.Calculate{keyValueClassName}Size(ref entryCalc, keyValue);");
 
             // Add tag and length prefix size
-            _sb.AppendIndentedLine($"calculator.AddByteLength({tagBytes});");
-            _sb.AppendIndentedLine("calculator.WriteVarUInt32((uint)entryCalc.Length);");
-            _sb.AppendIndentedLine("calculator.AddByteLength(entryCalc.Length);");
+            _sb.AppendIndentedLine($"{calculatorVar}.AddByteLength({tagBytes});");
+            _sb.AppendIndentedLine($"{calculatorVar}.WriteVarUInt32((uint)entryCalc.Length);");
+            _sb.AppendIndentedLine($"{calculatorVar}.AddByteLength(entryCalc.Length);");
 
             _sb.EndBlock(); // foreach
         }
@@ -755,7 +764,7 @@ namespace GProtobuf.Generator.V2.Handlers
         /// <summary>
         /// Generates inline size calculation code for simple map types.
         /// </summary>
-        private void GenerateInlineSize(string sourceVar, string valueType, ProtoMemberAttribute member)
+        private void GenerateInlineSize(string sourceVar, string valueType, ProtoMemberAttribute member, string calculatorVar = "calculator")
         {
             // Reuse calculators outside the loop to reduce allocations
             _sb.AppendIndentedLine("var entryCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
@@ -783,9 +792,9 @@ namespace GProtobuf.Generator.V2.Handlers
 
             // Add tag and length prefix size
             var (_, tagBytes) = TypeMapping.PrecomputeTagBytes(member.FieldId, WireType.Len);
-            _sb.AppendIndentedLine($"calculator.AddByteLength({tagBytes});");
-            _sb.AppendIndentedLine("calculator.WriteVarUInt32((uint)entryCalc.Length);");
-            _sb.AppendIndentedLine("calculator.AddByteLength(entryCalc.Length);");
+            _sb.AppendIndentedLine($"{calculatorVar}.AddByteLength({tagBytes});");
+            _sb.AppendIndentedLine($"{calculatorVar}.WriteVarUInt32((uint)entryCalc.Length);");
+            _sb.AppendIndentedLine($"{calculatorVar}.AddByteLength(entryCalc.Length);");
 
             _sb.EndBlock(); // foreach
         }
