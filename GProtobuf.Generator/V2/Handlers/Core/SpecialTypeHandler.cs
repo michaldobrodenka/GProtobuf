@@ -80,8 +80,8 @@ namespace GProtobuf.Generator.V2.Handlers.Core
                     return true;
 
                 case "System.Guid":
-                    // Guid is 16 bytes + 1 byte for length prefix (varint 16)
-                    sb.AppendIndentedLine($"{calculatorVar}.AddByteLength(17);");
+                    // Guid BCL format: 1 byte length + 18 bytes nested message (1 tag + 8 lo + 1 tag + 8 hi) = 19 bytes total
+                    sb.AppendIndentedLine($"{calculatorVar}.AddByteLength(19);");
                     return true;
 
                 default:

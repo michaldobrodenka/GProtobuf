@@ -264,10 +264,22 @@ namespace GProtobuf.Core
             return currentLength;
         }
 
+        /// <summary>
+        /// Calculates size for Guid in protobuf-net BCL format.
+        /// BCL format: nested message with lo/hi fixed64 fields.
+        /// Wire format: [length=18 as varint][tag 0x09][8 bytes lo][tag 0x11][8 bytes hi]
+        /// Total: 19 bytes (1 length prefix + 18 nested content)
+        /// </summary>
         public void WriteGuid(Guid value)
         {
-            // Guid is 16 bytes + 1 byte for length prefix (varint 16)
-            Length += 17;
+            // BCL format size breakdown:
+            // - 1 byte: length prefix (varint 18 = 0x12)
+            // - 1 byte: lo field tag (0x09)
+            // - 8 bytes: lo data
+            // - 1 byte: hi field tag (0x11)
+            // - 8 bytes: hi data
+            // Total: 1 + 1 + 8 + 1 + 8 = 19 bytes
+            Length += 19;
         }
 
         /// <summary>

@@ -174,14 +174,78 @@ namespace GProtobuf.Core
         }
 
         /// <summary>
-        /// Reads a Guid value (16 bytes).
+        /// Reads Guid in protobuf-net BCL format (nested message with lo/hi fixed64 fields).
+        /// Wire format: [length=18][tag 0x09][8 bytes lo][tag 0x11][8 bytes hi]
+        /// Supports field order independence (hi/lo can appear in any order).
+        /// STRICT validation: requires exactly 18 bytes and both lo/hi fields present (or empty for Guid.Empty).
         /// </summary>
         public static Guid ReadGuid(this ref SpanReader reader, WireType wireType)
         {
+            if (wireType != WireType.Len)
+                throw new InvalidOperationException($"Expected WireType.Len for Guid, got {wireType}");
+
             int length = reader.ReadVarInt32();
-            if (length != 16)
-                throw new InvalidOperationException($"Expected Guid length of 16 bytes, got {length}");
-            return new Guid(reader.GetSlice(16));
+
+            // Special case: length=0 means Guid.Empty (default value not serialized by protobuf-net)
+            if (length == 0)
+                return Guid.Empty;
+
+            int startPosition = reader.Position;
+            int endPosition = startPosition + length;
+
+            // BCL format REQUIRES exactly 18 bytes (1 tag + 8 lo + 1 tag + 8 hi)
+            if (length != 18)
+                throw new InvalidDataException($"Expected Guid BCL nested message length of 18 bytes, got {length}");
+
+            // Initialize byte buffer for Guid construction
+            Span<byte> guidBytes = stackalloc byte[16];
+            bool hasLo = false;
+            bool hasHi = false;
+
+            // Parse nested message fields (support field order independence)
+            while (reader.Position < endPosition)
+            {
+                reader.ReadWireTypeAndFieldId(out var innerWireType, out var fieldId);
+
+                switch (fieldId)
+                {
+                    case 1: // lo (low 64 bits)
+                        if (innerWireType != WireType.Fixed64b)
+                            throw new InvalidDataException($"Expected Fixed64 for Guid.lo, got {innerWireType}");
+
+                        // Read 8 bytes for low part (little-endian)
+                        var loSlice = reader.GetSlice(8);
+                        loSlice.CopyTo(guidBytes.Slice(0, 8));
+                        hasLo = true;
+                        break;
+
+                    case 2: // hi (high 64 bits)
+                        if (innerWireType != WireType.Fixed64b)
+                            throw new InvalidDataException($"Expected Fixed64 for Guid.hi, got {innerWireType}");
+
+                        // Read 8 bytes for high part (little-endian)
+                        var hiSlice = reader.GetSlice(8);
+                        hiSlice.CopyTo(guidBytes.Slice(8, 8));
+                        hasHi = true;
+                        break;
+
+                    default:
+                        // Unknown field — skip (forward compatibility)
+                        reader.SkipField(innerWireType);
+                        break;
+                }
+            }
+
+            // Strict validation: exactly endPosition reached (matches protobuf-net behavior)
+            if (reader.Position != endPosition)
+                throw new InvalidDataException($"Guid nested message length mismatch: expected end at {endPosition}, got {reader.Position}");
+
+            // Strict validation: both fields required (matches protobuf-net behavior)
+            if (!hasLo || !hasHi)
+                throw new InvalidDataException($"Incomplete Guid BCL format: hasLo={hasLo}, hasHi={hasHi}");
+
+            // Construct Guid from 16 bytes
+            return new Guid(guidBytes);
         }
 
         /// <summary>

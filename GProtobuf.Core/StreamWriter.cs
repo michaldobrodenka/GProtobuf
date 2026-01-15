@@ -260,14 +260,37 @@ namespace GProtobuf.Core
         //    }
         //}
 
+        /// <summary>
+        /// Writes Guid in protobuf-net BCL format (nested message with lo/hi fixed64 fields).
+        /// Wire format: [length=18][tag 0x09][8 bytes lo][tag 0x11][8 bytes hi]
+        /// Total: 19 bytes (1 length prefix + 18 nested content)
+        /// </summary>
         public void WriteGuid(Guid value)
         {
-            // Write Guid as 16-byte length-delimited value (same as protobuf-net)
-            WriteVarUInt32(16); // Length
-            EnsureBufferSpace(16);
-            if (!value.TryWriteBytes(buffer.Slice(bufferPosition, 16)))
-                throw new InvalidOperationException("Failed to write Guid to buffer");
-            bufferPosition += 16;
+            // Convert Guid to byte array (16 bytes, little-endian)
+            Span<byte> guidBytes = stackalloc byte[16];
+            if (!value.TryWriteBytes(guidBytes))
+                throw new InvalidOperationException("Failed to convert Guid to bytes");
+
+            // Write nested message length = 18 bytes total
+            // (1 byte tag + 8 bytes lo + 1 byte tag + 8 bytes hi)
+            WriteVarUInt32(18);
+
+            // Write field 1 (lo): tag 0x09 (field 1, WireType.Fixed64)
+            WriteSingleByte(0x09);
+
+            // Write low 8 bytes (little-endian, directly from guidBytes)
+            EnsureBufferSpace(8);
+            guidBytes.Slice(0, 8).CopyTo(buffer.Slice(bufferPosition, 8));
+            bufferPosition += 8;
+
+            // Write field 2 (hi): tag 0x11 (field 2, WireType.Fixed64)
+            WriteSingleByte(0x11);
+
+            // Write high 8 bytes (little-endian, directly from guidBytes)
+            EnsureBufferSpace(8);
+            guidBytes.Slice(8, 8).CopyTo(buffer.Slice(bufferPosition, 8));
+            bufferPosition += 8;
         }
 
         /// <summary>

@@ -711,7 +711,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                     _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
                     _sb.StartNewBlock();
                     _sb.AppendIndentedLine($"{calcVar}.AddByteLength({guidTagBytes}); // tag for repeated field {fieldId}");
-                    _sb.AppendIndentedLine($"{calcVar}.AddByteLength(17);"); // Guid is 16 bytes + 1 byte for length prefix (varint 16)
+                    _sb.AppendIndentedLine($"{calcVar}.AddByteLength(19);"); // Guid BCL format: 1 byte length + 18 bytes nested message = 19 bytes total
                     _sb.EndBlock();
                 }
                 else if (normalizedElem == "System.TimeSpan")
@@ -1067,6 +1067,12 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
 
         private static string GetFullTypeName(string typeName, TypeAnalysisInfo typeInfo)
         {
+            // Null check - fallback to typeName if typeInfo is null
+            if (typeInfo == null)
+            {
+                return typeName;
+            }
+
             if (typeInfo.IsPrimitive)
             {
                 return typeInfo.ShortTypeName ?? typeName;
