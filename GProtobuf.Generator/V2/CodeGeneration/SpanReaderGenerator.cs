@@ -340,6 +340,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 _sb.IncreaseIndent();
             }
 
+            // Phase 1: Wire type validation (Level200 requirement)
+            GenerateWireTypeValidation(member, wireTypeVar, readerVar);
+
             if (member.IsMap)
             {
                 var mapHandler = new MapHandler(_sb, _virtualMapRegistry);
@@ -385,15 +388,19 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         {
             if (_primitiveHandler.CanHandleCollection(member.CollectionElementType))
             {
-                if (member.IsPacked)
+                // Level200: Primitives use dual-mode packed encoding (packed + unpacked backward compat with MERGE)
+                bool shouldBePacked = member.IsPacked || TypeMapping.ShouldBePackedByDefault(member.CollectionElementType);
+
+                if (shouldBePacked)
                 {
-                    _primitiveHandler.GeneratePackedArrayRead(
+                    _primitiveHandler.GenerateDualModePackedArrayRead(
                         _sb,
                         $"result.{member.Name}",
                         member.CollectionElementType,
                         member.DataFormat,
                         member.CollectionKind,
                         member.Type,
+                        wireTypeVar,
                         readerVar);
                 }
                 else
@@ -457,6 +464,10 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine($"public static global::{type.FullName} Read{className}Content(ref SpanReader reader)");
             _sb.StartNewBlock();
 
+            // Phase 1: Recursion depth guard (Level200 requirement)
+            _sb.AppendIndentedLine("using (global::GProtobuf.Core.RecursionGuard.EnterLevel())");
+            _sb.StartNewBlock();
+
             bool hasInheritance = GeneratorHelpers.HasInheritance(type, _registry);
 
             if (!hasInheritance)
@@ -467,6 +478,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 GenerateReadContentWithInheritance(type, className);
             }
+
+            _sb.EndBlock(); // Close using block
 
             _sb.EndBlock();
             _sb.AppendNewLine();
@@ -852,15 +865,20 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         {
             if (_primitiveHandler.CanHandleCollection(member.CollectionElementType))
             {
-                if (member.IsPacked)
+                // Level200: Primitives use dual-mode packed encoding (packed + unpacked backward compat with MERGE)
+                bool shouldBePacked = member.IsPacked || TypeMapping.ShouldBePackedByDefault(member.CollectionElementType);
+
+                if (shouldBePacked)
                 {
-                    _primitiveHandler.GeneratePackedArrayRead(
+                    _primitiveHandler.GenerateDualModePackedArrayRead(
                         _sb,
                         $"instance.{member.Name}",
                         member.CollectionElementType,
                         member.DataFormat,
                         member.CollectionKind,
-                        member.Type);
+                        member.Type,
+                        "wireType",
+                        "reader");
                 }
                 else
                 {
@@ -903,6 +921,80 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         #region Field Generation
 
         /// <summary>
+        /// Gets expected wire type for a field as a string (e.g., "WireType.VarInt").
+        /// Handles collections (packed vs unpacked), maps, primitives, and complex types.
+        /// </summary>
+        private string GetExpectedWireTypeString(ProtoMemberAttribute member)
+        {
+            // Maps and complex types always use LengthDelimited
+            if (member.IsMap || (!member.IsEnum && !_primitiveHandler.CanHandle(member.Type) && !member.IsCollection))
+            {
+                return "WireType.Len";
+            }
+
+            // Collections: check if packed
+            if (member.IsCollection)
+            {
+                // Level200: Primitives use packed encoding by default
+                bool shouldBePacked = member.IsPacked || TypeMapping.ShouldBePackedByDefault(member.CollectionElementType);
+
+                if (shouldBePacked)
+                {
+                    return "WireType.Len"; // Packed encoding uses LengthDelimited
+                }
+                else
+                {
+                    // Unpacked: use element's wire type
+                    return TypeMapping.GetWireTypeString(member.CollectionElementType, member.DataFormat);
+                }
+            }
+
+            // FIX: Enum always uses Varint wire type (serialized as int32)
+            if (member.IsEnum)
+            {
+                return "WireType.VarInt";
+            }
+
+            // Other primitives
+            return TypeMapping.GetWireTypeString(member.Type, member.DataFormat);
+        }
+
+        /// <summary>
+        /// Determines if wire type validation should be generated for this member.
+        /// Collections with dual-mode support don't need validation here (handled in the handler).
+        /// </summary>
+        private bool ShouldGenerateWireTypeValidation(ProtoMemberAttribute member)
+        {
+            // Collections with dual-mode (packed/unpacked) support handle wire type internally
+            if (member.IsCollection)
+            {
+                // Only primitive collections use dual-mode
+                bool isDualMode = TypeMapping.ShouldBePackedByDefault(member.CollectionElementType) || member.IsPacked;
+                return !isDualMode;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Generates wire type validation check.
+        /// If wire type doesn't match expected, skips the field.
+        /// </summary>
+        private void GenerateWireTypeValidation(ProtoMemberAttribute member, string wireTypeVar = "wireType", string readerVar = "reader")
+        {
+            // Skip validation for collections with dual-mode support
+            if (!ShouldGenerateWireTypeValidation(member))
+                return;
+
+            var expectedWireType = GetExpectedWireTypeString(member);
+            _sb.AppendIndentedLine($"if ({wireTypeVar} != {expectedWireType})");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine($"{readerVar}.SkipField({wireTypeVar});");
+            _sb.AppendIndentedLine("break;");
+            _sb.EndBlock();
+        }
+
+        /// <summary>
         /// Generates switch case for reading a single field with lazy instance initialization.
         /// Used for inheritance scenarios where result starts as null.
         /// </summary>
@@ -912,6 +1004,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.IncreaseIndent();
             _sb.AppendIndentedLine("{");
             _sb.IncreaseIndent();
+
+            // Phase 1: Wire type validation (Level200 requirement)
+            GenerateWireTypeValidation(member);
 
             // Add lazy initialization before accessing result
             if (!string.IsNullOrEmpty(lazyInit))
@@ -973,6 +1068,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 _sb.IncreaseIndent();
             }
 
+            // Phase 1: Wire type validation (Level200 requirement)
+            GenerateWireTypeValidation(member);
+
             // Route to appropriate handler based on field type
             if (member.IsMap)
             {
@@ -1022,6 +1120,15 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.IncreaseIndent();
             _sb.AppendIndentedLine("{");
             _sb.IncreaseIndent();
+
+            // Phase 1: Wire type validation (Level200 requirement)
+            // ProtoInclude always uses LengthDelimited wire type
+            _sb.AppendIndentedLine("if (wireType != WireType.Len)");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine("reader.SkipField(wireType);");
+            _sb.AppendIndentedLine("break;");
+            _sb.EndBlock();
+
             _sb.AppendIndentedLine("var length = reader.ReadVarInt32();");
             _sb.AppendIndentedLine("var nestedReader = new SpanReader(reader.GetSlice(length));");
 
@@ -1128,15 +1235,20 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // Check if it's a primitive collection that can use PrimitiveHandler
             if (_primitiveHandler.CanHandleCollection(member.CollectionElementType))
             {
-                if (member.IsPacked)
+                // Level200: Primitives use dual-mode packed encoding (packed + unpacked backward compat with MERGE)
+                bool shouldBePacked = member.IsPacked || TypeMapping.ShouldBePackedByDefault(member.CollectionElementType);
+
+                if (shouldBePacked)
                 {
-                    _primitiveHandler.GeneratePackedArrayRead(
+                    _primitiveHandler.GenerateDualModePackedArrayRead(
                         _sb,
                         $"result.{member.Name}",
                         member.CollectionElementType,
                         member.DataFormat,
                         member.CollectionKind,
-                        member.Type);
+                        member.Type,
+                        "wireType",
+                        "reader");
                 }
                 else
                 {
@@ -1202,15 +1314,20 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // Check if it's a primitive collection that can use PrimitiveHandler
             if (_primitiveHandler.CanHandleCollection(member.CollectionElementType))
             {
-                if (member.IsPacked)
+                // Level200: Primitives use dual-mode packed encoding (packed + unpacked backward compat with MERGE)
+                bool shouldBePacked = member.IsPacked || TypeMapping.ShouldBePackedByDefault(member.CollectionElementType);
+
+                if (shouldBePacked)
                 {
-                    _primitiveHandler.GeneratePackedArrayRead(
+                    _primitiveHandler.GenerateDualModePackedArrayRead(
                         _sb,
                         $"result.{member.Name}",
                         member.CollectionElementType,
                         member.DataFormat,
                         member.CollectionKind,
-                        member.Type);
+                        member.Type,
+                        "wireType",
+                        "reader");
                 }
                 else
                 {

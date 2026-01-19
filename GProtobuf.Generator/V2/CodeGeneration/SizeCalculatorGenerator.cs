@@ -401,7 +401,10 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         {
             if (_primitiveHandler.CanHandleCollection(member.CollectionElementType))
             {
-                if (member.IsPacked)
+                // Level200: Primitives MUST use packed encoding by default
+                bool shouldBePacked = member.IsPacked || TypeMapping.ShouldBePackedByDefault(member.CollectionElementType);
+
+                if (shouldBePacked)
                 {
                     _primitiveHandler.GeneratePackedArraySize(
                         _sb,

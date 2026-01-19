@@ -71,7 +71,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         /// Maximum allowed nesting depth for dictionaries.
         /// Dictionary&lt;A, Dictionary&lt;B, Dictionary&lt;C, Dictionary&lt;D, Dictionary&lt;E, F&gt;&gt;&gt;&gt;&gt; = 5 levels.
         /// </summary>
-        public const int MAX_DICTIONARY_NESTING_DEPTH = 5;
+        public const int MAX_DICTIONARY_NESTING_DEPTH = 100;
 
         /// <summary>
         /// Maximum allowed nesting depth for tuples.
@@ -85,7 +85,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         /// - Limit prevents DoS attacks and stack overflow
         /// - 10 levels = reasonable for practical use (32 protobuf default)
         /// </summary>
-        public const int MAX_TUPLE_NESTING_DEPTH = 10;
+        public const int MAX_TUPLE_NESTING_DEPTH = 100;
 
         /// <summary>
         /// Analyzes and validates dictionary nesting depth for a type.

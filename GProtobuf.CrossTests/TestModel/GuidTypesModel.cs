@@ -3,7 +3,7 @@ using System;
 
 namespace GProtobuf.Tests.TestModel
 {
-    // [ProtoContract] // Temporarily disabled - Guid support not implemented in V2
+    [ProtoContract] // BCL Guid format now supported in V2
     public class GuidTypesModel
     {
         [ProtoMember(1)]

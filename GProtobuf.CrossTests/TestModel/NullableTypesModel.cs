@@ -49,8 +49,8 @@ namespace GProtobuf.Tests.TestModel
         [ProtoMember(14, DataFormat = DataFormat.FixedSize)]
         public int? NullableFixedSizeIntValue { get; set; }
 
-        // Test nullable Guid - Temporarily disabled - Guid support not implemented in V2
-        // [ProtoMember(15)]
+        // Test nullable Guid - BCL format now supported in V2
+        [ProtoMember(15)]
         public Guid? NullableGuidValue { get; set; }
 
         // Test nullable Char

@@ -165,6 +165,201 @@ namespace GProtobuf.Generator.V2.Handlers
         }
 
         /// <summary>
+        /// Generates dual-mode packed array read (Level200 compliance).
+        /// Handles BOTH packed (WireType.Len) and unpacked (primitive WireType) with MERGE semantics.
+        /// Supports duplicate field numbers by merging into existing collection.
+        /// </summary>
+        /// <remarks>
+        /// Level200 requirement: Must accept both packed and unpacked encoding for repeated primitives.
+        /// Packed: [tag=Len][length][val1][val2][val3]
+        /// Unpacked: [tag=VarInt][val1] (backward compatibility, single element MERGE)
+        ///
+        /// MERGE behavior: Multiple packed blocks with same field number concatenate values.
+        /// Example: [field 1 packed: [1,2,3]] [field 1 packed: [4,5]] → result = [1,2,3,4,5]
+        /// </remarks>
+        public void GenerateDualModePackedArrayRead(
+            StringBuilderWithIndent sb,
+            string targetVar,
+            string elementTypeName,
+            DataFormat format,
+            CollectionKind collectionKind,
+            string collectionTypeName,
+            string wireTypeVar = "wireType",
+            string readerVar = "reader")
+        {
+            var normalized = TypeMapping.NormalizeTypeName(elementTypeName);
+            var shortType = TypeMapping.GetShortTypeName(elementTypeName);
+            var elementReadExpr = TypeMapping.GetElementReadExpression(elementTypeName, format, readerVar);
+            var packedWireType = "WireType.Len";
+            var unpackedWireType = TypeMapping.GetWireTypeString(elementTypeName, format);
+
+            // Determine if we can add directly to collection (List, ICollection, IList) or need tempList (Array, HashSet, IEnumerable)
+            // IEnumerable is read-only, so we need tempList for it
+            bool isListLike = (collectionKind == CollectionKind.ConcreteCollection &&
+                              collectionTypeName != null &&
+                              (collectionTypeName.Contains("List<") || collectionTypeName.Contains("System.Collections.Generic.List<"))) ||
+                             (collectionKind == CollectionKind.InterfaceCollection &&
+                              collectionTypeName != null &&
+                              !collectionTypeName.Contains("IEnumerable<") && !collectionTypeName.Contains("System.Collections.Generic.IEnumerable<"));
+
+            // Generate wire type check for dual mode
+            sb.AppendIndentedLine($"if ({wireTypeVar} == {packedWireType})");
+            sb.StartNewBlock();
+            sb.AppendIndentedLine("// Packed encoding (Level200)");
+
+            // Initialize collection if needed (MERGE semantics)
+            GenerateCollectionInitialization(sb, targetVar, shortType, collectionKind, collectionTypeName);
+
+            sb.AppendIndentedLine("int length = reader.ReadVarInt32();");
+            sb.AppendIndentedLine("int endPos = reader.Position + length;");
+            sb.AppendIndentedLine("while (reader.Position < endPos)");
+            sb.StartNewBlock();
+
+            if (isListLike)
+            {
+                sb.AppendIndentedLine($"{targetVar}.Add({elementReadExpr});");
+            }
+            else
+            {
+                // Use temp list for Array/HashSet
+                sb.AppendIndentedLine($"tempList.Add({elementReadExpr});");
+            }
+
+            sb.EndBlock();
+
+            // Convert temp list to final collection type if needed (for Array/HashSet)
+            if (!isListLike)
+            {
+                GenerateCollectionMerge(sb, targetVar, shortType, collectionKind, collectionTypeName);
+            }
+
+            sb.EndBlock();
+            sb.AppendIndentedLine($"else if ({wireTypeVar} == {unpackedWireType})");
+            sb.StartNewBlock();
+            sb.AppendIndentedLine("// Unpacked encoding (backward compatibility, single element)");
+
+            // Initialize collection if needed (MERGE semantics)
+            GenerateCollectionInitialization(sb, targetVar, shortType, collectionKind, collectionTypeName);
+
+            // Add single element
+            if (isListLike)
+            {
+                sb.AppendIndentedLine($"{targetVar}.Add({elementReadExpr});");
+            }
+            else
+            {
+                sb.AppendIndentedLine($"tempList.Add({elementReadExpr});");
+                GenerateCollectionMerge(sb, targetVar, shortType, collectionKind, collectionTypeName);
+            }
+
+            sb.EndBlock();
+            sb.AppendIndentedLine("else");
+            sb.StartNewBlock();
+            sb.AppendIndentedLine($"{readerVar}.SkipField({wireTypeVar});");
+            sb.EndBlock();
+        }
+
+        /// <summary>
+        /// Generates collection initialization code (null-coalescing assignment for MERGE).
+        /// </summary>
+        private void GenerateCollectionInitialization(
+            StringBuilderWithIndent sb,
+            string targetVar,
+            string shortElementType,
+            CollectionKind collectionKind,
+            string collectionTypeName)
+        {
+            switch (collectionKind)
+            {
+                case CollectionKind.Array:
+                    // Array requires temp list for MERGE
+                    sb.AppendIndentedLine($"var tempList = {targetVar} != null ? new global::System.Collections.Generic.List<{shortElementType}>({targetVar}) : new global::System.Collections.Generic.List<{shortElementType}>();");
+                    break;
+
+                case CollectionKind.InterfaceCollection:
+                    // IEnumerable is read-only, needs tempList. ICollection/IList can be initialized as List
+                    if (collectionTypeName != null &&
+                        (collectionTypeName.Contains("IEnumerable<") || collectionTypeName.Contains("System.Collections.Generic.IEnumerable<")))
+                    {
+                        // IEnumerable requires temp list (read-only interface)
+                        sb.AppendIndentedLine($"var tempList = {targetVar} != null ? new global::System.Collections.Generic.List<{shortElementType}>({targetVar}) : new global::System.Collections.Generic.List<{shortElementType}>();");
+                    }
+                    else
+                    {
+                        // ICollection, IList - initialize as List for MERGE
+                        sb.AppendIndentedLine($"{targetVar} ??= new global::System.Collections.Generic.List<{shortElementType}>();");
+                    }
+                    break;
+
+                case CollectionKind.ConcreteCollection:
+                    if (collectionTypeName != null)
+                    {
+                        if (collectionTypeName.Contains("HashSet<") || collectionTypeName.Contains("System.Collections.Generic.HashSet<"))
+                        {
+                            // HashSet requires temp list for MERGE
+                            sb.AppendIndentedLine($"var tempList = {targetVar} != null ? new global::System.Collections.Generic.List<{shortElementType}>({targetVar}) : new global::System.Collections.Generic.List<{shortElementType}>();");
+                        }
+                        else if (collectionTypeName.Contains("List<") || collectionTypeName.Contains("System.Collections.Generic.List<"))
+                        {
+                            // List can MERGE directly
+                            sb.AppendIndentedLine($"{targetVar} ??= new global::System.Collections.Generic.List<{shortElementType}>();");
+                        }
+                        else
+                        {
+                            // Fallback: generic ICollection
+                            sb.AppendIndentedLine($"{targetVar} ??= new global::System.Collections.Generic.List<{shortElementType}>();");
+                        }
+                    }
+                    else
+                    {
+                        sb.AppendIndentedLine($"{targetVar} ??= new global::System.Collections.Generic.List<{shortElementType}>();");
+                    }
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// Generates collection merge code (converts temp list and merges with existing collection).
+        /// </summary>
+        private void GenerateCollectionMerge(
+            StringBuilderWithIndent sb,
+            string targetVar,
+            string shortElementType,
+            CollectionKind collectionKind,
+            string collectionTypeName)
+        {
+            switch (collectionKind)
+            {
+                case CollectionKind.Array:
+                    sb.AppendIndentedLine($"{targetVar} = tempList.ToArray();");
+                    break;
+
+                case CollectionKind.InterfaceCollection:
+                    // IEnumerable is read-only, convert from tempList
+                    if (collectionTypeName != null &&
+                        (collectionTypeName.Contains("IEnumerable<") || collectionTypeName.Contains("System.Collections.Generic.IEnumerable<")))
+                    {
+                        sb.AppendIndentedLine($"{targetVar} = tempList;");
+                    }
+                    break;
+
+                case CollectionKind.ConcreteCollection:
+                    if (collectionTypeName != null && (collectionTypeName.Contains("HashSet<") || collectionTypeName.Contains("System.Collections.Generic.HashSet<")))
+                    {
+                        sb.AppendIndentedLine($"if ({targetVar} == null)");
+                        sb.StartNewBlock();
+                        sb.AppendIndentedLine($"{targetVar} = new global::System.Collections.Generic.HashSet<{shortElementType}>(tempList);");
+                        sb.EndBlock();
+                        sb.AppendIndentedLine("else");
+                        sb.StartNewBlock();
+                        sb.AppendIndentedLine($"foreach (var item in tempList) {targetVar}.Add(item);");
+                        sb.EndBlock();
+                    }
+                    break;
+            }
+        }
+
+        /// <summary>
         /// Generates the correct collection assignment based on CollectionKind.
         /// </summary>
         private string GenerateCollectionAssignment(

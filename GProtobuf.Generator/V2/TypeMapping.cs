@@ -58,9 +58,29 @@ namespace GProtobuf.Generator.V2
         }
 
         /// <summary>
+        /// Determines if a repeated field should use packed encoding by default (Level200 compliance).
+        /// Packed encoding is mandatory for primitive types in protobuf-net 2.3.7 CompatibilityLevel.Level200.
+        /// </summary>
+        /// <remarks>
+        /// Level200 requirement: All repeated primitives (int32, int64, float, double, bool, etc.)
+        /// MUST use packed encoding (WireType.LengthDelimited) instead of unpacked (repeated tags).
+        /// This matches protobuf-net 2.3.7 behavior and reduces wire format size.
+        /// </remarks>
+        public static bool ShouldBePackedByDefault(string elementTypeName)
+        {
+            // Level200: primitives ALWAYS use packed encoding
+            // Excludes: string, byte (single), Guid, TimeSpan (length-delimited types)
+            return IsPrimitiveArrayType(elementTypeName);
+        }
+
+        /// <summary>
         /// Gets the default value expression for skip-if-default check.
         /// Returns null for types that should always be written.
         /// </summary>
+        /// <remarks>
+        /// Level200 requirement: Proto2 default values MUST NOT be written to wire.
+        /// This includes false for bool, 0 for numbers, null for strings, etc.
+        /// </remarks>
         public static string GetDefaultValueCheck(string typeName, string valueExpr)
         {
             var normalized = NormalizeTypeName(typeName);
@@ -70,7 +90,7 @@ namespace GProtobuf.Generator.V2
                 "System.UInt32" or "System.UInt64" or "System.UInt16" or "System.Byte" => $"{valueExpr} != 0",
                 "System.Single" => $"{valueExpr} != 0f",
                 "System.Double" => $"{valueExpr} != 0d",
-                "System.Boolean" => null, // bool is always written (even false)
+                "System.Boolean" => $"{valueExpr}", // Level200: skip if false (proto2 default)
                 "System.Char" => $"{valueExpr} != '\\0'",
                 "System.String" => $"{valueExpr} != null",
                 "System.Byte[]" => $"{valueExpr} != null",
@@ -293,9 +313,21 @@ namespace GProtobuf.Generator.V2
                     DataFormat.ZigZag => $"(sbyte){readerVar}.ReadZigZagVarInt32()",
                     _ => $"(sbyte){readerVar}.ReadVarInt32()"
                 },
-                "System.UInt32" => $"{readerVar}.ReadVarUInt32()",
-                "System.UInt64" => $"{readerVar}.ReadVarUInt64()",
-                "System.UInt16" => $"(ushort){readerVar}.ReadVarUInt32()",
+                "System.UInt32" => format switch
+                {
+                    DataFormat.FixedSize => $"{readerVar}.ReadFixedUInt32()",
+                    _ => $"{readerVar}.ReadVarUInt32()"
+                },
+                "System.UInt64" => format switch
+                {
+                    DataFormat.FixedSize => $"{readerVar}.ReadFixedUInt64()",
+                    _ => $"{readerVar}.ReadVarUInt64()"
+                },
+                "System.UInt16" => format switch
+                {
+                    DataFormat.FixedSize => $"(ushort){readerVar}.ReadFixedUInt32()",
+                    _ => $"(ushort){readerVar}.ReadVarUInt32()"
+                },
                 "System.Byte" => $"(byte){readerVar}.ReadVarUInt32()",
                 "System.Single" => $"{readerVar}.ReadFixedFloat()",
                 "System.Double" => $"{readerVar}.ReadFixedDouble()",

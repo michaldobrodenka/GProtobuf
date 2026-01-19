@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Reflection.PortableExecutable;
 using System.Runtime.CompilerServices;
@@ -308,6 +309,10 @@ namespace GProtobuf.Core
 
         public void CheckLength(int length)
         {
+            // Level200: Length prefix must be non-negative
+            if (length < 0)
+                throw new InvalidDataException($"Malformed length prefix: length cannot be negative (got {length})");
+
             if (position + length > buffer.Length)
                 throw new InvalidOperationException("Buffer overrun");
         }
@@ -328,65 +333,110 @@ namespace GProtobuf.Core
             return buffer[position++];
         }
 
+        /// <summary>
+        /// Reads a varint-encoded int32 using hybrid unrolled/loop approach.
+        /// Unrolled for 1-5 bytes (99% of cases), loop for 6-10 bytes (rare).
+        /// Tolerates incomplete varints at EOF (treats last byte as final, ignores continuation bit).
+        /// </summary>
         public int ReadVarInt32()
         {
-            long result = 0;
-            int shift = 0;
-            byte b;
-            bool hasReadBytes = false;
-            do
+            // Boundary check
+            if (position >= buffer.Length)
+                throw new InvalidOperationException("Unexpected end of buffer while reading VarInt32");
+
+            // Byte 1: Fast path (90% of cases)
+            byte b = buffer[position++];
+            if (b < 0x80) return b;
+
+            long result = b & 0x7FL;
+
+            // Byte 2
+            if (position >= buffer.Length) return (int)result; // EOF tolerance
+            b = buffer[position++];
+            if (b < 0x80) return (int)(result | ((long)b << 7));
+            result |= (b & 0x7FL) << 7;
+
+            // Byte 3
+            if (position >= buffer.Length) return (int)result; // EOF tolerance
+            b = buffer[position++];
+            if (b < 0x80) return (int)(result | ((long)b << 14));
+            result |= (b & 0x7FL) << 14;
+
+            // Byte 4
+            if (position >= buffer.Length) return (int)result; // EOF tolerance
+            b = buffer[position++];
+            if (b < 0x80) return (int)(result | ((long)b << 21));
+            result |= (b & 0x7FL) << 21;
+
+            // Byte 5
+            if (position >= buffer.Length) return (int)result; // EOF tolerance
+            b = buffer[position++];
+            if (b < 0x80) return (int)(result | ((long)b << 28));
+            result |= (b & 0x7FL) << 28;
+
+            // Bytes 6-10: Rare case, use loop
+            for (int shift = 35; shift < 70; shift += 7)
             {
-                int readByte = GetByte();
+                if (position >= buffer.Length) return (int)result; // EOF tolerance
+                b = buffer[position++];
+                if (b < 0x80) return (int)(result | ((long)b << shift));
+                result |= (b & 0x7FL) << shift;
+            }
 
-                if (readByte < 0)
-                {
-                    if (!hasReadBytes)
-                        throw new InvalidOperationException("Unexpected end of buffer while reading VarInt32");
-                    break;
-                }
-
-                hasReadBytes = true;
-                b = (byte)readByte;
-
-                result |= (long)(b & 0x7F) << shift;
-                shift += 7;
-                
-                // Handle up to 10 bytes for full signed int range
-                if (shift >= 64) break;
-            } while ((b & 0x80) != 0);
-
-            return (int)result; // Cast back to int, handles sign extension correctly
+            // 11+ bytes - malformed
+            throw new InvalidDataException("Malformed varint: varint exceeded maximum length of 10 bytes");
         }
 
-        // Optimized version for unsigned/positive values only (lengths, byte, ushort, uint)
+        /// <summary>
+        /// Reads a varint-encoded uint32 using hybrid unrolled/loop approach.
+        /// Optimized for unsigned values (lengths, byte, ushort, uint).
+        /// Tolerates incomplete varints at EOF (treats last byte as final, ignores continuation bit).
+        /// </summary>
         public uint ReadVarUInt32()
         {
-            uint result = 0;
-            int shift = 0;
-            byte b;
-            bool hasReadBytes = false;
-            do
+            if (position >= buffer.Length)
+                throw new InvalidOperationException("Unexpected end of buffer while reading VarUInt32");
+
+            // Byte 1: Fast path
+            byte b = buffer[position++];
+            if (b < 0x80) return b;
+
+            uint result = (uint)(b & 0x7F);
+
+            // Byte 2
+            if (position >= buffer.Length) return result; // EOF tolerance
+            b = buffer[position++];
+            if (b < 0x80) return result | ((uint)b << 7);
+            result |= (uint)(b & 0x7F) << 7;
+
+            // Byte 3
+            if (position >= buffer.Length) return result; // EOF tolerance
+            b = buffer[position++];
+            if (b < 0x80) return result | ((uint)b << 14);
+            result |= (uint)(b & 0x7F) << 14;
+
+            // Byte 4
+            if (position >= buffer.Length) return result; // EOF tolerance
+            b = buffer[position++];
+            if (b < 0x80) return result | ((uint)b << 21);
+            result |= (uint)(b & 0x7F) << 21;
+
+            // Byte 5 (optimal for uint32)
+            if (position >= buffer.Length) return result; // EOF tolerance
+            b = buffer[position++];
+            if (b < 0x80) return result | ((uint)b << 28);
+
+            // Bytes 6-10: Rare case (backward compatibility), use ulong to avoid overflow
+            ulong result64 = result | ((ulong)(b & 0x7F) << 28);
+            for (int shift = 35; shift < 70; shift += 7)
             {
-                int readByte = GetByte();
+                if (position >= buffer.Length) return (uint)result64; // EOF tolerance
+                b = buffer[position++];
+                if (b < 0x80) return (uint)result64; // Truncate to uint32
+                result64 |= (ulong)(b & 0x7F) << shift;
+            }
 
-                if (readByte < 0)
-                {
-                    if (!hasReadBytes)
-                        throw new InvalidOperationException("Unexpected end of buffer while reading VarUInt32");
-                    break;
-                }
-
-                hasReadBytes = true;
-                b = (byte)readByte;
-
-                result |= (uint)(b & 0x7F) << shift;
-                shift += 7;
-                
-                // Only need 5 bytes max for 32-bit values
-                if (shift >= 35) break;
-            } while ((b & 0x80) != 0);
-
-            return result;
+            throw new InvalidDataException("Malformed varint: varint exceeded maximum length of 10 bytes");
         }
 
         public int ReadZigZagVarInt32()
@@ -395,34 +445,53 @@ namespace GProtobuf.Core
             return (int)((result >> 1) ^ (0U - (result & 1))); // Zigzag decoding for 32-bit
         }
 
+        /// <summary>
+        /// Reads a varint-encoded int64 using hybrid unrolled/loop approach.
+        /// Unrolled for 1-5 bytes (most common), loop for 6-10 bytes.
+        /// Tolerates incomplete varints at EOF (treats last byte as final, ignores continuation bit).
+        /// </summary>
         public long ReadVarInt64()
         {
-            long result = 0;
-            int shift = 0;
-            byte b;
-            bool hasReadBytes = false;
-            do
+            if (position >= buffer.Length)
+                throw new InvalidOperationException("Unexpected end of buffer while reading VarInt64");
+
+            // Byte 1: Fast path
+            byte b = buffer[position++];
+            if (b < 0x80) return b;
+
+            long result = b & 0x7FL;
+
+            // Bytes 2-5: Unrolled
+            if (position >= buffer.Length) return result; // EOF tolerance
+            b = buffer[position++];
+            if (b < 0x80) return result | ((long)b << 7);
+            result |= (b & 0x7FL) << 7;
+
+            if (position >= buffer.Length) return result; // EOF tolerance
+            b = buffer[position++];
+            if (b < 0x80) return result | ((long)b << 14);
+            result |= (b & 0x7FL) << 14;
+
+            if (position >= buffer.Length) return result; // EOF tolerance
+            b = buffer[position++];
+            if (b < 0x80) return result | ((long)b << 21);
+            result |= (b & 0x7FL) << 21;
+
+            if (position >= buffer.Length) return result; // EOF tolerance
+            b = buffer[position++];
+            if (b < 0x80) return result | ((long)b << 28);
+            result |= (b & 0x7FL) << 28;
+
+            // Bytes 6-10: Loop
+            for (int shift = 35; shift < 70; shift += 7)
             {
-                int readByte = GetByte();
+                if (position >= buffer.Length) return result; // EOF tolerance
+                b = buffer[position++];
+                if (b < 0x80) return result | ((long)b << shift);
+                result |= (b & 0x7FL) << shift;
+            }
 
-                if (readByte < 0)
-                {
-                    if (!hasReadBytes)
-                        throw new InvalidOperationException("Unexpected end of buffer while reading VarInt64");
-                    break;
-                }
-
-                hasReadBytes = true;
-                b = (byte)readByte;
-
-                result |= (long)(b & 0x7F) << shift;
-                shift += 7;
-                
-                // Handle up to 10 bytes for full 64-bit range
-                if (shift >= 70) break;
-            } while ((b & 0x80) != 0);
-
-            return result;
+            throw new InvalidDataException("Malformed varint: int64 varint exceeded maximum length of 10 bytes");
         }
 
         public long ReadZigZagVarInt64()
@@ -431,34 +500,53 @@ namespace GProtobuf.Core
             return (long)((result >> 1) ^ (0UL - (result & 1))); // Zigzag decoding for 64-bit
         }
 
+        /// <summary>
+        /// Reads a varint-encoded uint64 using hybrid unrolled/loop approach.
+        /// Unrolled for 1-5 bytes (most common), loop for 6-10 bytes.
+        /// Tolerates incomplete varints at EOF (treats last byte as final, ignores continuation bit).
+        /// </summary>
         public ulong ReadVarUInt64()
         {
-            ulong result = 0;
-            int shift = 0;
-            byte b;
-            bool hasReadBytes = false;
-            do
+            if (position >= buffer.Length)
+                throw new InvalidOperationException("Unexpected end of buffer while reading VarUInt64");
+
+            // Byte 1: Fast path
+            byte b = buffer[position++];
+            if (b < 0x80) return b;
+
+            ulong result = (ulong)(b & 0x7F);
+
+            // Bytes 2-5: Unrolled
+            if (position >= buffer.Length) return result; // EOF tolerance
+            b = buffer[position++];
+            if (b < 0x80) return result | ((ulong)b << 7);
+            result |= (ulong)(b & 0x7F) << 7;
+
+            if (position >= buffer.Length) return result; // EOF tolerance
+            b = buffer[position++];
+            if (b < 0x80) return result | ((ulong)b << 14);
+            result |= (ulong)(b & 0x7F) << 14;
+
+            if (position >= buffer.Length) return result; // EOF tolerance
+            b = buffer[position++];
+            if (b < 0x80) return result | ((ulong)b << 21);
+            result |= (ulong)(b & 0x7F) << 21;
+
+            if (position >= buffer.Length) return result; // EOF tolerance
+            b = buffer[position++];
+            if (b < 0x80) return result | ((ulong)b << 28);
+            result |= (ulong)(b & 0x7F) << 28;
+
+            // Bytes 6-10: Loop
+            for (int shift = 35; shift < 70; shift += 7)
             {
-                int readByte = GetByte();
-
-                if (readByte < 0)
-                {
-                    if (!hasReadBytes)
-                        throw new InvalidOperationException("Unexpected end of buffer while reading VarUInt64");
-                    break;
-                }
-
-                hasReadBytes = true;
-                b = (byte)readByte;
-
+                if (position >= buffer.Length) return result; // EOF tolerance
+                b = buffer[position++];
+                if (b < 0x80) return result | ((ulong)b << shift);
                 result |= (ulong)(b & 0x7F) << shift;
-                shift += 7;
-                
-                // Handle up to 10 bytes for full 64-bit range
-                if (shift >= 70) break;
-            } while ((b & 0x80) != 0);
+            }
 
-            return result;
+            throw new InvalidDataException("Malformed varint: uint64 varint exceeded maximum length of 10 bytes");
         }
 
         public double ReadFixedDouble()
@@ -627,23 +715,26 @@ namespace GProtobuf.Core
             switch (wireType)
             {
                 case WireType.VarInt:
-                    _ = ReadVarInt32();
-                    //throw new NotImplementedException();
-                    //ReadVarint64(); // Preskočí celé varint číslo
+                    _ = ReadVarInt32(); // Varint validation already built-in
                     break;
 
                 case WireType.Fixed32b:
-                    position += 4; // Preskočí 4 bajty (Fixed32)
+                    // Level200: Validate buffer bounds before skipping
+                    CheckLength(4);
+                    position += 4;
                     break;
 
                 case WireType.Fixed64b:
-                    position += 8; // Preskočí 8 bajtov (Fixed64)
+                    // Level200: Validate buffer bounds before skipping
+                    CheckLength(8);
+                    position += 8;
                     break;
 
                 case WireType.Len:
-                    //throw new NotImplementedException();
-                    int length = ReadVarInt32();
-                    position += length; // Preskočí celé length-prefixed dáta
+                    // Level200: Read and validate length, then skip
+                    int length = ReadVarInt32(); // Already validates non-negative and varint length
+                    CheckLength(length); // Validate buffer bounds
+                    position += length;
                     break;
 
                 default:

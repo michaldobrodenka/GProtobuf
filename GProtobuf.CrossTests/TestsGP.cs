@@ -271,7 +271,6 @@ public sealed class GProtobufToProtobufNetTests : BaseSerializationTest
         deserialized.Should().BeEquivalentTo(model);
     }
 
-#if false // Temporarily disabled - GuidTypesModel not supported in V2
     [Fact]
     public void GuidValue_SerializeDeserialize_GP()
     {
@@ -292,9 +291,7 @@ public sealed class GProtobufToProtobufNetTests : BaseSerializationTest
         deserialized.EmptyGuidValue.Should().Be(Guid.Empty, "Guid.Empty should roundtrip correctly");
         deserialized.AnotherGuidValue.Should().Be(model.AnotherGuidValue, "generated Guid should roundtrip correctly");
     }
-#endif
 
-#if false // Temporarily disabled - GuidTypesModel not supported in V2
     [Fact]
     public void GuidEmpty_ShouldNotSerialize_GP()
     {
@@ -319,9 +316,7 @@ public sealed class GProtobufToProtobufNetTests : BaseSerializationTest
         deserialized.EmptyGuidValue.Should().Be(Guid.Empty);
         deserialized.AnotherGuidValue.Should().Be(Guid.Empty);
     }
-#endif
 
-#if false // Temporarily disabled - GuidTypesModel not supported in V2
     [Fact]
     public void GuidValue_CrossCompatibility_GP()
     {
@@ -342,7 +337,6 @@ public sealed class GProtobufToProtobufNetTests : BaseSerializationTest
         protobufNetDeserialized.EmptyGuidValue.Should().Be(Guid.Empty, "empty Guid should remain empty");
         protobufNetDeserialized.AnotherGuidValue.Should().Be(Guid.Empty, "empty Guid should remain empty");
     }
-#endif
 
     [Fact]
     public void NullableTypes_CompatibleWithProtobufNet_GP()
