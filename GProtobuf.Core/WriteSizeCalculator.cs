@@ -290,6 +290,56 @@ namespace GProtobuf.Core
             WriteVarInt64(value.Ticks);
         }
 
+        /// <summary>
+        /// Calculates size for DateTime in protobuf-net BCL format (nested message).
+        /// Wire format: [length prefix][field 1: tag + value][field 2: tag + scale]
+        /// </summary>
+        public void WriteDateTime(DateTime value)
+        {
+            // Get optimal scale for this DateTime value
+            var (scaledValue, scale) = DateTimeHelper.GetOptimalScale(value);
+
+            // Calculate nested message size
+            int valueSize = GetZigZagVarintSize(scaledValue);
+            int scaleSize = GetVarintSize((uint)scale);
+            int contentSize = 1 + valueSize + 1 + scaleSize; // 2 tags + 2 values
+
+            // Add length prefix size + content size
+            WriteVarUInt32((uint)contentSize); // Length prefix
+            Length += contentSize;              // Nested content
+        }
+
+        /// <summary>
+        /// Helper method to calculate varint size for unsigned values.
+        /// </summary>
+        private static int GetVarintSize(uint value)
+        {
+            if (value < (1 << 7)) return 1;
+            if (value < (1 << 14)) return 2;
+            if (value < (1 << 21)) return 3;
+            if (value < (1 << 28)) return 4;
+            return 5;
+        }
+
+        /// <summary>
+        /// Helper method to calculate ZigZag varint size for signed values.
+        /// </summary>
+        private static int GetZigZagVarintSize(long value)
+        {
+            ulong zigzag = (ulong)((value << 1) ^ (value >> 63));
+
+            if (zigzag < (1UL << 7)) return 1;
+            if (zigzag < (1UL << 14)) return 2;
+            if (zigzag < (1UL << 21)) return 3;
+            if (zigzag < (1UL << 28)) return 4;
+            if (zigzag < (1UL << 35)) return 5;
+            if (zigzag < (1UL << 42)) return 6;
+            if (zigzag < (1UL << 49)) return 7;
+            if (zigzag < (1UL << 56)) return 8;
+            if (zigzag < (1UL << 63)) return 9;
+            return 10;
+        }
+
         // Packed array methods
         public void WritePackedVarintArray(int[] array)
         {

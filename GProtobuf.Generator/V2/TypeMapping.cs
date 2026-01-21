@@ -307,11 +307,13 @@ namespace GProtobuf.Generator.V2
                 },
                 "System.Int16" => format switch
                 {
+                    DataFormat.FixedSize => $"(short){readerVar}.ReadFixedInt32()",
                     DataFormat.ZigZag => $"(short){readerVar}.ReadZigZagVarInt32()",
                     _ => $"(short){readerVar}.ReadVarInt32()"
                 },
                 "System.SByte" => format switch
                 {
+                    DataFormat.FixedSize => $"(sbyte){readerVar}.ReadFixedInt32()",
                     DataFormat.ZigZag => $"(sbyte){readerVar}.ReadZigZagVarInt32()",
                     _ => $"(sbyte){readerVar}.ReadVarInt32()"
                 },

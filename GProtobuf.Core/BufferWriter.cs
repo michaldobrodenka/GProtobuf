@@ -337,6 +337,67 @@ namespace GProtobuf.Core
             WriteVarInt64(value.Ticks);
         }
 
+        /// <summary>
+        /// Writes DateTime in protobuf-net BCL format (nested message with value/scale fields).
+        /// Wire format: [length][field 1: tag 0x08][sint64 value][field 2: tag 0x10][int32 scale]
+        /// Uses optimal Scale to minimize wire size.
+        /// Level200: DateTimeKind is NOT serialized.
+        /// </summary>
+        public void WriteDateTime(DateTime value)
+        {
+            // Get optimal scale for this DateTime value
+            var (scaledValue, scale) = DateTimeHelper.GetOptimalScale(value);
+
+            // Calculate nested message size
+            int valueSize = GetZigZagVarintSize(scaledValue);
+            int scaleSize = GetVarintSize((uint)scale);
+            int contentSize = 1 + valueSize + 1 + scaleSize; // 2 tags + 2 values
+
+            // Write nested message length prefix
+            WriteVarUInt32((uint)contentSize);
+
+            // Write field 1: value (sint64, ZigZag encoded)
+            WriteSingleByte(0x08); // tag for field 1, WireType.VarInt
+            WriteZigZagVarInt64(scaledValue);
+
+            // Write field 2: scale (int32)
+            WriteSingleByte(0x10); // tag for field 2, WireType.VarInt
+            WriteVarInt32(scale);
+
+            // Level200: field 3 (kind) is NOT written
+        }
+
+        /// <summary>
+        /// Helper method to calculate varint size for unsigned values.
+        /// </summary>
+        private static int GetVarintSize(uint value)
+        {
+            if (value < (1 << 7)) return 1;
+            if (value < (1 << 14)) return 2;
+            if (value < (1 << 21)) return 3;
+            if (value < (1 << 28)) return 4;
+            return 5;
+        }
+
+        /// <summary>
+        /// Helper method to calculate ZigZag varint size for signed values.
+        /// </summary>
+        private static int GetZigZagVarintSize(long value)
+        {
+            ulong zigzag = (ulong)((value << 1) ^ (value >> 63));
+
+            if (zigzag < (1UL << 7)) return 1;
+            if (zigzag < (1UL << 14)) return 2;
+            if (zigzag < (1UL << 21)) return 3;
+            if (zigzag < (1UL << 28)) return 4;
+            if (zigzag < (1UL << 35)) return 5;
+            if (zigzag < (1UL << 42)) return 6;
+            if (zigzag < (1UL << 49)) return 7;
+            if (zigzag < (1UL << 56)) return 8;
+            if (zigzag < (1UL << 63)) return 9;
+            return 10;
+        }
+
         // Packed array methods
         public void WritePackedFixedSizeIntArray(int[] array)
         {

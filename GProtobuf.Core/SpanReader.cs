@@ -260,6 +260,64 @@ namespace GProtobuf.Core
         }
 
         /// <summary>
+        /// Reads DateTime in protobuf-net BCL format (nested message with value/scale/kind fields).
+        /// Wire format: [length][field 1: sint64 value][field 2: int32 scale][field 3: int32 kind (ignored)]
+        /// Supports all TimeSpanScale values for forward/backward compatibility.
+        /// Level200: DateTimeKind is always ignored (not serialized/deserialized).
+        /// </summary>
+        public static DateTime ReadDateTime(this ref SpanReader reader, WireType wireType)
+        {
+            if (wireType != WireType.Len)
+                throw new InvalidOperationException($"Expected WireType.Len for DateTime, got {wireType}");
+
+            int length = reader.ReadVarInt32();
+            int startPosition = reader.Position;
+            int endPosition = startPosition + length;
+
+            // Default values (protobuf defaults)
+            long scaledValue = 0;
+            int scale = 5; // Default to Ticks if not specified
+
+            // Parse nested message fields (support field order independence)
+            while (reader.Position < endPosition)
+            {
+                reader.ReadWireTypeAndFieldId(out var innerWireType, out var fieldId);
+
+                switch (fieldId)
+                {
+                    case 1: // value (sint64, ZigZag encoded)
+                        if (innerWireType != WireType.VarInt)
+                            throw new InvalidOperationException($"Expected VarInt for DateTime.value, got {innerWireType}");
+                        scaledValue = reader.ReadZigZagVarInt64();
+                        break;
+
+                    case 2: // scale (int32)
+                        if (innerWireType != WireType.VarInt)
+                            throw new InvalidOperationException($"Expected VarInt for DateTime.scale, got {innerWireType}");
+                        scale = reader.ReadVarInt32();
+                        break;
+
+                    case 3: // kind (int32) - Level200: IGNORED
+                        reader.SkipField(innerWireType);
+                        break;
+
+                    default:
+                        // Unknown field - skip (forward compatibility)
+                        reader.SkipField(innerWireType);
+                        break;
+                }
+            }
+
+            // Validate we read exactly the expected length
+            if (reader.Position != endPosition)
+                throw new InvalidOperationException($"DateTime nested message length mismatch");
+
+            // Convert scaled value to ticks and construct DateTime
+            long ticks = DateTimeHelper.ConvertToTicks(scaledValue, scale);
+            return new DateTime(ticks, DateTimeKind.Unspecified); // Level200: always Unspecified
+        }
+
+        /// <summary>
         /// Reads a boolean value as a varint (0 = false, non-zero = true).
         /// </summary>
         public static bool ReadBool(this ref SpanReader reader)
