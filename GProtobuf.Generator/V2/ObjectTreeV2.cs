@@ -41,6 +41,14 @@ namespace GProtobuf.Generator.V2
         {
             foreach (var ns in _registry.GetAllNamespaces())
             {
+                yield return GenerateCodeForNamespace(ns);
+            }
+        }
+
+        private (string FileName, string FileCode) GenerateCodeForNamespace(string ns)
+        {
+            try
+            {
                 var sb = new StringBuilderWithIndent();
                 var types = _registry.GetByNamespace(ns).ToList();
 
@@ -50,36 +58,97 @@ namespace GProtobuf.Generator.V2
 
                 WriteHeader(sb, ns);
 
-                // Generate static Tags class for multi-byte tags (zero-allocation)
-                var tagsGenerator = new TagsGenerator(sb);
-                tagsGenerator.CollectTags(types);
-                tagsGenerator.Generate();
+                try
+                {
+                    // Generate static Tags class for multi-byte tags (zero-allocation)
+                    var tagsGenerator = new TagsGenerator(sb);
+                    tagsGenerator.CollectTags(types);
+                    tagsGenerator.Generate();
+                }
+                catch (System.Exception ex)
+                {
+                    throw new System.Exception($"Error in TagsGenerator for namespace '{ns}'", ex);
+                }
 
-                // Generate Deserializers class (entry point methods)
-                GenerateDeserializers(sb, types);
+                try
+                {
+                    // Generate Deserializers class (entry point methods)
+                    GenerateDeserializers(sb, types);
+                }
+                catch (System.Exception ex)
+                {
+                    throw new System.Exception($"Error in GenerateDeserializers for namespace '{ns}'", ex);
+                }
 
-                // Generate Serializers class (entry point methods)
-                GenerateSerializers(sb, types);
+                try
+                {
+                    // Generate Serializers class (entry point methods)
+                    GenerateSerializers(sb, types);
+                }
+                catch (System.Exception ex)
+                {
+                    throw new System.Exception($"Error in GenerateSerializers for namespace '{ns}'", ex);
+                }
 
-                // Generate SpanReaders class (uses shared virtual registries, registers Dictionary and Tuple types)
-                new SpanReaderGenerator(sb, _registry, virtualMapRegistry, virtualTupleRegistry).GenerateAll(types);
+                try
+                {
+                    // Generate SpanReaders class (uses shared virtual registries, registers Dictionary and Tuple types)
+                    var spanReaderGenerator = new SpanReaderGenerator(sb, _registry, virtualMapRegistry, virtualTupleRegistry);
+                    spanReaderGenerator.GenerateAll(types);
+                }
+                catch (System.Exception ex)
+                {
+                    throw new System.Exception($"Error in SpanReaderGenerator for namespace '{ns}'. Inner: {ex.Message}. Stack: {ex.StackTrace}", ex);
+                }
 
-                // Generate StreamWriters class (uses shared virtual registries)
-                new StreamWriterGenerator(sb, _registry, virtualMapRegistry, virtualTupleRegistry).GenerateAll(types);
+                try
+                {
+                    // Generate StreamWriters class (uses shared virtual registries)
+                    new StreamWriterGenerator(sb, _registry, virtualMapRegistry, virtualTupleRegistry).GenerateAll(types);
+                }
+                catch (System.Exception ex)
+                {
+                    throw new System.Exception($"Error in StreamWriterGenerator for namespace '{ns}'", ex);
+                }
 
-                // Generate BufferWriters class (uses shared virtual registries)
-                new BufferWriterGenerator(sb, _registry, virtualMapRegistry, virtualTupleRegistry).GenerateAll(types);
+                try
+                {
+                    // Generate BufferWriters class (uses shared virtual registries)
+                    new BufferWriterGenerator(sb, _registry, virtualMapRegistry, virtualTupleRegistry).GenerateAll(types);
+                }
+                catch (System.Exception ex)
+                {
+                    throw new System.Exception($"Error in BufferWriterGenerator for namespace '{ns}'", ex);
+                }
 
-                // Generate SizeCalculators class (uses shared virtual registries)
-                new SizeCalculatorGenerator(sb, _registry, virtualMapRegistry, virtualTupleRegistry).GenerateAll(types);
+                try
+                {
+                    // Generate SizeCalculators class (uses shared virtual registries)
+                    new SizeCalculatorGenerator(sb, _registry, virtualMapRegistry, virtualTupleRegistry).GenerateAll(types);
+                }
+                catch (System.Exception ex)
+                {
+                    throw new System.Exception($"Error in SizeCalculatorGenerator for namespace '{ns}'", ex);
+                }
 
-                // Generate KeyValue structs AFTER all types are registered
-                var keyValueGenerator = new KeyValueClassGenerator(sb, virtualMapRegistry);
-                keyValueGenerator.GenerateAllKeyValueClasses();
+                try
+                {
+                    // Generate KeyValue structs AFTER all types are registered
+                    var keyValueGenerator = new KeyValueClassGenerator(sb, virtualMapRegistry);
+                    keyValueGenerator.GenerateAllKeyValueClasses();
+                }
+                catch (System.Exception ex)
+                {
+                    throw new System.Exception($"Error in KeyValueClassGenerator for namespace '{ns}'", ex);
+                }
 
                 WriteFooter(sb);
 
-                yield return ($"{ns}.Serialization.cs", sb.ToString());
+                return ($"{ns}.Serialization.cs", sb.ToString());
+            }
+            catch (System.NullReferenceException ex)
+            {
+                throw new System.Exception($"NullReferenceException while generating code for namespace '{ns}'. Message: {ex.Message}", ex);
             }
         }
 
@@ -96,11 +165,18 @@ namespace GProtobuf.Generator.V2
             {
                 var className = TypeNameHelper.GetClassName(type.FullName);
 
-                // Deserialize method - creates new instance
+                // Deserialize method - creates new instance (ReadOnlySpan<byte> overload)
                 sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(ReadOnlySpan<byte> data)");
                 sb.StartNewBlock();
                 sb.AppendIndentedLine("var reader = new SpanReader(data);");
                 sb.AppendIndentedLine($"return SpanReaders.Read{className}(ref reader);");
+                sb.EndBlock();
+                sb.AppendNewLine();
+
+                // Deserialize method - byte[] overload for compatibility with Reflection
+                sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(byte[] data)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine($"return Deserialize{className}(new ReadOnlySpan<byte>(data));");
                 sb.EndBlock();
                 sb.AppendNewLine();
 
@@ -111,6 +187,13 @@ namespace GProtobuf.Generator.V2
                     sb.StartNewBlock();
                     sb.AppendIndentedLine("var reader = new SpanReader(data);");
                     sb.AppendIndentedLine($"SpanReaders.Populate{className}(ref reader, instance);");
+                    sb.EndBlock();
+                    sb.AppendNewLine();
+
+                    // Populate method - byte[] overload for compatibility with Reflection
+                    sb.AppendIndentedLine($"public static void Populate{className}(byte[] data, global::{type.FullName} instance)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine($"Populate{className}(new ReadOnlySpan<byte>(data), instance);");
                     sb.EndBlock();
                     sb.AppendNewLine();
                 }

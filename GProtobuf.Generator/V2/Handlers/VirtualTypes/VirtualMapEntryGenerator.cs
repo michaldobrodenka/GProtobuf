@@ -376,6 +376,19 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 _sb.AppendIndentedLine($"{targetVar} ??= new global::System.Collections.Generic.List<{shortElementType}>();");
             }
 
+            // NULL CHECK: elemInfo can be null if ParseSingleGenericArg failed in AnalyzeType
+            // Also check if elementType is empty/null
+            if (elemInfo == null || string.IsNullOrWhiteSpace(elementType))
+            {
+                // Generate warning comment ONLY - skip code generation to avoid compile errors
+                _sb.AppendIndentedLine($"// ⚠️ CRITICAL: Element type '{elementType}' could not be analyzed (elemInfo={elemInfo}, elementType='{elementType}')");
+                _sb.AppendIndentedLine($"// This is a bug in VirtualMapTypeRegistry.AnalyzeType or ParseSingleGenericArg");
+                _sb.AppendIndentedLine($"// CANNOT generate deserialization code - skipping field read");
+                _sb.AppendIndentedLine($"// TODO: Fix type analysis to properly handle non-generic collections that implement ICollection<T>");
+                _sb.AppendIndentedLine($"reader.SkipField({wireTypeVar});");
+                return;
+            }
+
             if (elemInfo.IsDictionary)
             {
                 // Collection of dictionaries
@@ -667,6 +680,16 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         {
             var elemInfo = typeInfo.CollectionElementTypeInfo;
 
+            // NULL CHECK: elemInfo can be null if ParseSingleGenericArg failed in AnalyzeType
+            if (elemInfo == null)
+            {
+                // Generate warning comment and skip size calculation
+                _sb.AppendIndentedLine($"// ⚠️  WARNING: Element type '{typeInfo.CollectionElementType}' could not be analyzed (null TypeInfo)");
+                _sb.AppendIndentedLine($"// This is likely a bug in VirtualMapTypeRegistry.AnalyzeType or ParseSingleGenericArg");
+                _sb.AppendIndentedLine($"// Skipping size calculation for this collection field");
+                return;
+            }
+
             _sb.AppendIndentedLine($"if ({sourceVar} != null)");
             _sb.StartNewBlock();
 
@@ -915,6 +938,16 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         {
             var elemInfo = typeInfo.CollectionElementTypeInfo;
 
+            // NULL CHECK: elemInfo can be null if ParseSingleGenericArg failed in AnalyzeType
+            if (elemInfo == null)
+            {
+                // Generate warning comment and fallback code
+                _sb.AppendIndentedLine($"// ⚠️  WARNING: Element type '{typeInfo.CollectionElementType}' could not be analyzed (null TypeInfo)");
+                _sb.AppendIndentedLine($"// This is likely a bug in VirtualMapTypeRegistry.AnalyzeType or ParseSingleGenericArg");
+                _sb.AppendIndentedLine($"// Skipping write for this collection field");
+                return;
+            }
+
             _sb.AppendIndentedLine($"if ({sourceVar} != null)");
             _sb.StartNewBlock();
 
@@ -1067,6 +1100,12 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
 
         private static string GetFullTypeName(string typeName, TypeAnalysisInfo typeInfo)
         {
+            // Null/empty check - prevent generating invalid generic types like HashSet<>
+            if (string.IsNullOrWhiteSpace(typeName))
+            {
+                return "object /* ERROR: typeName is null/empty */";
+            }
+
             // Null check - fallback to typeName if typeInfo is null
             if (typeInfo == null)
             {
@@ -1109,6 +1148,12 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         /// </summary>
         private static string GetDefaultInitializer(string typeName, TypeAnalysisInfo typeInfo)
         {
+            // Safety check - if typeInfo is null or typeName is empty, return default
+            if (typeInfo == null || string.IsNullOrWhiteSpace(typeName))
+            {
+                return "default /* ERROR: cannot initialize - typeInfo or typeName is null/empty */";
+            }
+
             if (typeInfo.IsDictionary)
             {
                 return $"new global::System.Collections.Generic.Dictionary<{typeInfo.DictionaryKeyType}, {typeInfo.DictionaryValueType}>()";
@@ -1117,12 +1162,22 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             if (typeInfo.IsList)
             {
                 var elemType = GetFullTypeName(typeInfo.CollectionElementType, typeInfo.CollectionElementTypeInfo);
+                // Check if element type is valid before generating constructor
+                if (elemType.Contains("ERROR") || string.IsNullOrWhiteSpace(typeInfo.CollectionElementType))
+                {
+                    return "default /* ERROR: cannot initialize List with unknown element type */";
+                }
                 return $"new global::System.Collections.Generic.List<{elemType}>()";
             }
 
             if (typeInfo.IsHashSet)
             {
                 var elemType = GetFullTypeName(typeInfo.CollectionElementType, typeInfo.CollectionElementTypeInfo);
+                // Check if element type is valid before generating constructor
+                if (elemType.Contains("ERROR") || string.IsNullOrWhiteSpace(typeInfo.CollectionElementType))
+                {
+                    return "default /* ERROR: cannot initialize HashSet with unknown element type */";
+                }
                 return $"new global::System.Collections.Generic.HashSet<{elemType}>()";
             }
 

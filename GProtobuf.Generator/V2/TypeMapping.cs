@@ -22,7 +22,7 @@ namespace GProtobuf.Generator.V2
                 "System.Single" or "System.Double" => true,
                 "System.Boolean" or "System.String" or "System.Char" => true,
                 "System.Byte[]" => true,
-                "System.Guid" or "System.TimeSpan" => true,
+                "System.Guid" or "System.TimeSpan" or "System.DateTime" => true,
                 _ => false
             };
         }
@@ -96,6 +96,7 @@ namespace GProtobuf.Generator.V2
                 "System.Byte[]" => $"{valueExpr} != null",
                 "System.Guid" => $"{valueExpr} != global::System.Guid.Empty",
                 "System.TimeSpan" => $"{valueExpr} != global::System.TimeSpan.Zero",
+                "System.DateTime" => $"{valueExpr} != default(global::System.DateTime)",
                 _ => null
             };
         }
@@ -131,7 +132,7 @@ namespace GProtobuf.Generator.V2
                 "System.TimeSpan" => WireType.VarInt, // Serialized as Ticks (long)
                 "System.Single" => WireType.Fixed32b,
                 "System.Double" => WireType.Fixed64b,
-                "System.String" or "System.Byte[]" or "System.Guid" => WireType.Len,
+                "System.String" or "System.Byte[]" or "System.Guid" or "System.DateTime" => WireType.Len,
                 _ => WireType.Len
             };
         }
@@ -216,6 +217,7 @@ namespace GProtobuf.Generator.V2
                 "System.Byte[]" => $"{readerVar}.ReadByteArray()",
                 "System.Guid" => $"{readerVar}.ReadGuid({wireTypeVar})",
                 "System.TimeSpan" => $"{readerVar}.ReadTimeSpan({wireTypeVar})",
+                "System.DateTime" => $"{readerVar}.ReadDateTime({wireTypeVar})",
                 _ => null
             };
         }
@@ -404,6 +406,7 @@ namespace GProtobuf.Generator.V2
                 "System.Byte[]" => $"{writerVar}.WriteVarUInt32((uint){valueExpr}.Length); {writerVar}.WriteBytes({valueExpr})",
                 "System.Guid" => $"{writerVar}.WriteGuid({valueExpr})",
                 "System.TimeSpan" => $"{writerVar}.WriteTimeSpan({valueExpr})",
+                "System.DateTime" => $"{writerVar}.WriteDateTime({valueExpr})",
                 _ => null
             };
         }
@@ -535,6 +538,7 @@ namespace GProtobuf.Generator.V2
                 "System.Byte[]" => $"{calculatorVar}.WriteBytes({valueExpr})",
                 "System.Guid" => $"{calculatorVar}.WriteGuid({valueExpr})",
                 "System.TimeSpan" => $"{calculatorVar}.WriteTimeSpan({valueExpr})",
+                "System.DateTime" => $"{calculatorVar}.WriteDateTime({valueExpr})",
                 _ => null
             };
         }
@@ -684,6 +688,7 @@ namespace GProtobuf.Generator.V2
                 "System.Byte[]" => "byte[]",
                 "System.Guid" => "Guid",
                 "System.TimeSpan" => "TimeSpan",
+                "System.DateTime" => "DateTime",
                 _ => typeName
             };
         }

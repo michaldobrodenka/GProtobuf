@@ -93,16 +93,62 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                 //    return;
                 //}
 
-                var objectTree = new ObjectTreeV2(enumTypes);
-                foreach (var (namespaceName, typeDefinition) in typeDefinitions)
+                try
                 {
-                    objectTree.AddType(namespaceName, typeDefinition);
-                }
+                    // Report diagnostic that generator is starting
+                    context.ReportDiagnostic(Diagnostic.Create(
+                        new DiagnosticDescriptor(
+                            "GPROTO001",
+                            "GProtobuf Generator Started",
+                            "GProtobuf generator started with {0} enum types and {1} type definitions",
+                            "GProtobuf",
+                            DiagnosticSeverity.Info,
+                            true),
+                        Location.None,
+                        enumTypes.Count,
+                        typeDefinitions.Count()));
 
-                var codeFiles = objectTree.GenerateCode();
-                foreach(var f in codeFiles)
+                    var objectTree = new ObjectTreeV2(enumTypes);
+                    foreach (var (namespaceName, typeDefinition) in typeDefinitions)
+                    {
+                        objectTree.AddType(namespaceName, typeDefinition);
+                    }
+
+                    var codeFiles = objectTree.GenerateCode();
+                    int filesGenerated = 0;
+                    foreach(var f in codeFiles)
+                    {
+                        context.AddSource(f.FileName, f.FileCode);
+                        filesGenerated++;
+                    }
+
+                    // Report success
+                    context.ReportDiagnostic(Diagnostic.Create(
+                        new DiagnosticDescriptor(
+                            "GPROTO002",
+                            "GProtobuf Generator Success",
+                            "GProtobuf generator completed successfully, generated {0} files",
+                            "GProtobuf",
+                            DiagnosticSeverity.Info,
+                            true),
+                        Location.None,
+                        filesGenerated));
+                }
+                catch (System.Exception ex)
                 {
-                    context.AddSource(f.FileName, f.FileCode);
+                    // Report ALL exceptions
+                    context.ReportDiagnostic(Diagnostic.Create(
+                        new DiagnosticDescriptor(
+                            "GPROTO999",
+                            "GProtobuf Generator Error",
+                            "GProtobuf generator failed: {0}. Stack: {1}",
+                            "GProtobuf",
+                            DiagnosticSeverity.Error,
+                            true),
+                        Location.None,
+                        ex.Message,
+                        ex.StackTrace));
+                    throw;
                 }
             });
     }

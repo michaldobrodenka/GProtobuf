@@ -62,16 +62,53 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             foreach (var type in types)
             {
-                GenerateReadMethod(type);
-                GenerateReadContentMethod(type);
-                GeneratePopulateMethod(type);
+                try
+                {
+                    GenerateReadMethod(type);
+                }
+                catch (System.Exception ex)
+                {
+                    throw new System.Exception($"Error in GenerateReadMethod for type '{type.FullName}'", ex);
+                }
+
+                try
+                {
+                    GenerateReadContentMethod(type);
+                }
+                catch (System.Exception ex)
+                {
+                    throw new System.Exception($"Error in GenerateReadContentMethod for type '{type.FullName}'", ex);
+                }
+
+                try
+                {
+                    GeneratePopulateMethod(type);
+                }
+                catch (System.Exception ex)
+                {
+                    throw new System.Exception($"Error in GeneratePopulateMethod for type '{type.FullName}'", ex);
+                }
             }
 
-            // Generate virtual map entry readers
-            GenerateVirtualMapEntryReaders();
+            try
+            {
+                // Generate virtual map entry readers
+                GenerateVirtualMapEntryReaders();
+            }
+            catch (System.Exception ex)
+            {
+                throw new System.Exception("Error in GenerateVirtualMapEntryReaders", ex);
+            }
 
-            // Generate virtual tuple readers
-            GenerateVirtualTupleReaders();
+            try
+            {
+                // Generate virtual tuple readers
+                GenerateVirtualTupleReaders();
+            }
+            catch (System.Exception ex)
+            {
+                throw new System.Exception("Error in GenerateVirtualTupleReaders", ex);
+            }
 
             _sb.EndBlock();
             _sb.AppendNewLine();
@@ -82,31 +119,72 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// </summary>
         private void GenerateVirtualMapEntryReaders()
         {
-            var virtualTypes = _virtualMapRegistry.GetAllTypes();
+            System.Collections.Generic.IReadOnlyList<VirtualMapEntryInfo> virtualTypes;
+            try
+            {
+                virtualTypes = _virtualMapRegistry.GetAllTypes();
+            }
+            catch (System.Exception ex)
+            {
+                throw new System.Exception("Error calling _virtualMapRegistry.GetAllTypes()", ex);
+            }
+
             if (virtualTypes.Count == 0) return;
+
+            // DIAGNOSTIC: Validate all virtual map types and report warnings for problematic ones
+            ValidateVirtualMapTypes(virtualTypes);
 
             _sb.AppendNewLine();
             _sb.AppendIndentedLine("// Virtual Map Entry Readers");
             _sb.AppendNewLine();
 
-            var generator = new VirtualMapEntryGenerator(_sb, _virtualMapRegistry);
+            VirtualMapEntryGenerator generator;
+            try
+            {
+                generator = new VirtualMapEntryGenerator(_sb, _virtualMapRegistry);
+            }
+            catch (System.Exception ex)
+            {
+                throw new System.Exception("Error creating VirtualMapEntryGenerator", ex);
+            }
 
             // Generate EstimateMapCapacity helper (once, used by all map readers)
             _sb.AppendIndentedLine("#region Map Capacity Estimation");
             _sb.AppendNewLine();
-            generator.GenerateEstimateMapCapacityHelper();
+            try
+            {
+                generator.GenerateEstimateMapCapacityHelper();
+            }
+            catch (System.Exception ex)
+            {
+                throw new System.Exception("Error in GenerateEstimateMapCapacityHelper", ex);
+            }
             _sb.AppendIndentedLine("#endregion");
             _sb.AppendNewLine();
 
             // Generate individual map entry readers
             foreach (var virtualType in virtualTypes)
             {
-                generator.GenerateReader(virtualType);
+                try
+                {
+                    generator.GenerateReader(virtualType);
+                }
+                catch (System.Exception ex)
+                {
+                    throw new System.Exception($"Error generating reader for virtual map type: KeyType='{virtualType?.KeyType}', ValueType='{virtualType?.ValueType}', TypeName='{virtualType?.TypeName}'", ex);
+                }
             }
 
             // Generate KeyValue methods that use MapEntry methods
-            var keyValueGenerator = new KeyValueClassGenerator(_sb, _virtualMapRegistry);
-            keyValueGenerator.GenerateKeyValueMethods("SpanReaders");
+            try
+            {
+                var keyValueGenerator = new KeyValueClassGenerator(_sb, _virtualMapRegistry);
+                keyValueGenerator.GenerateKeyValueMethods("SpanReaders");
+            }
+            catch (System.Exception ex)
+            {
+                throw new System.Exception("Error in GenerateKeyValueMethods", ex);
+            }
         }
 
         /// <summary>
@@ -386,6 +464,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateCollectionFieldReadBodyForDerived(ProtoMemberAttribute member, string wireTypeVar, string readerVar)
         {
+            if (member.CollectionElementType == null)
+            {
+                throw new System.Exception($"CollectionElementType is null for collection member '{member.Name}' of type '{member.Type}'");
+            }
+
             if (_primitiveHandler.CanHandleCollection(member.CollectionElementType))
             {
                 // Level200: Primitives use dual-mode packed encoding (packed + unpacked backward compat with MERGE)
@@ -1375,6 +1458,72 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine("var nestedReader = new SpanReader(reader.GetSlice(length));");
             _sb.AppendIndentedLine($"result.{member.Name} = Read{typeName}Content(ref nestedReader);");
             _sb.AppendIndentedLine("continue;");
+        }
+
+        /// <summary>
+        /// Validates all virtual map types and writes diagnostic warnings to generated code for problematic types.
+        /// This helps identify type analysis bugs where CollectionElementTypeInfo or other info is null.
+        /// </summary>
+        private void ValidateVirtualMapTypes(System.Collections.Generic.IReadOnlyList<VirtualMapEntryInfo> virtualTypes)
+        {
+            var warnings = new System.Collections.Generic.List<string>();
+
+            foreach (var virtualType in virtualTypes)
+            {
+                // Check KeyTypeInfo
+                if (virtualType.KeyTypeInfo == null)
+                {
+                    warnings.Add($"Virtual map '{virtualType.TypeName}': KeyTypeInfo is null (KeyType='{virtualType.KeyType}')");
+                }
+
+                // Check ValueTypeInfo
+                if (virtualType.ValueTypeInfo == null)
+                {
+                    warnings.Add($"Virtual map '{virtualType.TypeName}': ValueTypeInfo is null (ValueType='{virtualType.ValueType}')");
+                }
+                else
+                {
+                    // Check nested type info for collections
+                    if (virtualType.ValueTypeInfo.IsCollection && virtualType.ValueTypeInfo.CollectionElementTypeInfo == null)
+                    {
+                        warnings.Add($"Virtual map '{virtualType.TypeName}': ValueType is collection but CollectionElementTypeInfo is null (ValueType='{virtualType.ValueType}', ElementType='{virtualType.ValueTypeInfo.CollectionElementType}')");
+                    }
+
+                    // Check nested type info for dictionaries
+                    if (virtualType.ValueTypeInfo.IsDictionary)
+                    {
+                        if (string.IsNullOrEmpty(virtualType.ValueTypeInfo.DictionaryKeyType))
+                        {
+                            warnings.Add($"Virtual map '{virtualType.TypeName}': ValueType is dictionary but DictionaryKeyType is null/empty (ValueType='{virtualType.ValueType}')");
+                        }
+                        if (string.IsNullOrEmpty(virtualType.ValueTypeInfo.DictionaryValueType))
+                        {
+                            warnings.Add($"Virtual map '{virtualType.TypeName}': ValueType is dictionary but DictionaryValueType is null/empty (ValueType='{virtualType.ValueType}')");
+                        }
+                    }
+                }
+            }
+
+            // If there are warnings, add them as comments in generated code for diagnostics
+            if (warnings.Count > 0)
+            {
+                _sb.AppendNewLine();
+                _sb.AppendIndentedLine("// ═══════════════════════════════════════════════════════════════════════════════");
+                _sb.AppendIndentedLine($"// ⚠️  TYPE ANALYSIS WARNINGS ({warnings.Count} issues found)");
+                _sb.AppendIndentedLine("// ═══════════════════════════════════════════════════════════════════════════════");
+                _sb.AppendIndentedLine("// The following virtual map types have null or incomplete type analysis info.");
+                _sb.AppendIndentedLine("// This indicates a bug in VirtualMapTypeRegistry.AnalyzeType or ParseSingleGenericArg.");
+                _sb.AppendIndentedLine("// Generation will proceed with fallback behavior but may produce incorrect code.");
+                _sb.AppendIndentedLine("// ═══════════════════════════════════════════════════════════════════════════════");
+
+                foreach (var warning in warnings)
+                {
+                    _sb.AppendIndentedLine($"// ⚠️  {warning}");
+                }
+
+                _sb.AppendIndentedLine("// ═══════════════════════════════════════════════════════════════════════════════");
+                _sb.AppendNewLine();
+            }
         }
 
         #endregion

@@ -166,7 +166,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.StartNewBlock();
 
             int caseIndex = 0;
-            foreach (var include in type.ProtoIncludes)
+            if (type.ProtoIncludes != null)
+            {
+                foreach (var include in type.ProtoIncludes)
             {
                 var derivedClassName = TypeNameHelper.GetClassName(include.Type);
                 _sb.AppendIndentedLine($"case global::{include.Type} derived:");
@@ -185,6 +187,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 _sb.AppendIndentedLine("return;");  // CRITICAL FIX: return instead of break to exit method
                 _sb.DecreaseIndent();
                 caseIndex++;
+                }
             }
 
             _sb.EndBlock();

@@ -35,18 +35,40 @@ namespace GProtobuf.Generator.V2.Handlers
             _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
             _sb.StartNewBlock();
 
-            // Write tag
-            TagCodeHelper.WriteTag(_sb, fieldId, WireType.Len);
+            // Check if element is a simple BCL type
+            bool isSimpleBclType = TypeMapping.IsSimpleType(elementTypeName);
 
-            // Calculate and write length
-            _sb.AppendIndentedLine("var itemCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
-            var qualifiedSizeCall = GetQualifiedCalculateContentSizeCall(elementTypeName, elementClassName);
-            _sb.AppendIndentedLine($"{qualifiedSizeCall}(ref itemCalc, item);");
-            _sb.AppendIndentedLine("writer.WriteVarUInt32((uint)itemCalc.Length);");
+            if (isSimpleBclType)
+            {
+                // For simple BCL types (DateTime, Guid, etc.), write tag and use direct write method
+                var wireType = TypeMapping.GetWireType(elementTypeName);
+                TagCodeHelper.WriteTag(_sb, fieldId, wireType);
 
-            // Write content
-            var qualifiedWriteCall = GetQualifiedWriteContentCall(elementTypeName, elementClassName, writerClassName);
-            _sb.AppendIndentedLine($"{qualifiedWriteCall}(ref writer, item);");
+                var writeExpr = TypeMapping.GetWriteExpression(elementTypeName, "item", DataFormat.Default, "writer");
+                if (writeExpr != null)
+                {
+                    _sb.AppendIndentedLine($"{writeExpr};");
+                }
+                else
+                {
+                    _sb.AppendIndentedLine($"// WARNING: No write expression for {elementTypeName}");
+                }
+            }
+            else
+            {
+                // For complex types, write tag, calculate length, write length, write content
+                TagCodeHelper.WriteTag(_sb, fieldId, WireType.Len);
+
+                // Calculate and write length
+                _sb.AppendIndentedLine("var itemCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+                var qualifiedSizeCall = GetQualifiedCalculateContentSizeCall(elementTypeName, elementClassName);
+                _sb.AppendIndentedLine($"{qualifiedSizeCall}(ref itemCalc, item);");
+                _sb.AppendIndentedLine("writer.WriteVarUInt32((uint)itemCalc.Length);");
+
+                // Write content
+                var qualifiedWriteCall = GetQualifiedWriteContentCall(elementTypeName, elementClassName, writerClassName);
+                _sb.AppendIndentedLine($"{qualifiedWriteCall}(ref writer, item);");
+            }
 
             _sb.EndBlock(); // foreach
             _sb.EndBlock(); // if
@@ -119,13 +141,35 @@ namespace GProtobuf.Generator.V2.Handlers
 
             _sb.EndBlock();
 
-            // Read length-prefixed item
-            _sb.AppendIndentedLine($"var length = {readerVar}.ReadVarInt32();");
-            _sb.AppendIndentedLine($"var nestedReader = new SpanReader({readerVar}.GetSlice(length));");
+            // Check if element is a simple BCL type (DateTime, Guid, TimeSpan, etc.)
+            bool isSimpleBclType = TypeMapping.IsSimpleType(elementTypeName);
 
-            // Generate fully qualified call to Read{ClassName}Content
-            var qualifiedCall = GetQualifiedReadContentCall(elementTypeName, elementClassName);
-            _sb.AppendIndentedLine($"var item = {qualifiedCall}(ref nestedReader);");
+            if (isSimpleBclType)
+            {
+                // For simple BCL types (DateTime, Guid, etc.), use direct read method
+                // These types handle their own wire format internally
+                var readExpr = TypeMapping.GetReadExpression(elementTypeName, DataFormat.Default, readerVar, "wireType");
+                if (readExpr != null)
+                {
+                    _sb.AppendIndentedLine($"var item = {readExpr};");
+                }
+                else
+                {
+                    // Fallback for unsupported simple types
+                    _sb.AppendIndentedLine($"// WARNING: No read expression for {elementTypeName}");
+                    _sb.AppendIndentedLine($"var item = default({shortElementType});");
+                }
+            }
+            else
+            {
+                // For complex types, read length-prefixed nested message
+                _sb.AppendIndentedLine($"var length = {readerVar}.ReadVarInt32();");
+                _sb.AppendIndentedLine($"var nestedReader = new SpanReader({readerVar}.GetSlice(length));");
+
+                // Generate fully qualified call to Read{ClassName}Content
+                var qualifiedCall = GetQualifiedReadContentCall(elementTypeName, elementClassName);
+                _sb.AppendIndentedLine($"var item = {qualifiedCall}(ref nestedReader);");
+            }
 
             // Add to collection
             _sb.AppendIndentedLine($"{actualTargetVar}.Add(item);");
@@ -187,17 +231,39 @@ namespace GProtobuf.Generator.V2.Handlers
             _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
             _sb.StartNewBlock();
 
-            // Add tag size
-            TagCodeHelper.AddTagSize(_sb, fieldId, WireType.Len, calculatorVar);
+            // Check if element is a simple BCL type
+            bool isSimpleBclType = TypeMapping.IsSimpleType(elementTypeName);
 
-            // Calculate item content size
-            _sb.AppendIndentedLine("var itemCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
-            var qualifiedSizeCall = GetQualifiedCalculateContentSizeCall(elementTypeName, elementClassName);
-            _sb.AppendIndentedLine($"{qualifiedSizeCall}(ref itemCalc, item);");
+            if (isSimpleBclType)
+            {
+                // For simple BCL types (DateTime, Guid, etc.), add tag size and use direct size method
+                var wireType = TypeMapping.GetWireType(elementTypeName);
+                TagCodeHelper.AddTagSize(_sb, fieldId, wireType, calculatorVar);
 
-            // Add length varint size + content size
-            _sb.AppendIndentedLine($"{calculatorVar}.WriteVarUInt32((uint)itemCalc.Length);");
-            _sb.AppendIndentedLine($"{calculatorVar}.AddByteLength(itemCalc.Length);");
+                var sizeExpr = TypeMapping.GetSizeExpression(elementTypeName, "item", DataFormat.Default, calculatorVar);
+                if (sizeExpr != null)
+                {
+                    _sb.AppendIndentedLine($"{sizeExpr};");
+                }
+                else
+                {
+                    _sb.AppendIndentedLine($"// WARNING: No size expression for {elementTypeName}");
+                }
+            }
+            else
+            {
+                // For complex types, add tag size, calculate content size, add length + content
+                TagCodeHelper.AddTagSize(_sb, fieldId, WireType.Len, calculatorVar);
+
+                // Calculate item content size
+                _sb.AppendIndentedLine("var itemCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+                var qualifiedSizeCall = GetQualifiedCalculateContentSizeCall(elementTypeName, elementClassName);
+                _sb.AppendIndentedLine($"{qualifiedSizeCall}(ref itemCalc, item);");
+
+                // Add length varint size + content size
+                _sb.AppendIndentedLine($"{calculatorVar}.WriteVarUInt32((uint)itemCalc.Length);");
+                _sb.AppendIndentedLine($"{calculatorVar}.AddByteLength(itemCalc.Length);");
+            }
 
             _sb.EndBlock(); // foreach
             _sb.EndBlock(); // if

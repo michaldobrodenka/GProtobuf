@@ -434,25 +434,30 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 if (parent == type.FullName)
                 {
                     // Direct child - use ProtoInclude from current type
-                    fieldId = type.ProtoIncludes.First(p => p.Type == derivedType).FieldId;
+                    var protoInclude = type.ProtoIncludes?.FirstOrDefault(p => p.Type == derivedType);
+                    fieldId = protoInclude?.FieldId ?? 0;
                 }
                 else
                 {
                     // Transitive child - find field ID that connects to immediate child of current type
                     // Walk up from derivedType until we find immediate child of current type
                     var current = derivedType;
+                    fieldId = 0; // Initialize to avoid uninitialized variable error
                     while (current != null)
                     {
                         var currentParent = _registry.GetParent(current);
                         if (currentParent == type.FullName)
                         {
                             // current is immediate child of type
-                            fieldId = type.ProtoIncludes.First(p => p.Type == current).FieldId;
+                            var protoInclude = type.ProtoIncludes?.FirstOrDefault(p => p.Type == current);
+                            if (protoInclude != null)
+                            {
+                                fieldId = protoInclude.FieldId;
+                            }
                             break;
                         }
                         current = currentParent;
                     }
-                    fieldId = type.ProtoIncludes.First(p => p.Type == current).FieldId;
                 }
 
                 derivedCases.Add((derivedType, fieldId));
