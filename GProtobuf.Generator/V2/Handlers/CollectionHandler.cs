@@ -196,6 +196,17 @@ namespace GProtobuf.Generator.V2.Handlers
                     // Default to List
                     return GetListInit(elementType);
 
+                case CollectionKind.CustomCollection:
+                case CollectionKind.CustomEnumerable:
+                    // Custom collection type - instantiate the actual type
+                    // (protobuf-net compatible: IEnumerable<T> + Add(T))
+                    if (!string.IsNullOrEmpty(collectionTypeName))
+                    {
+                        return $"new global::{collectionTypeName}()";
+                    }
+                    // Fallback to List if type is unknown
+                    return GetListInit(elementType);
+
                 default:
                     return GetListInit(elementType);
             }

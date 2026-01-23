@@ -52,20 +52,23 @@ public sealed class SerializerGenerator : IIncrementalGenerator
 
         var pipeline = context.SyntaxProvider.ForAttributeWithMetadataName(
             fullyQualifiedMetadataName: "ProtoBuf.ProtoContractAttribute",
-            predicate: static (node, _) => node is ClassDeclarationSyntax,
+            predicate: static (node, _) => node is ClassDeclarationSyntax or StructDeclarationSyntax,
             transform: static (syntaxContext, _) =>
             {
                 var typeWithAttribute = (syntaxContext.TargetSymbol as INamedTypeSymbol)!;
                 var namespaceName = syntaxContext.TargetSymbol.ContainingNamespace.ToDisplayString();
                 var protoIncludes = GetProtoIncludeAttributes(typeWithAttribute);
                 var protoMembers = GetProtoMemberAttributes(typeWithAttribute);
+                var hasParameterlessConstructor = HasParameterlessConstructor(typeWithAttribute);
+
                 var typeDefinition = new TypeDefinition(
-                    IsStruct: false, // todo implement support for structs
+                    IsStruct: typeWithAttribute.TypeKind == Microsoft.CodeAnalysis.TypeKind.Struct,
                     IsAbstract: typeWithAttribute.IsAbstract,
                     typeWithAttribute.ToDisplayString(),
                     protoIncludes,
-                    protoMembers);
-                
+                    protoMembers,
+                    hasParameterlessConstructor);
+
                 return (namespaceName, typeDefinition);
             });
         
@@ -327,10 +330,21 @@ public sealed class SerializerGenerator : IIncrementalGenerator
             {
                 return (true, elementType, CollectionKind.InterfaceCollection);
             }
-            
+
             if (IsConcreteCollectionType(namedType))
             {
                 return (true, elementType, CollectionKind.ConcreteCollection);
+            }
+        }
+
+        // Check for non-generic types that implement IEnumerable<T> + Add(T) method
+        // (protobuf-net compatible collections without [ProtoContract])
+        if (typeSymbol is INamedTypeSymbol nonGenericType)
+        {
+            var customCollectionInfo = AnalyzeNonGenericCollection(nonGenericType);
+            if (customCollectionInfo.IsCollection)
+            {
+                return customCollectionInfo;
             }
         }
 
@@ -355,11 +369,56 @@ public sealed class SerializerGenerator : IIncrementalGenerator
     private static bool IsConcreteCollectionType(INamedTypeSymbol namedType)
     {
         // Check if it implements ICollection<T>
-        return namedType.AllInterfaces.Any(i => 
-            i.IsGenericType && 
+        return namedType.AllInterfaces.Any(i =>
+            i.IsGenericType &&
             i.OriginalDefinition.ToDisplayString() == "System.Collections.Generic.ICollection<T>");
     }
-    
+
+    /// <summary>
+    /// Analyzes non-generic types that implement IEnumerable&lt;T&gt; and have Add(T) method
+    /// (protobuf-net compatible collections like ValueLogTypeHashSet)
+    /// </summary>
+    private static (bool IsCollection, string ElementType, CollectionKind Kind) AnalyzeNonGenericCollection(INamedTypeSymbol typeSymbol)
+    {
+        // Find IEnumerable<T> interface
+        var enumerableInterface = typeSymbol.AllInterfaces.FirstOrDefault(i =>
+            i.IsGenericType &&
+            i.OriginalDefinition.ToDisplayString() == "System.Collections.Generic.IEnumerable<T>");
+
+        if (enumerableInterface == null)
+        {
+            return (false, null, CollectionKind.None);
+        }
+
+        // Get element type from IEnumerable<T>
+        var elementType = enumerableInterface.TypeArguments[0].ToDisplayString();
+
+        // Check if type has Add(T) method with matching parameter type
+        var hasAddMethod = typeSymbol.GetMembers("Add")
+            .OfType<IMethodSymbol>()
+            .Any(m =>
+                m.Parameters.Length == 1 &&
+                m.Parameters[0].Type.ToDisplayString() == elementType);
+
+        if (!hasAddMethod)
+        {
+            return (false, null, CollectionKind.None);
+        }
+
+        // This is a protobuf-net compatible collection!
+        // Determine kind based on whether it implements ICollection<T>
+        var implementsICollection = typeSymbol.AllInterfaces.Any(i =>
+            i.IsGenericType &&
+            i.OriginalDefinition.ToDisplayString() == "System.Collections.Generic.ICollection<T>");
+
+        if (implementsICollection)
+        {
+            return (true, elementType, CollectionKind.CustomCollection);
+        }
+
+        return (true, elementType, CollectionKind.CustomEnumerable);
+    }
+
     /// <summary>
     /// Checks if a type string represents a collection type (array, List, HashSet, etc.)
     /// </summary>
@@ -464,5 +523,39 @@ public sealed class SerializerGenerator : IIncrementalGenerator
         }
 
         return (false, null, null, false, null, false, null);
+    }
+
+    /// <summary>
+    /// Determines if a type has a parameterless constructor (explicit or implicit).
+    /// This mimics protobuf-net 2.3.7 behavior:
+    /// - Explicit parameterless constructor (public/private/internal)
+    /// - Implicit constructor (no constructors defined)
+    /// </summary>
+    private static bool HasParameterlessConstructor(INamedTypeSymbol typeSymbol)
+    {
+        // Get all instance constructors (non-static)
+        var instanceConstructors = typeSymbol.Constructors
+            .Where(c => !c.IsStatic)
+            .ToList();
+
+        // Check for explicit parameterless constructor
+        foreach (var ctor in instanceConstructors)
+        {
+            if (ctor.Parameters.Length == 0)
+            {
+                return true;
+            }
+        }
+
+        // If no explicit constructors are defined (only implicit exists),
+        // the type has an implicit parameterless constructor
+        var explicitConstructors = instanceConstructors.Where(c => !c.IsImplicitlyDeclared).ToList();
+        if (explicitConstructors.Count == 0)
+        {
+            return true; // Implicit parameterless constructor
+        }
+
+        // Has explicit constructors but none are parameterless
+        return false;
     }
 }

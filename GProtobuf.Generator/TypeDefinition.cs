@@ -7,4 +7,5 @@ public sealed record TypeDefinition(
     bool IsAbstract,
     string FullName,
     List<ProtoIncludeAttribute> ProtoIncludes, // List of ProtoInclude derived classes
-    List<ProtoMemberAttribute> ProtoMembers);
+    List<ProtoMemberAttribute> ProtoMembers,
+    bool HasParameterlessConstructor); // True if type has a parameterless constructor (explicit or implicit)

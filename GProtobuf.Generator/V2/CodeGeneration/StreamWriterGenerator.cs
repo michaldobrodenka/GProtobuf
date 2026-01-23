@@ -24,6 +24,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         private readonly string _writerType;
         private readonly string _className;
         private readonly string _writerKind;
+        private string _currentNamespace;
 
         public StreamWriterGenerator(StringBuilderWithIndent sb, TypeRegistry registry)
             : this(sb, registry, null, null, "Stream")
@@ -67,14 +68,49 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// <summary>
         /// Generates complete Writers class for all types.
         /// </summary>
-        public void GenerateAll(IEnumerable<TypeDefinition> types)
+        public void GenerateAll(IEnumerable<TypeDefinition> types, string currentNamespace = null)
         {
+            // Store current namespace for cross-namespace method calls
+            _currentNamespace = currentNamespace ?? string.Empty;
+
             _sb.AppendIndentedLine($"public static class {_className}");
             _sb.StartNewBlock();
 
             foreach (var type in types)
             {
                 GenerateWriteMethod(type);
+            }
+
+            // Generate WriteContent methods for ProtoInclude derived types
+            // that are not in the main types list (types without [ProtoContract])
+            var processedTypes = new HashSet<string>(types.Select(t => t.FullName));
+            var protoIncludeTypes = new HashSet<string>();
+
+            // Collect all ProtoInclude types from all registered types
+            foreach (var registeredType in _registry.GetAllTypes())
+            {
+                if (registeredType.ProtoIncludes != null)
+                {
+                    foreach (var include in registeredType.ProtoIncludes)
+                    {
+                        if (!processedTypes.Contains(include.Type))
+                        {
+                            protoIncludeTypes.Add(include.Type);
+                        }
+                    }
+                }
+            }
+
+            // Generate WriteContent methods for ProtoInclude types
+            foreach (var protoIncludeTypeName in protoIncludeTypes)
+            {
+                var protoIncludeType = _registry.GetByFullName(protoIncludeTypeName);
+                if (protoIncludeType != null)
+                {
+                    var className = TypeNameHelper.GetClassName(protoIncludeTypeName);
+                    GenerateWriteContentMethod(protoIncludeType, className);
+                    processedTypes.Add(protoIncludeTypeName);
+                }
             }
 
             // Generate virtual map entry writers
@@ -98,7 +134,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendNewLine();
             _sb.AppendIndentedLine("// Virtual Map Entry Writers");
 
-            var generator = new VirtualMapEntryGenerator(_sb, _virtualMapRegistry, _writerKind);
+            var generator = new VirtualMapEntryGenerator(_sb, _virtualMapRegistry, _registry, _writerKind);
             foreach (var virtualType in virtualTypes)
             {
                 generator.GenerateWriter(virtualType);
@@ -784,11 +820,29 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             // Calculate and write length
             _sb.AppendIndentedLine("var calculator = new global::GProtobuf.Core.WriteSizeCalculator();");
-            _sb.AppendIndentedLine($"SizeCalculators.Calculate{typeName}ContentSize(ref calculator, {sourceVar});");
+
+            // Check if type is from different namespace and qualify the call
+            var typeNamespace = TypeNameHelper.GetNamespace(member.Type);
+            if (!string.IsNullOrEmpty(typeNamespace) && typeNamespace != _currentNamespace)
+            {
+                _sb.AppendIndentedLine($"global::{typeNamespace}.Serialization.SizeCalculators.Calculate{typeName}ContentSize(ref calculator, {sourceVar});");
+            }
+            else
+            {
+                _sb.AppendIndentedLine($"SizeCalculators.Calculate{typeName}ContentSize(ref calculator, {sourceVar});");
+            }
+
             _sb.AppendIndentedLine("writer.WriteVarUInt32((uint)calculator.Length);");
 
             // Write content
-            _sb.AppendIndentedLine($"Write{typeName}Content(ref writer, {sourceVar});");
+            if (!string.IsNullOrEmpty(typeNamespace) && typeNamespace != _currentNamespace)
+            {
+                _sb.AppendIndentedLine($"global::{typeNamespace}.Serialization.{_className}.Write{typeName}Content(ref writer, {sourceVar});");
+            }
+            else
+            {
+                _sb.AppendIndentedLine($"Write{typeName}Content(ref writer, {sourceVar});");
+            }
 
             _sb.EndBlock();
         }

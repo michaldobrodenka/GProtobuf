@@ -100,7 +100,7 @@ namespace GProtobuf.Generator.V2.Handlers
         /// Generates code to read a map field.
         /// Uses virtual type methods for complex types, inline code for simple types.
         /// </summary>
-        public void GenerateRead(ProtoMemberAttribute member, string targetVar)
+        public void GenerateRead(ProtoMemberAttribute member, string targetVar, string readerVar = "reader")
         {
             var keyType = member.MapKeyType;
             var valueType = member.MapValueType;
@@ -112,19 +112,19 @@ namespace GProtobuf.Generator.V2.Handlers
             if (virtualInfo != null)
             {
                 // Use virtual type reader
-                GenerateVirtualTypeRead(targetVar, virtualInfo, member, dictCreationType);
+                GenerateVirtualTypeRead(targetVar, virtualInfo, member, dictCreationType, readerVar);
             }
             else
             {
                 // Use inline reading for simple types
-                GenerateInlineRead(targetVar, keyType, valueType, member, dictCreationType);
+                GenerateInlineRead(targetVar, keyType, valueType, member, dictCreationType, readerVar);
             }
         }
 
         /// <summary>
         /// Generates code that calls the appropriate reader method (MapEntry for nested dictionaries, KeyValue otherwise).
         /// </summary>
-        private void GenerateVirtualTypeRead(string targetVar, VirtualMapEntryInfo virtualInfo, ProtoMemberAttribute member, string dictCreationType)
+        private void GenerateVirtualTypeRead(string targetVar, VirtualMapEntryInfo virtualInfo, ProtoMemberAttribute member, string dictCreationType, string readerVar)
         {
             // NESTED DICTIONARY DETECTION:
             // If value type is a dictionary, use MapEntry approach (Approach A)
@@ -137,7 +137,7 @@ namespace GProtobuf.Generator.V2.Handlers
                 // Returns: (bool success, TKey key, TValue value)
                 var mapEntryTypeName = VirtualTypeNameGenerator.GetMapEntryTypeName(virtualInfo.KeyType, virtualInfo.ValueType);
 
-                _sb.AppendIndentedLine($"var entry = SpanReaders.Read{mapEntryTypeName}(ref reader);");
+                _sb.AppendIndentedLine($"var entry = SpanReaders.Read{mapEntryTypeName}(ref {readerVar});");
                 _sb.AppendIndentedLine($"if (entry.success)");
                 _sb.StartNewBlock();
 
@@ -152,7 +152,7 @@ namespace GProtobuf.Generator.V2.Handlers
                 var keyValueClassName = GetKeyValueClassName(virtualInfo);
 
                 // Call the KeyValue reader method - read data first
-                _sb.AppendIndentedLine($"var keyValue = SpanReaders.Read{keyValueClassName}(ref reader);");
+                _sb.AppendIndentedLine($"var keyValue = SpanReaders.Read{keyValueClassName}(ref {readerVar});");
 
                 // Initialize dictionary AFTER reading data successfully
                 _sb.AppendIndentedLine($"{targetVar} ??= new {dictCreationType}();");
@@ -171,20 +171,20 @@ namespace GProtobuf.Generator.V2.Handlers
         /// <summary>
         /// Generates inline reading code for simple map types.
         /// </summary>
-        private void GenerateInlineRead(string targetVar, string keyType, string valueType, ProtoMemberAttribute member, string dictCreationType)
+        private void GenerateInlineRead(string targetVar, string keyType, string valueType, ProtoMemberAttribute member, string dictCreationType, string readerVar)
         {
             // Read entry length
-            _sb.AppendIndentedLine("var entryLength = reader.ReadVarUInt32();");
-            _sb.AppendIndentedLine("var entryEnd = reader.Position + (int)entryLength;");
+            _sb.AppendIndentedLine($"var entryLength = {readerVar}.ReadVarUInt32();");
+            _sb.AppendIndentedLine($"var entryEnd = {readerVar}.Position + (int)entryLength;");
 
             // Initialize key/value with defaults
             _sb.AppendIndentedLine($"{keyType} key = default;");
             _sb.AppendIndentedLine($"{valueType} value = default;");
 
             // Read entry fields
-            _sb.AppendIndentedLine("while (reader.Position < entryEnd)");
+            _sb.AppendIndentedLine($"while ({readerVar}.Position < entryEnd)");
             _sb.StartNewBlock();
-            _sb.AppendIndentedLine("var entryTag = reader.ReadVarUInt32();");
+            _sb.AppendIndentedLine($"var entryTag = {readerVar}.ReadVarUInt32();");
             _sb.AppendIndentedLine("var entryFieldId = (int)(entryTag >> 3);");
             _sb.AppendIndentedLine("var entryWireType = (int)(entryTag & 0x7);");
             _sb.AppendNewLine();
@@ -195,21 +195,21 @@ namespace GProtobuf.Generator.V2.Handlers
             // Field 1: Key
             _sb.AppendIndentedLine("case 1:");
             _sb.IncreaseIndent();
-            GeneratePrimitiveRead("key", keyType, member.MapKeyIsEnum);
+            GeneratePrimitiveRead("key", keyType, member.MapKeyIsEnum, readerVar);
             _sb.AppendIndentedLine("break;");
             _sb.DecreaseIndent();
 
             // Field 2: Value
             _sb.AppendIndentedLine("case 2:");
             _sb.IncreaseIndent();
-            GenerateValueRead(valueType, member.MapValueIsEnum);
+            GenerateValueRead(valueType, member.MapValueIsEnum, readerVar);
             _sb.AppendIndentedLine("break;");
             _sb.DecreaseIndent();
 
             // Default: skip unknown fields
             _sb.AppendIndentedLine("default:");
             _sb.IncreaseIndent();
-            _sb.AppendIndentedLine("reader.SkipField((global::GProtobuf.Core.WireType)entryWireType);");
+            _sb.AppendIndentedLine($"{readerVar}.SkipField((global::GProtobuf.Core.WireType)entryWireType);");
             _sb.AppendIndentedLine("break;");
             _sb.DecreaseIndent();
 
@@ -230,11 +230,11 @@ namespace GProtobuf.Generator.V2.Handlers
             }
         }
 
-        private void GeneratePrimitiveRead(string targetVar, string typeName, bool isEnum)
+        private void GeneratePrimitiveRead(string targetVar, string typeName, bool isEnum, string readerVar = "reader")
         {
             if (isEnum)
             {
-                _sb.AppendIndentedLine($"{targetVar} = ({typeName})reader.ReadVarInt32();");
+                _sb.AppendIndentedLine($"{targetVar} = ({typeName}){readerVar}.ReadVarInt32();");
                 return;
             }
 
@@ -243,24 +243,24 @@ namespace GProtobuf.Generator.V2.Handlers
             // Special handling for types that need wireType parameter
             if (normalized == "System.String")
             {
-                _sb.AppendIndentedLine($"{targetVar} = reader.ReadString((WireType)entryWireType);");
+                _sb.AppendIndentedLine($"{targetVar} = {readerVar}.ReadString((WireType)entryWireType);");
                 return;
             }
 
             if (normalized == "System.Guid")
             {
-                _sb.AppendIndentedLine($"{targetVar} = reader.ReadGuid((WireType)entryWireType);");
+                _sb.AppendIndentedLine($"{targetVar} = {readerVar}.ReadGuid((WireType)entryWireType);");
                 return;
             }
 
             if (normalized == "System.TimeSpan")
             {
-                _sb.AppendIndentedLine($"{targetVar} = reader.ReadTimeSpan((WireType)entryWireType);");
+                _sb.AppendIndentedLine($"{targetVar} = {readerVar}.ReadTimeSpan((WireType)entryWireType);");
                 return;
             }
 
             // Use TypeMapping for centralized read expression
-            var readExpr = TypeMapping.GetElementReadExpression(typeName, DataFormat.Default, "reader");
+            var readExpr = TypeMapping.GetElementReadExpression(typeName, DataFormat.Default, readerVar);
             if (readExpr != null)
             {
                 _sb.AppendIndentedLine($"{targetVar} = {readExpr};");
@@ -268,7 +268,7 @@ namespace GProtobuf.Generator.V2.Handlers
             }
 
             // Try special types
-            if (SpecialTypeHandler.TryGenerateRead(_sb, targetVar, typeName))
+            if (SpecialTypeHandler.TryGenerateRead(_sb, targetVar, typeName, readerVar))
             {
                 return;
             }
@@ -276,11 +276,11 @@ namespace GProtobuf.Generator.V2.Handlers
             _sb.AppendIndentedLine($"// Unsupported type: {typeName}");
         }
 
-        private void GenerateValueRead(string valueType, bool isEnum)
+        private void GenerateValueRead(string valueType, bool isEnum, string readerVar = "reader")
         {
             if (isEnum)
             {
-                _sb.AppendIndentedLine($"value = ({valueType})reader.ReadVarInt32();");
+                _sb.AppendIndentedLine($"value = ({valueType}){readerVar}.ReadVarInt32();");
                 return;
             }
 
@@ -289,24 +289,24 @@ namespace GProtobuf.Generator.V2.Handlers
             // Special handling for types that need wireType parameter
             if (normalized == "System.String")
             {
-                _sb.AppendIndentedLine($"value = reader.ReadString((WireType)entryWireType);");
+                _sb.AppendIndentedLine($"value = {readerVar}.ReadString((WireType)entryWireType);");
                 return;
             }
 
             if (normalized == "System.Guid")
             {
-                _sb.AppendIndentedLine($"value = reader.ReadGuid((WireType)entryWireType);");
+                _sb.AppendIndentedLine($"value = {readerVar}.ReadGuid((WireType)entryWireType);");
                 return;
             }
 
             if (normalized == "System.TimeSpan")
             {
-                _sb.AppendIndentedLine($"value = reader.ReadTimeSpan((WireType)entryWireType);");
+                _sb.AppendIndentedLine($"value = {readerVar}.ReadTimeSpan((WireType)entryWireType);");
                 return;
             }
 
             // Check for primitive types using TypeMapping
-            var readExpr = TypeMapping.GetElementReadExpression(valueType, DataFormat.Default, "reader");
+            var readExpr = TypeMapping.GetElementReadExpression(valueType, DataFormat.Default, readerVar);
             if (readExpr != null)
             {
                 _sb.AppendIndentedLine($"value = {readExpr};");
@@ -314,7 +314,7 @@ namespace GProtobuf.Generator.V2.Handlers
             }
 
             // Try special types
-            if (SpecialTypeHandler.TryGenerateRead(_sb, "value", valueType))
+            if (SpecialTypeHandler.TryGenerateRead(_sb, "value", valueType, readerVar))
             {
                 return;
             }
@@ -322,30 +322,30 @@ namespace GProtobuf.Generator.V2.Handlers
             // Complex types
             if (valueType.EndsWith("[]"))
             {
-                GeneratePackedArrayValueRead(valueType);
+                GeneratePackedArrayValueRead(valueType, readerVar);
             }
             else if (TypeHelper.IsListType(valueType) || TypeHelper.IsHashSetType(valueType))
             {
-                GenerateCollectionValueRead(valueType);
+                GenerateCollectionValueRead(valueType, readerVar);
             }
             else
             {
                 // Nested message type
                 var sanitizedName = TypeNameHelper.GetClassName(valueType);
-                _sb.AppendIndentedLine("var valueLength = reader.ReadVarUInt32();");
-                _sb.AppendIndentedLine("var valueEnd = reader.Position + (int)valueLength;");
+                _sb.AppendIndentedLine($"var valueLength = {readerVar}.ReadVarUInt32();");
+                _sb.AppendIndentedLine($"var valueEnd = {readerVar}.Position + (int)valueLength;");
                 _sb.AppendIndentedLine($"value = new global::{valueType}();");
-                _sb.AppendIndentedLine($"SpanReaders.Populate{sanitizedName}(ref reader, value);");
-                _sb.AppendIndentedLine("reader.Position = valueEnd;");
+                _sb.AppendIndentedLine($"SpanReaders.Populate{sanitizedName}(ref {readerVar}, value);");
+                _sb.AppendIndentedLine($"{readerVar}.Position = valueEnd;");
             }
         }
 
-        private void GeneratePackedArrayValueRead(string valueType)
+        private void GeneratePackedArrayValueRead(string valueType, string readerVar)
         {
             var elementType = valueType.Substring(0, valueType.Length - 2);
 
             // Try to use optimized packed array read from SpanReader
-            var packedReadExpr = TypeMapping.GetPackedArrayReadExpression(elementType, DataFormat.Default, "reader");
+            var packedReadExpr = TypeMapping.GetPackedArrayReadExpression(elementType, DataFormat.Default, readerVar);
             if (packedReadExpr != null)
             {
                 _sb.AppendIndentedLine($"value = {packedReadExpr};");
@@ -353,7 +353,7 @@ namespace GProtobuf.Generator.V2.Handlers
             }
 
             // Fallback for types without optimized packed read (e.g., string)
-            var elementReadExpr = TypeMapping.GetElementReadExpression(elementType, DataFormat.Default, "reader");
+            var elementReadExpr = TypeMapping.GetElementReadExpression(elementType, DataFormat.Default, readerVar);
             if (elementReadExpr == null)
             {
                 _sb.AppendIndentedLine($"// Unsupported array element type: {elementType}");
@@ -361,24 +361,24 @@ namespace GProtobuf.Generator.V2.Handlers
             }
 
             var shortType = TypeMapping.GetShortTypeName(elementType);
-            _sb.AppendIndentedLine("var packedLength = reader.ReadVarUInt32();");
-            _sb.AppendIndentedLine("var packedEnd = reader.Position + (int)packedLength;");
+            _sb.AppendIndentedLine($"var packedLength = {readerVar}.ReadVarUInt32();");
+            _sb.AppendIndentedLine($"var packedEnd = {readerVar}.Position + (int)packedLength;");
             _sb.AppendIndentedLine($"var tempList = new global::System.Collections.Generic.List<{shortType}>();");
-            _sb.AppendIndentedLine("while (reader.Position < packedEnd)");
+            _sb.AppendIndentedLine($"while ({readerVar}.Position < packedEnd)");
             _sb.StartNewBlock();
             _sb.AppendIndentedLine($"tempList.Add({elementReadExpr});");
             _sb.EndBlock();
             _sb.AppendIndentedLine("value = tempList.ToArray();");
         }
 
-        private void GenerateCollectionValueRead(string valueType)
+        private void GenerateCollectionValueRead(string valueType, string readerVar)
         {
             var elementType = TypeHelper.GetCollectionElementType(valueType);
             var isHashSet = TypeHelper.IsHashSetType(valueType);
             var shortElementType = TypeMapping.GetShortTypeName(elementType);
 
             // Try to use optimized packed array read, then convert to collection
-            var packedReadExpr = TypeMapping.GetPackedArrayReadExpression(elementType, DataFormat.Default, "reader");
+            var packedReadExpr = TypeMapping.GetPackedArrayReadExpression(elementType, DataFormat.Default, readerVar);
             if (packedReadExpr != null)
             {
                 if (isHashSet)
@@ -393,13 +393,13 @@ namespace GProtobuf.Generator.V2.Handlers
             }
 
             // Fallback for types without optimized packed read
-            var elementReadExpr = TypeMapping.GetElementReadExpression(elementType, DataFormat.Default, "reader");
+            var elementReadExpr = TypeMapping.GetElementReadExpression(elementType, DataFormat.Default, readerVar);
             if (elementReadExpr == null)
             {
                 // Handle string specially
                 if (TypeMapping.NormalizeTypeName(elementType) == "System.String")
                 {
-                    elementReadExpr = "global::GProtobuf.Core.SpanReaders.ReadString(ref reader, global::GProtobuf.Core.WireType.Len)";
+                    elementReadExpr = $"global::GProtobuf.Core.SpanReaders.ReadString(ref {readerVar}, global::GProtobuf.Core.WireType.Len)";
                 }
                 else
                 {
@@ -408,8 +408,8 @@ namespace GProtobuf.Generator.V2.Handlers
                 }
             }
 
-            _sb.AppendIndentedLine("var packedLength = reader.ReadVarUInt32();");
-            _sb.AppendIndentedLine("var packedEnd = reader.Position + (int)packedLength;");
+            _sb.AppendIndentedLine($"var packedLength = {readerVar}.ReadVarUInt32();");
+            _sb.AppendIndentedLine($"var packedEnd = {readerVar}.Position + (int)packedLength;");
 
             if (isHashSet)
             {
@@ -420,7 +420,7 @@ namespace GProtobuf.Generator.V2.Handlers
                 _sb.AppendIndentedLine($"var tempCollection = new global::System.Collections.Generic.List<{shortElementType}>();");
             }
 
-            _sb.AppendIndentedLine("while (reader.Position < packedEnd)");
+            _sb.AppendIndentedLine($"while ({readerVar}.Position < packedEnd)");
             _sb.StartNewBlock();
             _sb.AppendIndentedLine($"tempCollection.Add({elementReadExpr});");
             _sb.EndBlock();

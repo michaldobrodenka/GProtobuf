@@ -58,16 +58,25 @@ namespace GProtobuf.Generator.V2
 
                 WriteHeader(sb, ns);
 
+                // Remember position after header to insert Tags class later
+                var insertPosition = sb.Length;
+
+                // Create TagsGenerator with separate StringBuilder (will be inserted at insertPosition)
+                var tagsSb = new StringBuilderWithIndent();
+                tagsSb.IndentLevel = sb.IndentLevel; // Match indentation
+                var tagsGenerator = new TagsGenerator(tagsSb);
+
                 try
                 {
-                    // Generate static Tags class for multi-byte tags (zero-allocation)
-                    var tagsGenerator = new TagsGenerator(sb);
+                    // Collect tags from base types first
                     tagsGenerator.CollectTags(types);
-                    tagsGenerator.Generate();
+
+                    // Collect tags from ProtoInclude types that will have WriteContent methods generated
+                    tagsGenerator.CollectTagsFromProtoIncludes(types, _registry);
                 }
                 catch (System.Exception ex)
                 {
-                    throw new System.Exception($"Error in TagsGenerator for namespace '{ns}'", ex);
+                    throw new System.Exception($"Error collecting tags from base types for namespace '{ns}'", ex);
                 }
 
                 try
@@ -94,7 +103,7 @@ namespace GProtobuf.Generator.V2
                 {
                     // Generate SpanReaders class (uses shared virtual registries, registers Dictionary and Tuple types)
                     var spanReaderGenerator = new SpanReaderGenerator(sb, _registry, virtualMapRegistry, virtualTupleRegistry);
-                    spanReaderGenerator.GenerateAll(types);
+                    spanReaderGenerator.GenerateAll(types, ns);
                 }
                 catch (System.Exception ex)
                 {
@@ -104,7 +113,7 @@ namespace GProtobuf.Generator.V2
                 try
                 {
                     // Generate StreamWriters class (uses shared virtual registries)
-                    new StreamWriterGenerator(sb, _registry, virtualMapRegistry, virtualTupleRegistry).GenerateAll(types);
+                    new StreamWriterGenerator(sb, _registry, virtualMapRegistry, virtualTupleRegistry).GenerateAll(types, ns);
                 }
                 catch (System.Exception ex)
                 {
@@ -114,7 +123,7 @@ namespace GProtobuf.Generator.V2
                 try
                 {
                     // Generate BufferWriters class (uses shared virtual registries)
-                    new BufferWriterGenerator(sb, _registry, virtualMapRegistry, virtualTupleRegistry).GenerateAll(types);
+                    new BufferWriterGenerator(sb, _registry, virtualMapRegistry, virtualTupleRegistry).GenerateAll(types, ns);
                 }
                 catch (System.Exception ex)
                 {
@@ -124,7 +133,7 @@ namespace GProtobuf.Generator.V2
                 try
                 {
                     // Generate SizeCalculators class (uses shared virtual registries)
-                    new SizeCalculatorGenerator(sb, _registry, virtualMapRegistry, virtualTupleRegistry).GenerateAll(types);
+                    new SizeCalculatorGenerator(sb, _registry, virtualMapRegistry, virtualTupleRegistry).GenerateAll(types, ns);
                 }
                 catch (System.Exception ex)
                 {
@@ -140,6 +149,26 @@ namespace GProtobuf.Generator.V2
                 catch (System.Exception ex)
                 {
                     throw new System.Exception($"Error in KeyValueClassGenerator for namespace '{ns}'", ex);
+                }
+
+                try
+                {
+                    // Collect tags from virtual types (Map entries, Tuples) registered by generators
+                    tagsGenerator.CollectTagsFromMapEntries(virtualMapRegistry.GetAllTypes());
+                    tagsGenerator.CollectTagsFromTuples(virtualTupleRegistry.GetAllTypes());
+
+                    // Generate Tags class AFTER collecting all tags (base + virtual)
+                    tagsGenerator.Generate();
+
+                    // Insert Tags class at the beginning (after header, before other classes)
+                    if (tagsSb.Length > 0)
+                    {
+                        sb.Insert(insertPosition, tagsSb.ToString());
+                    }
+                }
+                catch (System.Exception ex)
+                {
+                    throw new System.Exception($"Error generating Tags class for namespace '{ns}'", ex);
                 }
 
                 WriteFooter(sb);
@@ -230,6 +259,7 @@ namespace GProtobuf.Generator.V2
                 sb.StartNewBlock();
                 sb.AppendIndentedLine("var writer = new global::GProtobuf.Core.BufferWriter(buffer);");
                 sb.AppendIndentedLine($"BufferWriters.Write{className}(ref writer, obj);");
+                sb.AppendIndentedLine("writer.Flush();");
                 sb.EndBlock();
                 sb.AppendNewLine();
             }

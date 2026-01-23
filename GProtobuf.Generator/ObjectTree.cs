@@ -262,7 +262,7 @@ class ObjectTree
 
     public void AddType(string nmspace, string fullName, bool isStruct, bool isAbstract, List<ProtoIncludeAttribute> protoIncludes, List<ProtoMemberAttribute> protoMembers)
     {
-        AddType(nmspace, new TypeDefinition(isStruct, isAbstract, fullName, protoIncludes, protoMembers));
+        AddType(nmspace, new TypeDefinition(isStruct, isAbstract, fullName, protoIncludes, protoMembers, HasParameterlessConstructor: true));
     }
 
     public void AddType(string @namespace, TypeDefinition typeDefinition)
@@ -4406,10 +4406,11 @@ class ObjectTree
         
         var mapEntryType = new TypeDefinition(
             IsStruct: false,
-            IsAbstract: false, 
+            IsAbstract: false,
             FullName: "MapEntry",
             ProtoIncludes: new List<ProtoIncludeAttribute>(),
-            ProtoMembers: new List<ProtoMemberAttribute> { keyMember, valueMember }
+            ProtoMembers: new List<ProtoMemberAttribute> { keyMember, valueMember },
+            HasParameterlessConstructor: true
         );
         
         return mapEntryType;

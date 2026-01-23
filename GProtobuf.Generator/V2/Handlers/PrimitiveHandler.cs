@@ -109,26 +109,32 @@ namespace GProtobuf.Generator.V2.Handlers
             int fieldId,
             CollectionKind collectionKind,
             string collectionTypeName,
-            string readerVar = "reader")
+            string readerVar = "reader",
+            string wireTypeVar = "wireType",
+            string fieldIdVar = "fieldId")
         {
             var normalized = TypeMapping.NormalizeTypeName(elementTypeName);
             var shortType = TypeMapping.GetShortTypeName(elementTypeName);
             var elementReadExpr = TypeMapping.GetElementReadExpression(elementTypeName, format, readerVar);
             var expectedWireType = TypeMapping.GetWireTypeString(elementTypeName, format);
 
+            // Generate unique loop variable names to avoid conflicts with outer scope
+            var wireTypeLoopVar = wireTypeVar + "_loop";
+            var fieldIdLoopVar = fieldIdVar + "_loop";
+
             // For managed types (string, Guid, TimeSpan), use List<T>
             if (normalized == "System.String" || normalized == "System.Guid" || normalized == "System.TimeSpan")
             {
                 sb.AppendIndentedLine($"var tempList = new global::System.Collections.Generic.List<{shortType}>();");
-                sb.AppendIndentedLine($"var wireType1 = wireType;");
-                sb.AppendIndentedLine($"var fieldId1 = fieldId;");
-                sb.AppendIndentedLine($"while (fieldId1 == fieldId && wireType1 == {expectedWireType})");
+                sb.AppendIndentedLine($"var {wireTypeLoopVar} = {wireTypeVar};");
+                sb.AppendIndentedLine($"var {fieldIdLoopVar} = {fieldIdVar};");
+                sb.AppendIndentedLine($"while ({fieldIdLoopVar} == {fieldId} && {wireTypeLoopVar} == {expectedWireType})");
                 sb.StartNewBlock();
                 sb.AppendIndentedLine($"tempList.Add({elementReadExpr});");
                 sb.AppendIndentedLine($"if ({readerVar}.EndOfData) break;");
                 sb.AppendIndentedLine($"var p = {readerVar}.Position;");
-                sb.AppendIndentedLine($"(wireType1, fieldId1) = {readerVar}.ReadKey();");
-                sb.AppendIndentedLine($"if (fieldId1 != fieldId)");
+                sb.AppendIndentedLine($"({wireTypeLoopVar}, {fieldIdLoopVar}) = {readerVar}.ReadKey();");
+                sb.AppendIndentedLine($"if ({fieldIdLoopVar} != {fieldId})");
                 sb.StartNewBlock();
                 sb.AppendIndentedLine($"{readerVar}.Position = p; // rewind");
                 sb.AppendIndentedLine($"break;");
@@ -143,15 +149,15 @@ namespace GProtobuf.Generator.V2.Handlers
             {
                 // For unmanaged types, use UnmanagedCollectionCollector
                 sb.AppendIndentedLine($"using var resultCollector = new global::GProtobuf.Core.UnmanagedCollectionCollector<{shortType}>(stackalloc {shortType}[256 / sizeof({shortType})], 1024);");
-                sb.AppendIndentedLine($"var wireType1 = wireType;");
-                sb.AppendIndentedLine($"var fieldId1 = fieldId;");
-                sb.AppendIndentedLine($"while (fieldId1 == fieldId && wireType1 == {expectedWireType})");
+                sb.AppendIndentedLine($"var {wireTypeLoopVar} = {wireTypeVar};");
+                sb.AppendIndentedLine($"var {fieldIdLoopVar} = {fieldIdVar};");
+                sb.AppendIndentedLine($"while ({fieldIdLoopVar} == {fieldId} && {wireTypeLoopVar} == {expectedWireType})");
                 sb.StartNewBlock();
                 sb.AppendIndentedLine($"resultCollector.Add({elementReadExpr});");
                 sb.AppendIndentedLine($"if ({readerVar}.EndOfData) break;");
                 sb.AppendIndentedLine($"var p = {readerVar}.Position;");
-                sb.AppendIndentedLine($"(wireType1, fieldId1) = {readerVar}.ReadKey();");
-                sb.AppendIndentedLine($"if (fieldId1 != fieldId)");
+                sb.AppendIndentedLine($"({wireTypeLoopVar}, {fieldIdLoopVar}) = {readerVar}.ReadKey();");
+                sb.AppendIndentedLine($"if ({fieldIdLoopVar} != {fieldId})");
                 sb.StartNewBlock();
                 sb.AppendIndentedLine($"{readerVar}.Position = p; // rewind");
                 sb.AppendIndentedLine($"break;");

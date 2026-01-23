@@ -27,6 +27,89 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
         }
 
+        /// <summary>
+        /// Collects tags from virtual map entry types.
+        /// Map entries have 2 fields: Key (fieldId=1) and Value (fieldId=2).
+        /// </summary>
+        public void CollectTagsFromMapEntries(System.Collections.Generic.IEnumerable<Handlers.VirtualTypes.VirtualMapEntryInfo> mapEntries)
+        {
+            foreach (var mapEntry in mapEntries)
+            {
+                // Field 1: Key
+                var keyWireType = TypeMapping.GetWireType(mapEntry.KeyType, DataFormat.Default);
+                CollectTag(1, keyWireType);
+
+                // Field 2: Value
+                var valueWireType = TypeMapping.GetWireType(mapEntry.ValueType, DataFormat.Default);
+                CollectTag(2, valueWireType);
+            }
+        }
+
+        /// <summary>
+        /// Collects tags from virtual tuple types.
+        /// </summary>
+        public void CollectTagsFromTuples(System.Collections.Generic.IEnumerable<Handlers.VirtualTypes.TupleTypeInfo> tuples)
+        {
+            foreach (var tuple in tuples)
+            {
+                for (int i = 0; i < tuple.ItemTypes.Count; i++)
+                {
+                    var itemType = tuple.ItemTypes[i]; // itemType is already a string
+                    var wireType = TypeMapping.GetWireType(itemType, DataFormat.Default);
+                    CollectTag(i + 1, wireType); // Field IDs start at 1
+                }
+            }
+        }
+
+        /// <summary>
+        /// Collects tags from ProtoInclude types that will have WriteContent methods generated.
+        /// This ensures tags are available when writing cross-namespace ProtoInclude types.
+        /// </summary>
+        public void CollectTagsFromProtoIncludes(IEnumerable<TypeDefinition> types, TypeRegistry registry)
+        {
+            var processedTypes = new HashSet<string>();
+            var protoIncludeTypes = new HashSet<string>();
+
+            // Collect all ProtoInclude types from the given types
+            foreach (var type in types)
+            {
+                if (type.ProtoIncludes != null)
+                {
+                    foreach (var include in type.ProtoIncludes)
+                    {
+                        protoIncludeTypes.Add(include.Type);
+                    }
+                }
+            }
+
+            // Also collect ProtoIncludes from ALL registered types to match StreamWriterGenerator logic
+            foreach (var registeredType in registry.GetAllTypes())
+            {
+                if (registeredType.ProtoIncludes != null)
+                {
+                    foreach (var include in registeredType.ProtoIncludes)
+                    {
+                        protoIncludeTypes.Add(include.Type);
+                    }
+                }
+            }
+
+            // Collect tags from each ProtoInclude type
+            foreach (var protoIncludeTypeName in protoIncludeTypes)
+            {
+                if (processedTypes.Contains(protoIncludeTypeName))
+                    continue;
+
+                processedTypes.Add(protoIncludeTypeName);
+
+                var protoIncludeType = registry.GetByFullName(protoIncludeTypeName);
+                if (protoIncludeType != null)
+                {
+                    CollectFromType(protoIncludeType);
+                }
+            }
+        }
+
         private void CollectFromType(TypeDefinition type)
         {
             if (type.ProtoMembers != null)

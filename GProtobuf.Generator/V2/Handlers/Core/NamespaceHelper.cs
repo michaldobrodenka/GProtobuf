@@ -1,3 +1,5 @@
+using GProtobuf.Generator.V2.Helpers;
+
 namespace GProtobuf.Generator.V2.Handlers.Core
 {
     /// <summary>
@@ -8,6 +10,7 @@ namespace GProtobuf.Generator.V2.Handlers.Core
     {
         /// <summary>
         /// Gets the full namespace path for serialization classes from a type name.
+        /// Correctly handles nested classes by using TypeNameHelper to extract the actual namespace.
         /// </summary>
         /// <param name="fullTypeName">The full type name (e.g., "GProtobuf.Tests.TestModel.NestedDictionaryValue")</param>
         /// <returns>The serialization namespace (e.g., "global::GProtobuf.Tests.TestModel.Serialization")</returns>
@@ -23,14 +26,13 @@ namespace GProtobuf.Generator.V2.Handlers.Core
                 fullTypeName = fullTypeName.Substring(8);
             }
 
-            // Find the last dot to get the namespace
-            var lastDotIndex = fullTypeName.LastIndexOf('.');
-            if (lastDotIndex <= 0)
+            // Use TypeNameHelper to properly extract namespace (handles nested classes)
+            var typeNamespace = TypeNameHelper.GetNamespace(fullTypeName);
+            if (string.IsNullOrEmpty(typeNamespace))
             {
                 return "global::Serialization";
             }
 
-            var typeNamespace = fullTypeName.Substring(0, lastDotIndex);
             return $"global::{typeNamespace}.Serialization";
         }
 

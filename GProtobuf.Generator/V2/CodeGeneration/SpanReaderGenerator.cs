@@ -20,6 +20,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         private readonly TupleHandler _tupleHandler;
         private readonly VirtualMapTypeRegistry _virtualMapRegistry;
         private readonly VirtualTupleTypeRegistry _virtualTupleRegistry;
+        private string _currentNamespace;
 
         public SpanReaderGenerator(StringBuilderWithIndent sb, TypeRegistry registry)
             : this(sb, registry, null, null)
@@ -53,10 +54,36 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         public VirtualTupleTypeRegistry VirtualTupleRegistry => _virtualTupleRegistry;
 
         /// <summary>
+        /// Generates object creation code, using FormatterServices if type has no parameterless constructor.
+        /// </summary>
+        private void GenerateObjectCreation(TypeDefinition type, string variableName = "result")
+        {
+            var fullTypeName = $"global::{type.FullName}";
+
+            if (type.HasParameterlessConstructor)
+            {
+                // Use standard new operator
+                _sb.AppendIndentedLine($"{fullTypeName} {variableName} = new {fullTypeName}();");
+            }
+            else
+            {
+                // Use FormatterServices.GetUninitializedObject() like protobuf-net does
+                _sb.AppendIndentedLine($"{fullTypeName} {variableName} = ({fullTypeName})");
+                _sb.IncreaseIndent();
+                _sb.AppendIndentedLine($"System.Runtime.Serialization.FormatterServices.GetUninitializedObject(");
+                _sb.AppendIndentedLine($"    typeof({fullTypeName}));");
+                _sb.DecreaseIndent();
+            }
+        }
+
+        /// <summary>
         /// Generates complete SpanReaders class for all types.
         /// </summary>
-        public void GenerateAll(IEnumerable<TypeDefinition> types)
+        public void GenerateAll(IEnumerable<TypeDefinition> types, string currentNamespace = null)
         {
+            // Store current namespace for cross-namespace method calls
+            _currentNamespace = currentNamespace ?? string.Empty;
+
             _sb.AppendIndentedLine("public static class SpanReaders");
             _sb.StartNewBlock();
 
@@ -87,6 +114,54 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 catch (System.Exception ex)
                 {
                     throw new System.Exception($"Error in GeneratePopulateMethod for type '{type.FullName}'", ex);
+                }
+            }
+
+            // Generate ReadContent methods for ProtoInclude derived types
+            // that are not in the main types list (types without [ProtoContract])
+            var processedTypes = new System.Collections.Generic.HashSet<string>(types.Select(t => t.FullName));
+            var protoIncludeTypes = new System.Collections.Generic.HashSet<string>();
+
+            // Collect all ProtoInclude types from all registered types
+            foreach (var registeredType in _registry.GetAllTypes())
+            {
+                if (registeredType.ProtoIncludes != null)
+                {
+                    foreach (var include in registeredType.ProtoIncludes)
+                    {
+                        if (!processedTypes.Contains(include.Type))
+                        {
+                            protoIncludeTypes.Add(include.Type);
+                        }
+                    }
+                }
+            }
+
+            // Generate ReadContent methods for ProtoInclude types
+            foreach (var protoIncludeTypeName in protoIncludeTypes)
+            {
+                var protoIncludeType = _registry.GetByFullName(protoIncludeTypeName);
+                if (protoIncludeType != null)
+                {
+                    try
+                    {
+                        GenerateReadContentMethod(protoIncludeType);
+                    }
+                    catch (System.Exception ex)
+                    {
+                        throw new System.Exception($"Error in GenerateReadContentMethod for ProtoInclude type '{protoIncludeTypeName}'", ex);
+                    }
+
+                    try
+                    {
+                        GeneratePopulateMethod(protoIncludeType);
+                    }
+                    catch (System.Exception ex)
+                    {
+                        throw new System.Exception($"Error in GeneratePopulateMethod for ProtoInclude type '{protoIncludeTypeName}'", ex);
+                    }
+
+                    processedTypes.Add(protoIncludeTypeName);
                 }
             }
 
@@ -141,7 +216,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             VirtualMapEntryGenerator generator;
             try
             {
-                generator = new VirtualMapEntryGenerator(_sb, _virtualMapRegistry);
+                generator = new VirtualMapEntryGenerator(_sb, _virtualMapRegistry, _registry);
             }
             catch (System.Exception ex)
             {
@@ -305,14 +380,70 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         private void GenerateReadMethodForDerived(TypeDefinition type, string className)
         {
             // Create instance of the derived type
-            _sb.AppendIndentedLine($"global::{type.FullName} result = new global::{type.FullName}();");
+            GenerateObjectCreation(type, "result");
             _sb.AppendNewLine();
 
             // Get inheritance chain: [Root, ..., Parent, This]
             var chain = _registry.GetInheritanceChain(type.FullName);
 
+            // Collect all fields needing temp lists from the entire inheritance chain
+            var fieldsNeedingTempList = new List<ProtoMemberAttribute>();
+            foreach (var typeName in chain)
+            {
+                var typeInChain = _registry.GetByFullName(typeName);
+                if (typeInChain?.ProtoMembers != null)
+                {
+                    var tempListFields = typeInChain.ProtoMembers
+                        .Where(m => m.IsCollection && (
+                            m.CollectionKind == CollectionKind.Array ||
+                            (m.CollectionKind == CollectionKind.InterfaceCollection && m.Type != null &&
+                             TypeMapping.NormalizeTypeName(m.Type).StartsWith("System.Collections.Generic.IEnumerable<") &&
+                             !m.Type.Contains("ICollection") &&
+                             !m.Type.Contains("IList"))
+                        ))
+                        .ToList();
+
+                    fieldsNeedingTempList.AddRange(tempListFields);
+                }
+            }
+
+            // Declare temp lists for all collection fields from inheritance chain
+            if (fieldsNeedingTempList.Count > 0)
+            {
+                foreach (var member in fieldsNeedingTempList)
+                {
+                    var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType);
+                    _sb.AppendIndentedLine($"global::System.Collections.Generic.List<{elementType}> _tempList_{member.Name} = null;");
+                }
+                _sb.AppendNewLine();
+            }
+
             // Generate nested reading for each level
             GenerateNestedReading(chain, 0, "reader");
+
+            // Convert temp lists to arrays or assign to IEnumerable properties
+            if (fieldsNeedingTempList.Count > 0)
+            {
+                _sb.AppendNewLine();
+                foreach (var member in fieldsNeedingTempList)
+                {
+                    _sb.AppendIndentedLine($"if (_tempList_{member.Name} != null)");
+                    _sb.StartNewBlock();
+
+                    if (member.CollectionKind == CollectionKind.Array)
+                    {
+                        // Arrays need ToArray() conversion
+                        _sb.AppendIndentedLine($"result.{member.Name} = _tempList_{member.Name}.ToArray();");
+                    }
+                    else
+                    {
+                        // IEnumerable can be assigned List directly (List implements IEnumerable)
+                        _sb.AppendIndentedLine($"result.{member.Name} = _tempList_{member.Name};");
+                    }
+
+                    _sb.EndBlock();
+                }
+            }
 
             _sb.AppendIndentedLine("return result;");
         }
@@ -424,7 +555,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             if (member.IsMap)
             {
                 var mapHandler = new MapHandler(_sb, _virtualMapRegistry);
-                mapHandler.GenerateRead(member, $"result.{member.Name}");
+                mapHandler.GenerateRead(member, $"result.{member.Name}", readerVar);
             }
             else if (member.IsCollection)
             {
@@ -432,8 +563,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
             else if (member.IsEnum)
             {
-                var typeName = TypeNameHelper.GetClassName(member.Type);
-                _sb.AppendIndentedLine($"result.{member.Name} = ({typeName}){readerVar}.ReadVarInt32();");
+                // Use fully qualified type name for enums to avoid namespace issues
+                _sb.AppendIndentedLine($"result.{member.Name} = (global::{member.Type}){readerVar}.ReadVarInt32();");
             }
             else if (TupleHandler.IsTupleType(member.Type))
             {
@@ -488,6 +619,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 }
                 else
                 {
+                    var fieldIdVar = wireTypeVar.Replace("wireType", "fieldId");
                     _primitiveHandler.GenerateNonPackedArrayRead(
                         _sb,
                         $"result.{member.Name}",
@@ -496,7 +628,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                         member.FieldId,
                         member.CollectionKind,
                         member.Type,
-                        readerVar);
+                        readerVar,
+                        wireTypeVar,
+                        fieldIdVar);
                 }
             }
             else if (TupleHandler.IsTupleType(member.CollectionElementType))
@@ -529,7 +663,17 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var typeName = TypeNameHelper.GetClassName(member.Type);
             _sb.AppendIndentedLine($"var length = {readerVar}.ReadVarInt32();");
             _sb.AppendIndentedLine($"var nestedReader = new SpanReader({readerVar}.GetSlice(length));");
-            _sb.AppendIndentedLine($"result.{member.Name} = Read{typeName}Content(ref nestedReader);");
+
+            // Check if type is from different namespace and qualify the call
+            var typeNamespace = TypeNameHelper.GetNamespace(member.Type);
+            if (!string.IsNullOrEmpty(typeNamespace) && typeNamespace != _currentNamespace)
+            {
+                _sb.AppendIndentedLine($"result.{member.Name} = global::{typeNamespace}.Serialization.SpanReaders.Read{typeName}Content(ref nestedReader);");
+            }
+            else
+            {
+                _sb.AppendIndentedLine($"result.{member.Name} = Read{typeName}Content(ref nestedReader);");
+            }
         }
 
         #endregion
@@ -571,7 +715,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         private void GenerateSimpleReadContent(TypeDefinition type, string className)
         {
             // Create instance
-            _sb.AppendIndentedLine($"global::{type.FullName} result = new global::{type.FullName}();");
+            GenerateObjectCreation(type, "result");
             _sb.AppendNewLine();
 
             // Declare temp lists for array fields and IEnumerable interface fields (same as in Populate)
@@ -665,7 +809,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
             else
             {
-                _sb.AppendIndentedLine($"global::{type.FullName} result = new global::{type.FullName}();");
+                GenerateObjectCreation(type, "result");
             }
             _sb.AppendNewLine();
 
@@ -910,8 +1054,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
             else if (member.IsEnum)
             {
-                var typeName = TypeNameHelper.GetClassName(member.Type);
-                _sb.AppendIndentedLine($"instance.{member.Name} = ({typeName})reader.ReadVarInt32();");
+                // Use fully qualified type name for enums to avoid namespace issues
+                _sb.AppendIndentedLine($"instance.{member.Name} = (global::{member.Type})reader.ReadVarInt32();");
             }
             else if (TupleHandler.IsTupleType(member.Type))
             {
@@ -927,7 +1071,17 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 var typeName = TypeNameHelper.GetClassName(member.Type);
                 _sb.AppendIndentedLine("var length = reader.ReadVarInt32();");
                 _sb.AppendIndentedLine("var nestedReader = new SpanReader(reader.GetSlice(length));");
-                _sb.AppendIndentedLine($"instance.{member.Name} = Read{typeName}Content(ref nestedReader);");
+
+                // Check if type is from different namespace and qualify the call
+                var typeNamespace = TypeNameHelper.GetNamespace(member.Type);
+                if (!string.IsNullOrEmpty(typeNamespace) && typeNamespace != _currentNamespace)
+                {
+                    _sb.AppendIndentedLine($"instance.{member.Name} = global::{typeNamespace}.Serialization.SpanReaders.Read{typeName}Content(ref nestedReader);");
+                }
+                else
+                {
+                    _sb.AppendIndentedLine($"instance.{member.Name} = Read{typeName}Content(ref nestedReader);");
+                }
             }
 
             _sb.AppendIndentedLine("break;");
@@ -1303,8 +1457,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         // Body versions for switch case (without continue/break - those are added by GenerateFieldReadCase)
         private void GenerateEnumFieldReadBody(ProtoMemberAttribute member)
         {
-            var typeName = TypeNameHelper.GetClassName(member.Type);
-            _sb.AppendIndentedLine($"result.{member.Name} = ({typeName})reader.ReadVarInt32();");
+            // Use fully qualified type name for enums to avoid namespace issues
+            _sb.AppendIndentedLine($"result.{member.Name} = (global::{member.Type})reader.ReadVarInt32();");
         }
 
         private void GenerateMapFieldReadBody(ProtoMemberAttribute member)
@@ -1374,14 +1528,24 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var typeName = TypeNameHelper.GetClassName(member.Type);
             _sb.AppendIndentedLine("var length = reader.ReadVarInt32();");
             _sb.AppendIndentedLine("var nestedReader = new SpanReader(reader.GetSlice(length));");
-            _sb.AppendIndentedLine($"result.{member.Name} = Read{typeName}Content(ref nestedReader);");
+
+            // Check if type is from different namespace and qualify the call
+            var typeNamespace = TypeNameHelper.GetNamespace(member.Type);
+            if (!string.IsNullOrEmpty(typeNamespace) && typeNamespace != _currentNamespace)
+            {
+                _sb.AppendIndentedLine($"result.{member.Name} = global::{typeNamespace}.Serialization.SpanReaders.Read{typeName}Content(ref nestedReader);");
+            }
+            else
+            {
+                _sb.AppendIndentedLine($"result.{member.Name} = Read{typeName}Content(ref nestedReader);");
+            }
         }
 
         // Legacy versions for if-else (with continue)
         private void GenerateEnumFieldRead(ProtoMemberAttribute member)
         {
-            var typeName = TypeNameHelper.GetClassName(member.Type);
-            _sb.AppendIndentedLine($"result.{member.Name} = ({typeName})reader.ReadVarInt32();");
+            // Use fully qualified type name for enums to avoid namespace issues
+            _sb.AppendIndentedLine($"result.{member.Name} = (global::{member.Type})reader.ReadVarInt32();");
             _sb.AppendIndentedLine("continue;");
         }
 

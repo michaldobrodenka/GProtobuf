@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using GProtobuf.Generator.V2.Handlers.Core;
 using GProtobuf.Generator.V2.Helpers;
 
@@ -12,20 +13,63 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
     {
         private readonly StringBuilderWithIndent _sb;
         private readonly VirtualMapTypeRegistry _registry;
+        private readonly TypeRegistry _typeRegistry;
         private readonly string _writerType;
         private readonly string _writerClassName;
 
-        public VirtualMapEntryGenerator(StringBuilderWithIndent sb, VirtualMapTypeRegistry registry)
-            : this(sb, registry, "Stream")
+        public VirtualMapEntryGenerator(StringBuilderWithIndent sb, VirtualMapTypeRegistry registry, TypeRegistry typeRegistry = null)
+            : this(sb, registry, typeRegistry, "Stream")
         {
         }
 
-        public VirtualMapEntryGenerator(StringBuilderWithIndent sb, VirtualMapTypeRegistry registry, string writerKind)
+        public VirtualMapEntryGenerator(StringBuilderWithIndent sb, VirtualMapTypeRegistry registry, TypeRegistry typeRegistry, string writerKind)
         {
             _sb = sb;
             _registry = registry;
+            _typeRegistry = typeRegistry;
             _writerType = $"global::GProtobuf.Core.{writerKind}Writer";
             _writerClassName = $"{writerKind}Writers";
+        }
+
+        /// <summary>
+        /// Gets the correct SpanReaders class path for a type, handling nested classes correctly.
+        /// Uses TypeRegistry when available to get the correct namespace.
+        /// For nested classes, searches for the outer class in TypeRegistry.
+        /// </summary>
+        private string GetSpanReadersClass(string fullTypeName)
+        {
+            // Try to get namespace from TypeRegistry first (handles nested classes correctly)
+            if (_typeRegistry != null)
+            {
+                // Try different type name variants (for nested classes, we need to find the outer class)
+                var typeVariantsToTry = new System.Collections.Generic.List<string> { fullTypeName };
+
+                // For nested classes like "A.B.C.OuterClass.NestedClass", try "A.B.C.OuterClass"
+                var lastDot = fullTypeName.LastIndexOf('.');
+                while (lastDot > 0)
+                {
+                    var parentType = fullTypeName.Substring(0, lastDot);
+                    typeVariantsToTry.Add(parentType);
+                    lastDot = parentType.LastIndexOf('.');
+                }
+
+                // Search for any of these type variants in TypeRegistry
+                foreach (var typeToTry in typeVariantsToTry)
+                {
+                    foreach (var ns in _typeRegistry.GetAllNamespaces())
+                    {
+                        var typesInNs = _typeRegistry.GetByNamespace(ns);
+                        if (typesInNs.Any(t => t.FullName == typeToTry))
+                        {
+                            // Found the type (or its outer class) - return the namespace
+                            return $"global::{ns}.Serialization.SpanReaders";
+                        }
+                    }
+                }
+            }
+
+            // Fallback to NamespaceHelper if TypeRegistry is not available or type not found
+            return NamespaceHelper.GetSpanReadersClass(fullTypeName);
         }
 
         #region SpanReader Generation
@@ -292,7 +336,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 }
                 else if (elemInfo.IsCustomType)
                 {
-                    var spanReadersClass = NamespaceHelper.GetSpanReadersClass(elementType);
+                    var spanReadersClass = GetSpanReadersClass(elementType);
                     _sb.AppendIndentedLine($"var {fieldPrefix}ItemLength = reader.ReadVarUInt32();");
                     _sb.AppendIndentedLine($"var {fieldPrefix}ItemSpan = reader.GetSlice((int){fieldPrefix}ItemLength);");
                     _sb.AppendIndentedLine($"var {fieldPrefix}ScopedReader = new SpanReader({fieldPrefix}ItemSpan);");
@@ -327,7 +371,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             {
                 // Custom message type - use scoped reader to limit reading to message bounds
                 var sanitizedName = typeInfo.ShortTypeName;
-                var spanReadersClass = NamespaceHelper.GetSpanReadersClass(typeName);
+                var spanReadersClass = GetSpanReadersClass(typeName);
                 _sb.AppendIndentedLine($"var {fieldPrefix}MsgLength = reader.ReadVarUInt32();");
                 _sb.AppendIndentedLine($"var {fieldPrefix}MsgSpan = reader.GetSlice((int){fieldPrefix}MsgLength);");
                 _sb.AppendIndentedLine($"var {fieldPrefix}ScopedReader = new SpanReader({fieldPrefix}MsgSpan);");
@@ -478,7 +522,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             else if (elemInfo.IsCustomType)
             {
                 // Collection of custom types - use scoped reader to limit reading to item bounds
-                var spanReadersClass = NamespaceHelper.GetSpanReadersClass(elementType);
+                var spanReadersClass = GetSpanReadersClass(elementType);
                 _sb.AppendIndentedLine($"var {fieldPrefix}ItemLength = reader.ReadVarUInt32();");
                 _sb.AppendIndentedLine($"var {fieldPrefix}ItemSpan = reader.GetSlice((int){fieldPrefix}ItemLength);");
                 _sb.AppendIndentedLine($"var {fieldPrefix}ScopedReader = new SpanReader({fieldPrefix}ItemSpan);");

@@ -197,9 +197,16 @@ namespace GProtobuf.Core
         }
 
 
-        // Write non null string value, for shorter strings we use stackalloc for performance
+        // Write string value (null is written as empty string)
         public void WriteString(string value)
         {
+            // Handle null as empty string in protobuf
+            if (value == null)
+            {
+                WriteVarUInt32(0);
+                return;
+            }
+
             if (value.Length < 256)
             {
                 Span<byte> tempBuffer = stackalloc byte[value.Length * 4];

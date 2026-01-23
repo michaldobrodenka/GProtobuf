@@ -20,6 +20,33 @@ namespace GProtobuf.Generator.V2.Helpers
         }
 
         /// <summary>
+        /// Extracts the namespace from a full type name.
+        /// Handles generic types by finding the last dot outside of angle brackets.
+        /// </summary>
+        public static string GetNamespace(string fullTypeName)
+        {
+            if (string.IsNullOrEmpty(fullTypeName))
+                return string.Empty;
+
+            // Find the last dot that's not inside angle brackets or parentheses
+            int depth = 0;
+            int lastValidDot = -1;
+            for (int i = fullTypeName.Length - 1; i >= 0; i--)
+            {
+                char c = fullTypeName[i];
+                if (c == '>' || c == ')') depth++;
+                else if (c == '<' || c == '(') depth--;
+                else if (c == '.' && depth == 0)
+                {
+                    lastValidDot = i;
+                    break;
+                }
+            }
+
+            return lastValidDot >= 0 ? fullTypeName.Substring(0, lastValidDot) : string.Empty;
+        }
+
+        /// <summary>
         /// Gets a valid C# method name from a full type name.
         /// Handles nullable types, value tuples, arrays, and generic types.
         /// </summary>

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using GProtobuf.Generator.V2.CodeGeneration.Core;
 using GProtobuf.Generator.V2.Handlers;
 using GProtobuf.Generator.V2.Handlers.Core;
@@ -20,6 +21,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         private readonly TupleHandler _tupleHandler;
         private readonly VirtualMapTypeRegistry _virtualMapRegistry;
         private readonly VirtualTupleTypeRegistry _virtualTupleRegistry;
+        private string _currentNamespace;
 
         public SizeCalculatorGenerator(StringBuilderWithIndent sb, TypeRegistry registry)
             : this(sb, registry, null, null)
@@ -45,8 +47,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// <summary>
         /// Generates complete SizeCalculators class for all types.
         /// </summary>
-        public void GenerateAll(IEnumerable<TypeDefinition> types)
+        public void GenerateAll(IEnumerable<TypeDefinition> types, string currentNamespace = null)
         {
+            // Store current namespace for cross-namespace method calls
+            _currentNamespace = currentNamespace ?? string.Empty;
+
             _sb.AppendIndentedLine("public static class SizeCalculators");
             _sb.StartNewBlock();
 
@@ -54,6 +59,37 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 GenerateCalculateSizeMethod(type);
                 GenerateCalculateContentSizeMethod(type);
+            }
+
+            // Generate ContentSize methods for ProtoInclude derived types
+            // that are not in the main types list (types without [ProtoContract])
+            var processedTypes = new HashSet<string>(types.Select(t => t.FullName));
+            var protoIncludeTypes = new HashSet<string>();
+
+            // Collect all ProtoInclude types from all registered types
+            foreach (var registeredType in _registry.GetAllTypes())
+            {
+                if (registeredType.ProtoIncludes != null)
+                {
+                    foreach (var include in registeredType.ProtoIncludes)
+                    {
+                        if (!processedTypes.Contains(include.Type))
+                        {
+                            protoIncludeTypes.Add(include.Type);
+                        }
+                    }
+                }
+            }
+
+            // Generate ContentSize methods for ProtoInclude types
+            foreach (var protoIncludeTypeName in protoIncludeTypes)
+            {
+                var protoIncludeType = _registry.GetByFullName(protoIncludeTypeName);
+                if (protoIncludeType != null)
+                {
+                    GenerateCalculateContentSizeMethod(protoIncludeType);
+                    processedTypes.Add(protoIncludeTypeName);
+                }
             }
 
             // Generate virtual map entry size calculators
@@ -77,7 +113,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendNewLine();
             _sb.AppendIndentedLine("// Virtual Map Entry Size Calculators");
 
-            var generator = new VirtualMapEntryGenerator(_sb, _virtualMapRegistry);
+            var generator = new VirtualMapEntryGenerator(_sb, _virtualMapRegistry, _registry);
             foreach (var virtualType in virtualTypes)
             {
                 generator.GenerateSizeCalculator(virtualType);
@@ -457,7 +493,18 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             // Calculate content size first
             _sb.AppendIndentedLine("var lengthBefore = calculator.Length;");
-            _sb.AppendIndentedLine($"Calculate{typeName}ContentSize(ref calculator, {sourceVar});");
+
+            // Check if type is from different namespace and qualify the call
+            var typeNamespace = TypeNameHelper.GetNamespace(member.Type);
+            if (!string.IsNullOrEmpty(typeNamespace) && typeNamespace != _currentNamespace)
+            {
+                _sb.AppendIndentedLine($"global::{typeNamespace}.Serialization.SizeCalculators.Calculate{typeName}ContentSize(ref calculator, {sourceVar});");
+            }
+            else
+            {
+                _sb.AppendIndentedLine($"Calculate{typeName}ContentSize(ref calculator, {sourceVar});");
+            }
+
             _sb.AppendIndentedLine("var contentLength = calculator.Length - lengthBefore;");
             _sb.AppendIndentedLine("calculator.WriteVarUInt32((uint)contentLength);");
 

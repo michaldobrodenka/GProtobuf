@@ -13,7 +13,9 @@ internal sealed class StringBuilderWithIndent
         IndentLevel = 0;
     }
 
-    private int IndentLevel { get; set; }
+    public int IndentLevel { get; set; }
+
+    public int Length => sb.Length;
 
     public StringBuilderWithIndent IncreaseIndent()
     {
@@ -101,6 +103,11 @@ internal sealed class StringBuilderWithIndent
     {
         this.sb.Clear();
         IndentLevel = 0;
+    }
+
+    public void Insert(int index, string value)
+    {
+        this.sb.Insert(index, value);
     }
 
     public override string ToString()

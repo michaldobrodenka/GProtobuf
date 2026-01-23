@@ -24,6 +24,7 @@ namespace GProtobuf.Core
             this.writer = writer;
             currentSpan = writer.GetSpan(MinBufferSize);
             currentPosition = 0;
+            lastAdvancePosition = 0;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -31,12 +32,14 @@ namespace GProtobuf.Core
         {
             if (currentPosition + bytesNeeded > currentSpan.Length)
             {
-                this.writer.Advance(currentPosition- this.lastAdvancePosition);
-                //if (bytesNeeded > currentSpan.Length)
-                //{
-                currentSpan = writer.GetSpan(this.currentPosition + (bytesNeeded < MinBufferSize ? MinBufferSize : bytesNeeded));
-                //}
+                // Commit current buffer
+                this.writer.Advance(currentPosition - this.lastAdvancePosition);
 
+                // Get new buffer
+                int requestSize = bytesNeeded < MinBufferSize ? MinBufferSize : bytesNeeded;
+                currentSpan = writer.GetSpan(requestSize);
+
+                // Reset positions
                 this.lastAdvancePosition = 0;
                 this.currentPosition = 0;
             }
@@ -157,6 +160,13 @@ namespace GProtobuf.Core
 
         public void WriteString(string value)
         {
+            // Handle null as empty string in protobuf
+            if (value == null)
+            {
+                WriteVarUInt32(0);
+                return;
+            }
+
             if (value.Length < 256)
             {
                 Span<byte> tempBuffer = stackalloc byte[value.Length * 4];
