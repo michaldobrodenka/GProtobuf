@@ -291,6 +291,29 @@ namespace GProtobuf.Generator.V2.Handlers.Core
         }
 
         /// <summary>
+        /// Checks if the type is a custom List type (not standard List).
+        /// Examples: CustomList&lt;T&gt;, MyList&lt;T&gt;, but not List&lt;T&gt; or System.Collections.Generic.List&lt;T&gt;
+        /// </summary>
+        public static bool IsCustomListType(string listType)
+        {
+            return !listType.StartsWith("System.Collections.Generic.List<") &&
+                   !listType.StartsWith("List<") &&
+                   listType.Contains("List<");
+        }
+
+        /// <summary>
+        /// Checks if the type is a custom HashSet type (not standard HashSet).
+        /// Examples: CustomHashSet&lt;T&gt;, ValueLogTypeHashSet, but not HashSet&lt;T&gt; or System.Collections.Generic.HashSet&lt;T&gt;
+        /// </summary>
+        public static bool IsCustomHashSetType(string hashSetType)
+        {
+            // ValueLogTypeHashSet doesn't have generic parameter, so check Contains("HashSet") instead of Contains("HashSet<")
+            return !hashSetType.StartsWith("System.Collections.Generic.HashSet<") &&
+                   !hashSetType.StartsWith("HashSet<") &&
+                   hashSetType.Contains("HashSet");
+        }
+
+        /// <summary>
         /// Checks if the type is a KeyValuePair collection (List or ICollection of KeyValuePair).
         /// </summary>
         public static bool IsKeyValuePairCollection(string mapType)

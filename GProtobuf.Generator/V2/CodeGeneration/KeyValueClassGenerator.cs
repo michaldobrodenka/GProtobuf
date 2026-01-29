@@ -1,3 +1,4 @@
+using GProtobuf.Generator.V2.Handlers.Core;
 using GProtobuf.Generator.V2.Handlers.VirtualTypes;
 using System.Collections.Generic;
 using System.Linq;
@@ -151,22 +152,49 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// <summary>
         /// Determines the property type.
         /// APPROACH A: Nested dictionaries remain as Dictionary&lt;K,V&gt;, NOT converted to List&lt;KeyValue&gt;.
+        /// UPDATED: Preserves custom dictionary types (ListDictionary, ConcurrentDictionary, etc.)
         ///
         /// RATIONALE:
         /// - Native Dictionary provides O(1) lookups after deserialization
         /// - No conversion overhead from List → Dictionary
         /// - Simpler API for users (direct access)
         /// - Matches protobuf spec semantics
+        /// - Custom dictionaries maintain their specific behavior (e.g., ListDictionary's linear search)
         /// </summary>
         private string GetPropertyType(string originalType, TypeAnalysisInfo typeInfo)
         {
-            // For dictionaries, keep the original Dictionary<K,V> type
-            // Virtual map readers return (bool, K, Dictionary<K2,V2>) directly
+            // For dictionaries, check if it's a custom type or standard Dictionary
+            // Virtual map readers return (bool, K, Dictionary<K2,V2>) or (bool, K, CustomDict<K2,V2>) directly
             if (typeInfo.IsDictionary)
             {
+                // Check if it's a custom dictionary type (ListDictionary, ConcurrentDictionary, etc.)
+                if (TypeHelper.IsCustomDictionaryType(typeInfo.FullTypeName))
+                {
+                    // Use the original custom dictionary type
+                    return EnsureGlobalPrefix(typeInfo.FullTypeName);
+                }
+
+                // Standard Dictionary<K,V> or IDictionary<K,V>
                 var keyType = EnsureGlobalPrefix(typeInfo.DictionaryKeyType);
                 var valueType = EnsureGlobalPrefix(typeInfo.DictionaryValueType);
                 return $"global::System.Collections.Generic.Dictionary<{keyType}, {valueType}>";
+            }
+
+            // For List and HashSet, check if they are custom types
+            if (typeInfo.IsList)
+            {
+                if (TypeHelper.IsCustomListType(typeInfo.FullTypeName))
+                {
+                    return EnsureGlobalPrefix(typeInfo.FullTypeName);
+                }
+            }
+
+            if (typeInfo.IsHashSet)
+            {
+                if (TypeHelper.IsCustomHashSetType(typeInfo.FullTypeName))
+                {
+                    return EnsureGlobalPrefix(typeInfo.FullTypeName);
+                }
             }
 
             // For all other types, use as-is with global:: prefix

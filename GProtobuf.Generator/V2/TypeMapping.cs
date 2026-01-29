@@ -28,6 +28,20 @@ namespace GProtobuf.Generator.V2
         }
 
         /// <summary>
+        /// Checks if type is unsupported for protobuf serialization.
+        /// These types cannot be serialized/deserialized by the generator.
+        /// Properties of these types will be skipped with a warning comment.
+        /// </summary>
+        public static bool IsUnsupportedType(string typeName)
+        {
+            return NormalizeTypeName(typeName) switch
+            {
+                "System.Type" => true, // Reflection metadata type - cannot serialize
+                _ => false
+            };
+        }
+
+        /// <summary>
         /// Checks if type can be used in packed arrays (excludes string, byte).
         /// </summary>
         public static bool IsPrimitiveArrayType(string elementTypeName)

@@ -17,17 +17,24 @@ namespace GProtobuf.Generator.V2.Handlers
         private readonly StringBuilderWithIndent _sb;
         private readonly VirtualMapTypeRegistry _registry;
         private readonly string _writerClassName;
+        private readonly TypeRegistry _typeRegistry;
 
         public MapHandler(StringBuilderWithIndent sb, VirtualMapTypeRegistry registry)
-            : this(sb, registry, "StreamWriters")
+            : this(sb, registry, "StreamWriters", null)
         {
         }
 
         public MapHandler(StringBuilderWithIndent sb, VirtualMapTypeRegistry registry, string writerClassName)
+            : this(sb, registry, writerClassName, null)
+        {
+        }
+
+        public MapHandler(StringBuilderWithIndent sb, VirtualMapTypeRegistry registry, string writerClassName, TypeRegistry typeRegistry)
         {
             _sb = sb;
             _registry = registry;
             _writerClassName = writerClassName ?? "StreamWriters";
+            _typeRegistry = typeRegistry;
         }
 
         /// <summary>
@@ -37,6 +44,31 @@ namespace GProtobuf.Generator.V2.Handlers
         public static bool RequiresVirtualType(string keyType, string valueType)
         {
             // Always use KeyValue classes for all dictionaries
+            return true;
+        }
+
+        /// <summary>
+        /// Checks if a dictionary value type needs null checking.
+        /// Returns true if null check should be generated, false otherwise.
+        /// </summary>
+        private bool NeedsNullCheck(string valueType)
+        {
+            // Primitives and arrays never need null check
+            if (TypeHelper.IsPrimitiveType(valueType) || valueType.EndsWith("[]"))
+                return false;
+
+            // If we have TypeRegistry, check if it's a non-nullable struct
+            if (_typeRegistry != null)
+            {
+                var typeDef = _typeRegistry.GetByFullName(valueType);
+                if (typeDef != null && typeDef.IsStruct)
+                {
+                    // Non-nullable struct doesn't need null check
+                    return false;
+                }
+            }
+
+            // Reference types or nullable types need null check
             return true;
         }
 
@@ -473,8 +505,8 @@ namespace GProtobuf.Generator.V2.Handlers
             _sb.AppendIndentedLine($"foreach (var kvp in {sourceVar})");
             _sb.StartNewBlock();
 
-            // Skip null values for reference types
-            if (!TypeHelper.IsPrimitiveType(member.MapValueType) && !member.MapValueType.EndsWith("[]"))
+            // Skip null values for reference types (but not for non-nullable structs)
+            if (NeedsNullCheck(member.MapValueType))
             {
                 _sb.AppendIndentedLine("if (kvp.Value == null) continue;");
             }
@@ -519,8 +551,8 @@ namespace GProtobuf.Generator.V2.Handlers
             _sb.AppendIndentedLine($"foreach (var kvp in {sourceVar})");
             _sb.StartNewBlock();
 
-            // Skip null values for reference types
-            if (!TypeHelper.IsPrimitiveType(valueType) && !valueType.EndsWith("[]"))
+            // Skip null values for reference types (but not for non-nullable structs)
+            if (NeedsNullCheck(valueType))
             {
                 _sb.AppendIndentedLine("if (kvp.Value == null) continue;");
             }
@@ -742,8 +774,8 @@ namespace GProtobuf.Generator.V2.Handlers
             _sb.AppendIndentedLine($"foreach (var kvp in {sourceVar})");
             _sb.StartNewBlock();
 
-            // Skip null values for reference types
-            if (!TypeHelper.IsPrimitiveType(member.MapValueType) && !member.MapValueType.EndsWith("[]"))
+            // Skip null values for reference types (but not for non-nullable structs)
+            if (NeedsNullCheck(member.MapValueType))
             {
                 _sb.AppendIndentedLine("if (kvp.Value == null) continue;");
             }
@@ -778,8 +810,8 @@ namespace GProtobuf.Generator.V2.Handlers
             _sb.AppendIndentedLine($"foreach (var kvp in {sourceVar})");
             _sb.StartNewBlock();
 
-            // Skip null values for reference types
-            if (!TypeHelper.IsPrimitiveType(valueType) && !valueType.EndsWith("[]"))
+            // Skip null values for reference types (but not for non-nullable structs)
+            if (NeedsNullCheck(valueType))
             {
                 _sb.AppendIndentedLine("if (kvp.Value == null) continue;");
             }

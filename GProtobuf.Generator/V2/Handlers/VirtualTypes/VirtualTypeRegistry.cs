@@ -13,11 +13,13 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         private readonly List<VirtualMapEntryInfo> _orderedTypes = new();
         private readonly VirtualTupleTypeRegistry _tupleRegistry;
         private readonly TypeRegistry _typeRegistry;
+        private readonly Microsoft.CodeAnalysis.Compilation _compilation;
 
-        public VirtualMapTypeRegistry(VirtualTupleTypeRegistry tupleRegistry = null, TypeRegistry typeRegistry = null)
+        public VirtualMapTypeRegistry(VirtualTupleTypeRegistry tupleRegistry = null, TypeRegistry typeRegistry = null, Microsoft.CodeAnalysis.Compilation compilation = null)
         {
             _tupleRegistry = tupleRegistry;
             _typeRegistry = typeRegistry;
+            _compilation = compilation;
         }
 
         /// <summary>
@@ -195,6 +197,17 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                     info.CollectionElementType = TypeMapping.NormalizeGenericTypeName(elementType);
                     info.CollectionElementTypeInfo = AnalyzeType(info.CollectionElementType);
                 }
+                else
+                {
+                    // Custom List type without generic parameter in name
+                    // Try to extract element type from ICollection<T> interface using TypeSymbol
+                    var extractedElementType = ExtractCollectionElementTypeFromInterfaces(typeName);
+                    if (extractedElementType != null)
+                    {
+                        info.CollectionElementType = TypeMapping.NormalizeGenericTypeName(extractedElementType);
+                        info.CollectionElementTypeInfo = AnalyzeType(info.CollectionElementType);
+                    }
+                }
                 return info;
             }
 
@@ -209,6 +222,17 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                     // Normalize element type recursively
                     info.CollectionElementType = TypeMapping.NormalizeGenericTypeName(elementType);
                     info.CollectionElementTypeInfo = AnalyzeType(info.CollectionElementType);
+                }
+                else
+                {
+                    // Custom HashSet type (e.g., ValueLogTypeHashSet) without generic parameter in name
+                    // Try to extract element type from ICollection<T> interface using TypeSymbol
+                    var extractedElementType = ExtractCollectionElementTypeFromInterfaces(typeName);
+                    if (extractedElementType != null)
+                    {
+                        info.CollectionElementType = TypeMapping.NormalizeGenericTypeName(extractedElementType);
+                        info.CollectionElementTypeInfo = AnalyzeType(info.CollectionElementType);
+                    }
                 }
                 return info;
             }
@@ -300,6 +324,64 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 return typeName;
 
             return typeName.Substring(0, genericIndex);
+        }
+
+        /// <summary>
+        /// Extracts the element type from ICollection&lt;T&gt; or IEnumerable&lt;T&gt; interface implementation.
+        /// Used for custom collection types like ValueLogTypeHashSet that don't have generic parameters in their name.
+        /// </summary>
+        /// <param name="typeName">Full type name to analyze</param>
+        /// <returns>Element type T from ICollection&lt;T&gt;, or null if not found</returns>
+        private string ExtractCollectionElementTypeFromInterfaces(string typeName)
+        {
+            if (string.IsNullOrEmpty(typeName))
+                return null;
+
+            Microsoft.CodeAnalysis.INamedTypeSymbol typeSymbol = null;
+
+            // Try to get TypeSymbol from TypeRegistry first (for types with ProtoContract)
+            if (_typeRegistry != null)
+            {
+                var typeDefinition = _typeRegistry.GetByFullName(typeName);
+                if (typeDefinition?.TypeSymbol != null)
+                {
+                    typeSymbol = typeDefinition.TypeSymbol;
+                }
+            }
+
+            // If not found in TypeRegistry, try to get it from Compilation (for all types)
+            if (typeSymbol == null && _compilation != null)
+            {
+                typeSymbol = _compilation.GetTypeByMetadataName(typeName);
+            }
+
+            // No TypeSymbol available - cannot extract element type
+            if (typeSymbol == null)
+                return null;
+
+            // Search for ICollection<T> or IEnumerable<T> in implemented interfaces
+            foreach (var interfaceType in typeSymbol.AllInterfaces)
+            {
+                var interfaceFullName = interfaceType.ToDisplayString();
+
+                // Check for ICollection<T>
+                if (interfaceFullName.StartsWith("System.Collections.Generic.ICollection<"))
+                {
+                    var elementType = ParseSingleGenericArg(interfaceFullName);
+                    if (elementType != null)
+                        return elementType;
+                }
+
+                // Fallback to IEnumerable<T> if ICollection<T> not found
+                if (interfaceFullName.StartsWith("System.Collections.Generic.IEnumerable<"))
+                {
+                    var elementType = ParseSingleGenericArg(interfaceFullName);
+                    if (elementType != null)
+                        return elementType;
+                }
+            }
+
+            return null;
         }
 
         #endregion

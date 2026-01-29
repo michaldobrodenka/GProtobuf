@@ -13,6 +13,7 @@ namespace GProtobuf.Generator.V2
         private readonly Dictionary<string, string> _parentOf = new Dictionary<string, string>();
         private readonly Dictionary<string, HashSet<string>> _childrenOf = new Dictionary<string, HashSet<string>>();
         private readonly HashSet<string> _enumTypes = new HashSet<string>();
+        private readonly Dictionary<string, string> _typeNamespaceCache = new Dictionary<string, string>();
 
         private static readonly string[] EmptyStringArray = Array.Empty<string>();
         private static readonly TypeDefinition[] EmptyTypeArray = Array.Empty<TypeDefinition>();
@@ -22,6 +23,7 @@ namespace GProtobuf.Generator.V2
         public void Register(string @namespace, TypeDefinition type)
         {
             _byFullName[type.FullName] = type;
+            _typeNamespaceCache[type.FullName] = @namespace;
 
             if (!_byNamespace.TryGetValue(@namespace, out var list))
             {
@@ -78,6 +80,44 @@ namespace GProtobuf.Generator.V2
         }
 
         public IReadOnlyCollection<string> GetAllEnums() => _enumTypes;
+
+        /// <summary>
+        /// Gets the namespace where a type was registered.
+        /// For nested types (e.g., Parent.Nested), returns the namespace of the parent type.
+        /// </summary>
+        public string GetNamespaceForType(string fullTypeName)
+        {
+            if (string.IsNullOrEmpty(fullTypeName))
+                return string.Empty;
+
+            // Try direct lookup first (fast path for registered types)
+            if (_typeNamespaceCache.TryGetValue(fullTypeName, out var cachedNs))
+                return cachedNs;
+
+            // For nested types, strip parts until we find a registered type
+            // Example: A.B.C.Parent.NestedType -> try A.B.C.Parent, then A.B.C, etc.
+            string candidate = fullTypeName;
+            while (true)
+            {
+                int lastDot = candidate.LastIndexOf('.');
+                if (lastDot < 0)
+                    break;
+
+                candidate = candidate.Substring(0, lastDot);
+
+                if (_typeNamespaceCache.TryGetValue(candidate, out var ns))
+                {
+                    // Cache result for future lookups
+                    _typeNamespaceCache[fullTypeName] = ns;
+                    return ns;
+                }
+            }
+
+            // Fallback: use TypeNameHelper (for types not in registry)
+            var fallbackNs = Helpers.TypeNameHelper.GetNamespace(fullTypeName);
+            _typeNamespaceCache[fullTypeName] = fallbackNs;
+            return fallbackNs;
+        }
 
         #endregion
 

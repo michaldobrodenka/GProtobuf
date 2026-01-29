@@ -333,19 +333,17 @@ namespace GProtobuf.Generator.V2.Handlers
             if (string.IsNullOrEmpty(fullTypeName))
                 return null;
 
-            // Check if it's a registered type in registry
+            // Use TypeRegistry for accurate namespace resolution (handles nested types correctly)
             if (_registry != null)
             {
-                var type = _registry.GetByFullName(fullTypeName);
-                if (type != null)
+                var ns = _registry.GetNamespaceForType(fullTypeName);
+                if (!string.IsNullOrEmpty(ns))
                 {
-                    // Extract namespace from FullName
-                    var lastDot = fullTypeName.LastIndexOf('.');
-                    return lastDot > 0 ? fullTypeName.Substring(0, lastDot) : null;
+                    return ns;
                 }
             }
 
-            // Fallback: check if typename contains dot
+            // Fallback: check if typename contains dot (may be incorrect for nested types)
             var dotIndex = fullTypeName.LastIndexOf('.');
             return dotIndex > 0 ? fullTypeName.Substring(0, dotIndex) : null;
         }

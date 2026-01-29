@@ -353,6 +353,15 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine($"public static void Calculate{className}ContentSize(ref global::GProtobuf.Core.WriteSizeCalculator calculator, global::{type.FullName} obj)");
             _sb.StartNewBlock();
 
+            // For enum types, calculate VarInt32 size
+            if (type.IsEnum)
+            {
+                _sb.AppendIndentedLine("calculator.WriteVarInt32((int)obj);");
+                _sb.EndBlock();
+                _sb.AppendNewLine();
+                return;
+            }
+
             if (type.ProtoMembers != null)
             {
                 foreach (var member in type.ProtoMembers)
@@ -403,6 +412,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     member.FieldId,
                     member.IsNullable);
             }
+            else if (TypeMapping.IsUnsupportedType(member.Type))
+            {
+                // Unsupported type (e.g., System.Type) - skip with warning comment
+                _sb.AppendIndentedLine($"// ⚠️ WARNING: Field '{member.Name}' with type '{member.Type}' is unsupported and will be skipped");
+                _sb.AppendIndentedLine($"// Unsupported types: System.Type (reflection metadata cannot be serialized)");
+            }
             else
             {
                 // Complex type - nested message
@@ -432,7 +447,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateMapFieldSize(ProtoMemberAttribute member, string sourceVar)
         {
-            var mapHandler = new MapHandler(_sb, _virtualMapRegistry);
+            var mapHandler = new MapHandler(_sb, _virtualMapRegistry, "SizeCalculators", _registry);
             mapHandler.GenerateSize(member, sourceVar);
         }
 
@@ -486,29 +501,86 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         {
             var typeName = TypeNameHelper.GetClassName(member.Type);
 
-            _sb.AppendIndentedLine($"if ({sourceVar} != null)");
-            _sb.StartNewBlock();
+            // Check if type is a non-nullable value type (struct)
+            var typeDef = _registry.GetByFullName(member.Type);
+            bool isNonNullableStruct = typeDef != null && typeDef.IsStruct && !member.IsNullable;
+
+            // Only generate null check for reference types or nullable value types
+            if (!isNonNullableStruct)
+            {
+                _sb.AppendIndentedLine($"if ({sourceVar} != null)");
+                _sb.StartNewBlock();
+            }
 
             TagCodeHelper.AddTagSize(_sb, member.FieldId, WireType.Len);
 
             // Calculate content size first
-            _sb.AppendIndentedLine("var lengthBefore = calculator.Length;");
+            // Use unique variable names to avoid conflicts when multiple fields in same scope
+            var lengthVar = isNonNullableStruct ? $"lengthBefore_{member.FieldId}" : "lengthBefore";
+            var contentLengthVar = isNonNullableStruct ? $"contentLength_{member.FieldId}" : "contentLength";
+
+            _sb.AppendIndentedLine($"var {lengthVar} = calculator.Length;");
 
             // Check if type is from different namespace and qualify the call
-            var typeNamespace = TypeNameHelper.GetNamespace(member.Type);
+            var typeNamespace = _registry.GetNamespaceForType(member.Type);
+            // DEBUG nested type namespace resolution
+            if (member.Type.Contains("CustomButtonPressActionType"))
+            {
+                _sb.AppendIndentedLine($"// DEBUG: Type={member.Type}, ResolvedNamespace={typeNamespace}, CurrentNs={_currentNamespace}");
+            }
+
+            // For nullable enums or structs, use .Value to get the underlying value
+            string valueArg = GetNullableValueAccess(sourceVar, member, typeDef);
+
             if (!string.IsNullOrEmpty(typeNamespace) && typeNamespace != _currentNamespace)
             {
-                _sb.AppendIndentedLine($"global::{typeNamespace}.Serialization.SizeCalculators.Calculate{typeName}ContentSize(ref calculator, {sourceVar});");
+                _sb.AppendIndentedLine($"global::{typeNamespace}.Serialization.SizeCalculators.Calculate{typeName}ContentSize(ref calculator, {valueArg});");
             }
             else
             {
-                _sb.AppendIndentedLine($"Calculate{typeName}ContentSize(ref calculator, {sourceVar});");
+                _sb.AppendIndentedLine($"Calculate{typeName}ContentSize(ref calculator, {valueArg});");
             }
 
-            _sb.AppendIndentedLine("var contentLength = calculator.Length - lengthBefore;");
-            _sb.AppendIndentedLine("calculator.WriteVarUInt32((uint)contentLength);");
+            _sb.AppendIndentedLine($"var {contentLengthVar} = calculator.Length - {lengthVar};");
+            _sb.AppendIndentedLine($"calculator.WriteVarUInt32((uint){contentLengthVar});");
 
-            _sb.EndBlock();
+            if (!isNonNullableStruct)
+            {
+                _sb.EndBlock();
+            }
+        }
+
+        /// <summary>
+        /// Gets the correct value access for nullable types.
+        /// For nullable enums or structs, returns sourceVar.Value, otherwise returns sourceVar as-is.
+        /// </summary>
+        private string GetNullableValueAccess(string sourceVar, ProtoMemberAttribute member, TypeDefinition typeDef)
+        {
+            // If member.IsNullable = true in context of GenerateComplexTypeSize,
+            // it means it's a nullable value type (struct or enum), not a reference type.
+            // Reference types don't have nullable modifier in protobuf context.
+            if (member.IsNullable)
+            {
+                // Check if we can confirm it's a value type
+                bool isEnum = _registry != null && _registry.IsEnum(member.Type);
+                bool isStruct = typeDef != null && typeDef.IsStruct;
+
+                // If we know it's enum or struct, use .Value
+                if (isEnum || isStruct)
+                {
+                    return $"{sourceVar}.Value";
+                }
+
+                // Fallback: if typeDef is null but member.IsNullable = true in complex type context,
+                // assume it's a nullable struct and use .Value
+                // This handles cases where typeDef is null for registered structs like DataType
+                if (typeDef == null && !isEnum)
+                {
+                    return $"{sourceVar}.Value";
+                }
+            }
+
+            return sourceVar;
         }
 
         #endregion

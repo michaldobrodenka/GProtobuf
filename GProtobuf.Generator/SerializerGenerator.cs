@@ -52,7 +52,7 @@ public sealed class SerializerGenerator : IIncrementalGenerator
 
         var pipeline = context.SyntaxProvider.ForAttributeWithMetadataName(
             fullyQualifiedMetadataName: "ProtoBuf.ProtoContractAttribute",
-            predicate: static (node, _) => node is ClassDeclarationSyntax or StructDeclarationSyntax,
+            predicate: static (node, _) => node is ClassDeclarationSyntax or StructDeclarationSyntax or EnumDeclarationSyntax,
             transform: static (syntaxContext, _) =>
             {
                 var typeWithAttribute = (syntaxContext.TargetSymbol as INamedTypeSymbol)!;
@@ -64,21 +64,24 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                 var typeDefinition = new TypeDefinition(
                     IsStruct: typeWithAttribute.TypeKind == Microsoft.CodeAnalysis.TypeKind.Struct,
                     IsAbstract: typeWithAttribute.IsAbstract,
+                    IsEnum: typeWithAttribute.TypeKind == Microsoft.CodeAnalysis.TypeKind.Enum,
                     typeWithAttribute.ToDisplayString(),
                     protoIncludes,
                     protoMembers,
-                    hasParameterlessConstructor);
+                    hasParameterlessConstructor,
+                    TypeSymbol: typeWithAttribute);
 
                 return (namespaceName, typeDefinition);
             });
         
         context.RegisterSourceOutput(
-            pipeline.Collect().Combine(configOptions).Combine(enumTypesProvider),
+            pipeline.Collect().Combine(configOptions).Combine(enumTypesProvider).Combine(context.CompilationProvider),
             static (context, provider) =>
             {
-                var typeDefinitions = provider.Left.Left;
-                var shouldUsedRefactored = provider.Left.Right;
-                var enumTypes = provider.Right;
+                var typeDefinitions = provider.Left.Left.Left;
+                var shouldUsedRefactored = provider.Left.Left.Right;
+                var enumTypes = provider.Left.Right;
+                var compilation = provider.Right;
 
                 //if (shouldUsedRefactored)
                 //{
@@ -111,7 +114,7 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                         enumTypes.Count,
                         typeDefinitions.Count()));
 
-                    var objectTree = new ObjectTreeV2(enumTypes);
+                    var objectTree = new ObjectTreeV2(enumTypes, compilation);
                     foreach (var (namespaceName, typeDefinition) in typeDefinitions)
                     {
                         objectTree.AddType(namespaceName, typeDefinition);
@@ -220,8 +223,8 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                         CollectionElementType = collectionInfo.ElementType != null ? TypeMapping.NormalizeTypeName(collectionInfo.ElementType) : null,
                         CollectionKind = collectionInfo.Kind,
                         IsMap = isMap,
-                        MapKeyType = keyType != null ? TypeMapping.NormalizeTypeName(keyType) : null,
-                        MapValueType = valueType != null ? TypeMapping.NormalizeTypeName(valueType) : null,
+                        MapKeyType = keyType,
+                        MapValueType = valueType,
                         MapKeyIsEnum = keyIsEnum,
                         MapKeyEnumUnderlyingType = keyEnumType,
                         MapValueIsEnum = valueIsEnum,
@@ -254,6 +257,105 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                     // Pridáme do výsledku
                     result.Add(protoMember);
                     break; // only one is allowed
+                }
+            }
+        }
+
+        // Also collect fields with [ProtoMember] attributes (for readonly struct fields)
+        foreach (var field in typeSymbol.GetMembers().OfType<IFieldSymbol>())
+        {
+            // Skip static, const fields
+            if (field.IsStatic || field.IsConst)
+                continue;
+
+            // Process field attributes
+            foreach (var attribute in field.GetAttributes())
+            {
+                if (attribute.AttributeClass?.ToDisplayString().Contains("ProtoMemberAttribute") ?? false)
+                {
+                    // Get FieldId from constructor
+                    int fieldId = attribute.ConstructorArguments.Length > 0 && attribute.ConstructorArguments[0].Value is int id
+                        ? id
+                        : 0;
+
+                    var fieldType = field.Type.ToDisplayString();
+                    var fieldName = field.Name;
+                    var nmspace = typeSymbol.ContainingNamespace?.ToDisplayString() ?? string.Empty;
+
+                    // Detect if this is a nullable value type (Nullable<T>)
+                    bool isNullable = field.Type.OriginalDefinition?.SpecialType == SpecialType.System_Nullable_T;
+
+                    // Analyze collection information
+                    var collectionInfo = AnalyzeCollectionType(field.Type);
+
+                    // Analyze map/dictionary information
+                    var (isMap, keyType, valueType, keyIsEnum, keyEnumType, valueIsEnum, valueEnumType) = AnalyzeMapType(field.Type);
+
+                    // Check if type is enum
+                    bool isEnum = false;
+                    string enumUnderlyingType = null;
+
+                    // Handle nullable enum types
+                    var checkType = field.Type;
+                    if (isNullable && field.Type is INamedTypeSymbol nullableType && nullableType.TypeArguments.Length == 1)
+                    {
+                        checkType = nullableType.TypeArguments[0];
+                    }
+
+                    if (checkType.TypeKind == TypeKind.Enum)
+                    {
+                        isEnum = true;
+                        var enumType = (INamedTypeSymbol)checkType;
+                        var rawUnderlyingType = enumType.EnumUnderlyingType?.ToDisplayString() ?? "System.Int32";
+                        enumUnderlyingType = TypeMapping.NormalizeTypeName(rawUnderlyingType);
+                    }
+
+                    // Create ProtoMemberAttribute instance
+                    var protoMember = new ProtoMemberAttribute(fieldId)
+                    {
+                        Name = fieldName,
+                        Type = fieldType,
+                        Namespace = nmspace,
+                        Interfaces = field.Type.AllInterfaces.Select(i => i.ToDisplayString()).ToList(),
+                        IsNullable = isNullable,
+                        IsCollection = collectionInfo.IsCollection,
+                        CollectionElementType = collectionInfo.ElementType != null ? TypeMapping.NormalizeTypeName(collectionInfo.ElementType) : null,
+                        CollectionKind = collectionInfo.Kind,
+                        IsMap = isMap,
+                        MapKeyType = keyType,
+                        MapValueType = valueType,
+                        MapKeyIsEnum = keyIsEnum,
+                        MapKeyEnumUnderlyingType = keyEnumType,
+                        MapValueIsEnum = valueIsEnum,
+                        MapValueEnumUnderlyingType = valueEnumType,
+                        IsEnum = isEnum,
+                        EnumUnderlyingType = enumUnderlyingType,
+                    };
+
+                    // Process optional NamedArguments
+                    foreach (var argument in attribute.NamedArguments)
+                    {
+                        switch (argument.Key)
+                        {
+                            case nameof(protoMember.IsPacked):
+                                protoMember.IsPacked = argument.Value.Value is bool isPacked && isPacked;
+                                break;
+
+                            case nameof(protoMember.IsRequired):
+                                protoMember.IsRequired = argument.Value.Value is bool isRequired && isRequired;
+                                break;
+
+                            case nameof(protoMember.DataFormat):
+                                protoMember.DataFormat = argument.Value.Value is int dataFormat
+                                    ? (DataFormat)dataFormat
+                                    : DataFormat.Default;
+                                break;
+                        }
+                    }
+
+                    // Add to result
+                    result.Add(protoMember);
+                    break; // only one ProtoMember attribute allowed
                 }
             }
         }

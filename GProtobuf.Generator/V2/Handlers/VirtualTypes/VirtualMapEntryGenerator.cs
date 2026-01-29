@@ -38,6 +38,14 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         /// </summary>
         private string GetSpanReadersClass(string fullTypeName)
         {
+            // Use NamespaceHelper with TypeRegistry for accurate namespace resolution
+            return NamespaceHelper.GetSpanReadersClass(fullTypeName, _typeRegistry);
+        }
+
+        // OLD IMPLEMENTATION (kept for reference, can be removed later)
+        /*
+        private string GetSpanReadersClass_OLD(string fullTypeName)
+        {
             // Try to get namespace from TypeRegistry first (handles nested classes correctly)
             if (_typeRegistry != null)
             {
@@ -71,6 +79,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             // Fallback to NamespaceHelper if TypeRegistry is not available or type not found
             return NamespaceHelper.GetSpanReadersClass(fullTypeName);
         }
+        */
 
         #region SpanReader Generation
 
@@ -375,8 +384,20 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 _sb.AppendIndentedLine($"var {fieldPrefix}MsgLength = reader.ReadVarUInt32();");
                 _sb.AppendIndentedLine($"var {fieldPrefix}MsgSpan = reader.GetSlice((int){fieldPrefix}MsgLength);");
                 _sb.AppendIndentedLine($"var {fieldPrefix}ScopedReader = new SpanReader({fieldPrefix}MsgSpan);");
-                _sb.AppendIndentedLine($"{targetVar} = new global::{typeName}();");
-                _sb.AppendIndentedLine($"{spanReadersClass}.Populate{sanitizedName}(ref {fieldPrefix}ScopedReader, {targetVar});");
+
+                // Handle nullable types - create temp variable for Populate
+                if (typeName.EndsWith("?"))
+                {
+                    var nonNullableType = typeName.Substring(0, typeName.Length - 1);
+                    _sb.AppendIndentedLine($"var {fieldPrefix}Temp = new global::{nonNullableType}();");
+                    _sb.AppendIndentedLine($"{spanReadersClass}.Populate{sanitizedName}(ref {fieldPrefix}ScopedReader, {fieldPrefix}Temp);");
+                    _sb.AppendIndentedLine($"{targetVar} = {fieldPrefix}Temp;");
+                }
+                else
+                {
+                    _sb.AppendIndentedLine($"{targetVar} = new global::{typeName}();");
+                    _sb.AppendIndentedLine($"{spanReadersClass}.Populate{sanitizedName}(ref {fieldPrefix}ScopedReader, {targetVar});");
+                }
                 return;
             }
         }
@@ -392,9 +413,20 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             _sb.AppendIndentedLine("var innerDictEnd = reader.Position + (int)innerDictLength;");
             _sb.AppendNewLine();
 
-            _sb.AppendIndentedLine("// OPTIMIZATION: adaptive capacity estimation");
-            _sb.AppendIndentedLine("int estimatedCapacity = EstimateMapCapacity(innerDictLength);");
-            _sb.AppendIndentedLine($"{targetVar} = new global::System.Collections.Generic.Dictionary<{keyType}, {valueType}>(estimatedCapacity);");
+            // Determine the correct dictionary type to instantiate
+            bool isCustomDict = TypeHelper.IsCustomDictionaryType(typeInfo.FullTypeName);
+            if (isCustomDict)
+            {
+                // Custom dictionary type - use parameterless constructor (custom types may not support capacity)
+                _sb.AppendIndentedLine($"{targetVar} = new global::{typeInfo.FullTypeName}();");
+            }
+            else
+            {
+                // Standard Dictionary<K,V> with adaptive capacity estimation
+                _sb.AppendIndentedLine("// OPTIMIZATION: adaptive capacity estimation");
+                _sb.AppendIndentedLine("int estimatedCapacity = EstimateMapCapacity(innerDictLength);");
+                _sb.AppendIndentedLine($"{targetVar} = new global::System.Collections.Generic.Dictionary<{keyType}, {valueType}>(estimatedCapacity);");
+            }
             _sb.AppendNewLine();
 
             _sb.AppendIndentedLine("// Read inner dictionary entries");
@@ -413,7 +445,17 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
 
             if (typeInfo.IsHashSet)
             {
-                _sb.AppendIndentedLine($"{targetVar} ??= new global::System.Collections.Generic.HashSet<{shortElementType}>();");
+                // Check if it's a custom hashset type (e.g., ValueLogTypeHashSet)
+                if (TypeHelper.IsCustomHashSetType(typeInfo.FullTypeName))
+                {
+                    // Use the original type name for custom hashsets
+                    _sb.AppendIndentedLine($"{targetVar} ??= new global::{typeInfo.FullTypeName}();");
+                }
+                else
+                {
+                    // Standard HashSet<T>
+                    _sb.AppendIndentedLine($"{targetVar} ??= new global::System.Collections.Generic.HashSet<{shortElementType}>();");
+                }
             }
             else
             {
@@ -429,7 +471,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 _sb.AppendIndentedLine($"// This is a bug in VirtualMapTypeRegistry.AnalyzeType or ParseSingleGenericArg");
                 _sb.AppendIndentedLine($"// CANNOT generate deserialization code - skipping field read");
                 _sb.AppendIndentedLine($"// TODO: Fix type analysis to properly handle non-generic collections that implement ICollection<T>");
-                _sb.AppendIndentedLine($"reader.SkipField({wireTypeVar});");
+                _sb.AppendIndentedLine($"reader.SkipField((global::GProtobuf.Core.WireType){wireTypeVar});");
                 return;
             }
 
@@ -657,7 +699,10 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 var className = TypeNameHelper.GetSafeMethodName(typeName);
 
                 _sb.AppendIndentedLine($"var tempCalc{fieldId} = new global::GProtobuf.Core.WriteSizeCalculator();");
-                _sb.AppendIndentedLine($"SizeCalculators.Calculate{className}ContentSize(ref tempCalc{fieldId}, {sourceVar});");
+
+                // Handle nullable types - append .Value for Content method calls
+                var valueAccess = GetNullableValueAccess(sourceVar, typeName);
+                _sb.AppendIndentedLine($"SizeCalculators.Calculate{className}ContentSize(ref tempCalc{fieldId}, {valueAccess});");
 
                 // Cache the length if a cache variable is provided
                 if (lengthCacheVar != null)
@@ -673,9 +718,12 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             if (typeInfo.IsCustomType)
             {
                 var sanitizedName = typeInfo.ShortTypeName;
-                var sizeCalcClass = NamespaceHelper.GetSizeCalculatorsClass(typeName);
+                var sizeCalcClass = NamespaceHelper.GetSizeCalculatorsClass(typeName, _typeRegistry);
                 _sb.AppendIndentedLine($"var tempCalc{fieldId} = new global::GProtobuf.Core.WriteSizeCalculator();");
-                _sb.AppendIndentedLine($"{sizeCalcClass}.Calculate{sanitizedName}ContentSize(ref tempCalc{fieldId}, {sourceVar});");
+
+                // Handle nullable types - append .Value for Content method calls
+                var valueAccess = GetNullableValueAccess(sourceVar, typeName);
+                _sb.AppendIndentedLine($"{sizeCalcClass}.Calculate{sanitizedName}ContentSize(ref tempCalc{fieldId}, {valueAccess});");
 
                 // Cache the length if a cache variable is provided
                 if (lengthCacheVar != null)
@@ -694,8 +742,21 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             var keyType = typeInfo.DictionaryKeyType;
             var valueType = typeInfo.DictionaryValueType;
 
+            // Determine the correct dictionary type to instantiate (custom or standard)
+            string dictType;
+            if (TypeHelper.IsCustomDictionaryType(typeInfo.FullTypeName))
+            {
+                // Custom dictionary - use parameterless constructor
+                dictType = $"global::{typeInfo.FullTypeName}";
+            }
+            else
+            {
+                // Standard Dictionary<K,V>
+                dictType = $"global::System.Collections.Generic.Dictionary<{keyType}, {valueType}>";
+            }
+
             _sb.AppendIndentedLine("// INVARIANT: treat null as empty dictionary");
-            _sb.AppendIndentedLine($"var nestedDict = {sourceVar} ?? new global::System.Collections.Generic.Dictionary<{keyType}, {valueType}>();");
+            _sb.AppendIndentedLine($"var nestedDict = {sourceVar} ?? new {dictType}();");
             _sb.AppendNewLine();
 
             _sb.AppendIndentedLine("if (nestedDict.Count == 0)");
@@ -825,7 +886,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             {
                 // Custom types - each element is a repeated field with tag
                 var (_, customTagBytes) = TypeMapping.PrecomputeTagBytes(fieldId, WireType.Len);
-                var sizeCalcClass = NamespaceHelper.GetSizeCalculatorsClass(typeInfo.CollectionElementType);
+                var sizeCalcClass = NamespaceHelper.GetSizeCalculatorsClass(typeInfo.CollectionElementType, _typeRegistry);
                 _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
                 _sb.StartNewBlock();
                 _sb.AppendIndentedLine($"{calcVar}.AddByteLength({customTagBytes}); // tag for repeated field {fieldId}");
@@ -910,21 +971,27 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 var className = TypeNameHelper.GetSafeMethodName(typeName);
                 var writersClass = _writerClassName ?? "StreamWriters";
 
+                // Handle nullable types - append .Value for Content method calls
+                var valueAccess = GetNullableValueAccess(sourceVar, typeName);
+
                 // Calculate size
                 _sb.AppendIndentedLine($"var writeCalc{fieldId} = new global::GProtobuf.Core.WriteSizeCalculator();");
-                _sb.AppendIndentedLine($"SizeCalculators.Calculate{className}ContentSize(ref writeCalc{fieldId}, {sourceVar});");
+                _sb.AppendIndentedLine($"SizeCalculators.Calculate{className}ContentSize(ref writeCalc{fieldId}, {valueAccess});");
                 _sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)writeCalc{fieldId}.Length);");
 
                 // Write content
-                _sb.AppendIndentedLine($"{writersClass}.Write{className}Content(ref writer, {sourceVar});");
+                _sb.AppendIndentedLine($"{writersClass}.Write{className}Content(ref writer, {valueAccess});");
                 return;
             }
 
             if (typeInfo.IsCustomType)
             {
                 var sanitizedName = typeInfo.ShortTypeName;
-                var sizeCalcClass = NamespaceHelper.GetSizeCalculatorsClass(typeName);
-                var writersClass = NamespaceHelper.GetWritersClass(typeName, _writerClassName);
+                var sizeCalcClass = NamespaceHelper.GetSizeCalculatorsClass(typeName, _typeRegistry);
+                var writersClass = NamespaceHelper.GetWritersClass(typeName, _writerClassName, _typeRegistry);
+
+                // Handle nullable types - append .Value for Content method calls
+                var valueAccess = GetNullableValueAccess(sourceVar, typeName);
 
                 // Use cached length if available, otherwise recalculate
                 if (cachedLengthVar != null)
@@ -934,11 +1001,11 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 else
                 {
                     _sb.AppendIndentedLine($"var writeCalc{fieldId} = new global::GProtobuf.Core.WriteSizeCalculator();");
-                    _sb.AppendIndentedLine($"{sizeCalcClass}.Calculate{sanitizedName}ContentSize(ref writeCalc{fieldId}, {sourceVar});");
+                    _sb.AppendIndentedLine($"{sizeCalcClass}.Calculate{sanitizedName}ContentSize(ref writeCalc{fieldId}, {valueAccess});");
                     _sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)writeCalc{fieldId}.Length);");
                 }
 
-                _sb.AppendIndentedLine($"{writersClass}.Write{sanitizedName}Content(ref writer, {sourceVar});");
+                _sb.AppendIndentedLine($"{writersClass}.Write{sanitizedName}Content(ref writer, {valueAccess});");
             }
         }
 
@@ -1097,8 +1164,8 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             {
                 // Custom types - each element is a repeated field with tag
                 var (customBytesString, _) = TypeMapping.PrecomputeTagBytes(fieldId, WireType.Len);
-                var sizeCalcClass = NamespaceHelper.GetSizeCalculatorsClass(typeInfo.CollectionElementType);
-                var writersClass = NamespaceHelper.GetWritersClass(typeInfo.CollectionElementType, _writerClassName);
+                var sizeCalcClass = NamespaceHelper.GetSizeCalculatorsClass(typeInfo.CollectionElementType, _typeRegistry);
+                var writersClass = NamespaceHelper.GetWritersClass(typeInfo.CollectionElementType, _writerClassName, _typeRegistry);
                 _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
                 _sb.StartNewBlock();
                 _sb.AppendIndentedLine($"writer.WriteSingleByte({customBytesString}); // tag for repeated field {fieldId}");
@@ -1142,6 +1209,16 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
 
         #region Helpers
 
+        /// <summary>
+        /// Gets the correct value access expression for nullable types.
+        /// For nullable value types (ending with ?), returns sourceVar.Value, otherwise returns sourceVar as-is.
+        /// This is used when passing nullable parameters to Content methods that expect non-nullable types.
+        /// </summary>
+        private static string GetNullableValueAccess(string sourceVar, string typeName)
+        {
+            return typeName.EndsWith("?") ? $"{sourceVar}.Value" : sourceVar;
+        }
+
         private static string GetFullTypeName(string typeName, TypeAnalysisInfo typeInfo)
         {
             // Null/empty check - prevent generating invalid generic types like HashSet<>
@@ -1163,18 +1240,39 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
 
             if (typeInfo.IsDictionary)
             {
+                // Check if it's a custom dictionary type (ListDictionary, ConcurrentDictionary, etc.)
+                if (TypeHelper.IsCustomDictionaryType(typeInfo.FullTypeName))
+                {
+                    // Use the original type name for custom dictionaries
+                    return $"global::{typeInfo.FullTypeName}";
+                }
+                // Standard Dictionary<K,V> or IDictionary<K,V>
                 return $"global::System.Collections.Generic.Dictionary<{typeInfo.DictionaryKeyType}, {typeInfo.DictionaryValueType}>";
             }
 
             if (typeInfo.IsList)
             {
                 var elemType = GetFullTypeName(typeInfo.CollectionElementType, typeInfo.CollectionElementTypeInfo);
+                // Check if it's a custom list type
+                if (TypeHelper.IsCustomListType(typeInfo.FullTypeName))
+                {
+                    // Use the original type name for custom lists
+                    return $"global::{typeInfo.FullTypeName}";
+                }
+                // Standard List<T>
                 return $"global::System.Collections.Generic.List<{elemType}>";
             }
 
             if (typeInfo.IsHashSet)
             {
                 var elemType = GetFullTypeName(typeInfo.CollectionElementType, typeInfo.CollectionElementTypeInfo);
+                // Check if it's a custom hashset type (e.g., ValueLogTypeHashSet)
+                if (TypeHelper.IsCustomHashSetType(typeInfo.FullTypeName))
+                {
+                    // Use the original type name for custom hashsets
+                    return $"global::{typeInfo.FullTypeName}";
+                }
+                // Standard HashSet<T>
                 return $"global::System.Collections.Generic.HashSet<{elemType}>";
             }
 
@@ -1200,6 +1298,13 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
 
             if (typeInfo.IsDictionary)
             {
+                // Check if it's a custom dictionary type (ListDictionary, ConcurrentDictionary, etc.)
+                if (TypeHelper.IsCustomDictionaryType(typeInfo.FullTypeName))
+                {
+                    // Use the original type name for custom dictionaries
+                    return $"new global::{typeInfo.FullTypeName}()";
+                }
+                // Standard Dictionary<K,V>
                 return $"new global::System.Collections.Generic.Dictionary<{typeInfo.DictionaryKeyType}, {typeInfo.DictionaryValueType}>()";
             }
 
@@ -1211,6 +1316,13 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 {
                     return "default /* ERROR: cannot initialize List with unknown element type */";
                 }
+                // Check if it's a custom list type
+                if (TypeHelper.IsCustomListType(typeInfo.FullTypeName))
+                {
+                    // Use the original type name for custom lists
+                    return $"new global::{typeInfo.FullTypeName}()";
+                }
+                // Standard List<T>
                 return $"new global::System.Collections.Generic.List<{elemType}>()";
             }
 
@@ -1222,6 +1334,13 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 {
                     return "default /* ERROR: cannot initialize HashSet with unknown element type */";
                 }
+                // Check if it's a custom hashset type (e.g., ValueLogTypeHashSet)
+                if (TypeHelper.IsCustomHashSetType(typeInfo.FullTypeName))
+                {
+                    // Use the original type name for custom hashsets
+                    return $"new global::{typeInfo.FullTypeName}()";
+                }
+                // Standard HashSet<T>
                 return $"new global::System.Collections.Generic.HashSet<{elemType}>()";
             }
 

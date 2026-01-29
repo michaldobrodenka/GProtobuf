@@ -54,7 +54,77 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         public VirtualTupleTypeRegistry VirtualTupleRegistry => _virtualTupleRegistry;
 
         /// <summary>
+        /// Analyzes type and determines deserialization strategy (parameterless constructor, constructor with params, or FormatterServices).
+        /// </summary>
+        private ConstructorMatcher.ConstructorMatchResult AnalyzeConstructorStrategy(TypeDefinition type)
+        {
+            // If TypeSymbol not available, fallback to old behavior
+            if (type.TypeSymbol == null)
+            {
+                if (type.HasParameterlessConstructor)
+                {
+                    return new ConstructorMatcher.ConstructorMatchResult
+                    {
+                        UseParameterlessConstructor = true,
+                        ParameterMappings = new List<ConstructorMatcher.ParameterMapping>()
+                    };
+                }
+                else if (!type.IsStruct)
+                {
+                    return new ConstructorMatcher.ConstructorMatchResult
+                    {
+                        UseFormatterServices = true,
+                        ParameterMappings = new List<ConstructorMatcher.ParameterMapping>()
+                    };
+                }
+                else
+                {
+                    return new ConstructorMatcher.ConstructorMatchResult
+                    {
+                        ErrorMessage = $"Struct '{type.FullName}' requires TypeSymbol for constructor analysis"
+                    };
+                }
+            }
+
+            // Collect ProtoMember field information
+            var protoFields = new List<ConstructorMatcher.FieldInfo>();
+            if (type.ProtoMembers != null)
+            {
+                foreach (var protoMember in type.ProtoMembers)
+                {
+                    // Find corresponding field or property in TypeSymbol
+                    var member = type.TypeSymbol.GetMembers(protoMember.Name).FirstOrDefault();
+
+                    if (member is Microsoft.CodeAnalysis.IFieldSymbol field)
+                    {
+                        protoFields.Add(new ConstructorMatcher.FieldInfo
+                        {
+                            FieldId = protoMember.FieldId,
+                            Name = protoMember.Name,
+                            Type = field.Type,
+                            IsReadonly = field.IsReadOnly
+                        });
+                    }
+                    else if (member is Microsoft.CodeAnalysis.IPropertySymbol property)
+                    {
+                        protoFields.Add(new ConstructorMatcher.FieldInfo
+                        {
+                            FieldId = protoMember.FieldId,
+                            Name = protoMember.Name,
+                            Type = property.Type,
+                            IsReadonly = property.SetMethod == null || property.SetMethod.DeclaredAccessibility != Microsoft.CodeAnalysis.Accessibility.Public
+                        });
+                    }
+                }
+            }
+
+            // Use ConstructorMatcher to find best constructor
+            return ConstructorMatcher.FindBestConstructor(type.TypeSymbol, protoFields);
+        }
+
+        /// <summary>
         /// Generates object creation code, using FormatterServices if type has no parameterless constructor.
+        /// LEGACY: This method is kept for backward compatibility with old code paths.
         /// </summary>
         private void GenerateObjectCreation(TypeDefinition type, string variableName = "result")
         {
@@ -554,7 +624,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             if (member.IsMap)
             {
-                var mapHandler = new MapHandler(_sb, _virtualMapRegistry);
+                var mapHandler = new MapHandler(_sb, _virtualMapRegistry, "SpanReaders", _registry);
                 mapHandler.GenerateRead(member, $"result.{member.Name}", readerVar);
             }
             else if (member.IsCollection)
@@ -573,6 +643,13 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             else if (_primitiveHandler.CanHandle(member.Type))
             {
                 _primitiveHandler.GenerateRead(_sb, $"result.{member.Name}", member.Type, member.DataFormat, readerVar, wireTypeVar);
+            }
+            else if (TypeMapping.IsUnsupportedType(member.Type))
+            {
+                // Unsupported type (e.g., System.Type) - skip field with warning comment
+                _sb.AppendIndentedLine($"// ⚠️ WARNING: Field '{member.Name}' with type '{member.Type}' is unsupported and will be skipped");
+                _sb.AppendIndentedLine($"// Unsupported types: System.Type (reflection metadata cannot be deserialized)");
+                _sb.AppendIndentedLine($"{readerVar}.SkipField({wireTypeVar});");
             }
             else
             {
@@ -665,7 +742,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine($"var nestedReader = new SpanReader({readerVar}.GetSlice(length));");
 
             // Check if type is from different namespace and qualify the call
-            var typeNamespace = TypeNameHelper.GetNamespace(member.Type);
+            var typeNamespace = _registry.GetNamespaceForType(member.Type);
             if (!string.IsNullOrEmpty(typeNamespace) && typeNamespace != _currentNamespace)
             {
                 _sb.AppendIndentedLine($"result.{member.Name} = global::{typeNamespace}.Serialization.SpanReaders.Read{typeName}Content(ref nestedReader);");
@@ -691,6 +768,15 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine($"public static global::{type.FullName} Read{className}Content(ref SpanReader reader)");
             _sb.StartNewBlock();
 
+            // For enum types, generate simple VarInt read
+            if (type.IsEnum)
+            {
+                _sb.AppendIndentedLine($"return (global::{type.FullName})reader.ReadVarInt32();");
+                _sb.EndBlock();
+                _sb.AppendNewLine();
+                return;
+            }
+
             // Phase 1: Recursion depth guard (Level200 requirement)
             _sb.AppendIndentedLine("using (global::GProtobuf.Core.RecursionGuard.EnterLevel())");
             _sb.StartNewBlock();
@@ -714,7 +800,42 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateSimpleReadContent(TypeDefinition type, string className)
         {
-            // Create instance
+            // Analyze constructor strategy
+            var constructorStrategy = AnalyzeConstructorStrategy(type);
+
+            // DEBUG: Add comment showing strategy
+            if (type.IsStruct && type.TypeSymbol != null)
+            {
+                int mappingCount = constructorStrategy.ParameterMappings?.Count ?? -1;
+                _sb.AppendIndentedLine($"// DEBUG: Struct {type.FullName}");
+                _sb.AppendIndentedLine($"//   TypeSymbol={type.TypeSymbol != null}, Constructor={constructorStrategy.Constructor != null}");
+                _sb.AppendIndentedLine($"//   ParameterMappings={mappingCount}, UseParameterless={constructorStrategy.UseParameterlessConstructor}");
+                _sb.AppendIndentedLine($"//   UseFormatterServices={constructorStrategy.UseFormatterServices}");
+                _sb.AppendIndentedLine($"//   ProtoMembers count={type.ProtoMembers?.Count ?? 0}");
+            }
+
+            if (!constructorStrategy.IsSuccess)
+            {
+                // Constructor matching failed - generate error comment and skip field
+                _sb.AppendIndentedLine($"// ERROR: {constructorStrategy.ErrorMessage}");
+                _sb.AppendIndentedLine("reader.SkipField(WireType.VarInt); // Skip all fields due to constructor error");
+                _sb.AppendIndentedLine($"return default(global::{type.FullName});");
+                return;
+            }
+
+            bool useConstructor = constructorStrategy.Constructor != null &&
+                                 constructorStrategy.ParameterMappings != null &&
+                                 constructorStrategy.ParameterMappings.Count > 0;
+
+            if (useConstructor)
+            {
+                // Generate deserialization with constructor call
+                _sb.AppendIndentedLine($"// Using constructor with {constructorStrategy.ParameterMappings.Count} parameters");
+                GenerateReadContentWithConstructor(type, className, constructorStrategy);
+                return;
+            }
+
+            // Standard path: create instance first, then populate
             GenerateObjectCreation(type, "result");
             _sb.AppendNewLine();
 
@@ -798,6 +919,181 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
 
             _sb.AppendIndentedLine("return result;");
+        }
+
+        /// <summary>
+        /// Generates read content for types that use constructor with parameters (readonly struct support).
+        /// Creates local variables for constructor parameters and calls constructor at the end.
+        /// </summary>
+        private void GenerateReadContentWithConstructor(
+            TypeDefinition type,
+            string className,
+            ConstructorMatcher.ConstructorMatchResult constructorStrategy)
+        {
+            var fullTypeName = $"global::{type.FullName}";
+            var mappings = constructorStrategy.ParameterMappings!;
+
+            // Declare local variables for constructor parameters
+            _sb.AppendIndentedLine("// Local variables for constructor parameters");
+            foreach (var mapping in mappings.OrderBy(m => m.ParameterOrdinal))
+            {
+                // Use fully qualified type name
+                var paramTypeName = mapping.FieldType.ToDisplayString(Microsoft.CodeAnalysis.SymbolDisplayFormat.FullyQualifiedFormat);
+                _sb.AppendIndentedLine($"{paramTypeName} param_{mapping.ParameterName} = default;");
+            }
+            _sb.AppendNewLine();
+
+            // Read loop
+            _sb.AppendIndentedLine("while (!reader.IsEnd)");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine("reader.ReadWireTypeAndFieldId(out var wireType, out var fieldId);");
+            _sb.AppendNewLine();
+
+            // Generate switch for fields
+            if (type.ProtoMembers != null && type.ProtoMembers.Count > 0)
+            {
+                _sb.AppendIndentedLine("switch (fieldId)");
+                _sb.StartNewBlock();
+
+                foreach (var member in type.ProtoMembers)
+                {
+                    // Find mapping for this field
+                    var mapping = mappings.FirstOrDefault(m => m.FieldName == member.Name);
+
+                    if (mapping != null)
+                    {
+                        // This field corresponds to a constructor parameter
+                        GenerateFieldReadCaseForParameter(member, $"param_{mapping.ParameterName}");
+                    }
+                }
+
+                // Default - skip unknown fields
+                _sb.AppendIndentedLine("default:");
+                _sb.IncreaseIndent();
+                _sb.AppendIndentedLine("reader.SkipField(wireType);");
+                _sb.AppendIndentedLine("break;");
+                _sb.DecreaseIndent();
+
+                _sb.EndBlock();
+            }
+            else
+            {
+                // No fields - just skip
+                _sb.AppendIndentedLine("reader.SkipField(wireType);");
+            }
+
+            _sb.EndBlock();
+
+            // Call constructor with parameters
+            _sb.AppendNewLine();
+            _sb.AppendIndentedLine($"// Create instance using constructor");
+            var constructorParams = mappings
+                .OrderBy(m => m.ParameterOrdinal)
+                .Select(m => $"param_{m.ParameterName}")
+                .ToList();
+
+            if (constructorParams.Count == 0)
+            {
+                _sb.AppendIndentedLine($"{fullTypeName} result = new {fullTypeName}();");
+            }
+            else if (constructorParams.Count <= 3)
+            {
+                // Inline for short parameter lists
+                _sb.AppendIndentedLine($"{fullTypeName} result = new {fullTypeName}({string.Join(", ", constructorParams)});");
+            }
+            else
+            {
+                // Multi-line for long parameter lists
+                _sb.AppendIndentedLine($"{fullTypeName} result = new {fullTypeName}(");
+                _sb.IncreaseIndent();
+                for (int i = 0; i < constructorParams.Count; i++)
+                {
+                    var comma = i < constructorParams.Count - 1 ? "," : ");";
+                    _sb.AppendIndentedLine($"{constructorParams[i]}{comma}");
+                }
+                _sb.DecreaseIndent();
+            }
+
+            _sb.AppendNewLine();
+            _sb.AppendIndentedLine("return result;");
+        }
+
+        /// <summary>
+        /// Generates field read case that assigns to a local variable instead of object field.
+        /// Used for constructor-based deserialization.
+        /// </summary>
+        private void GenerateFieldReadCaseForParameter(ProtoMemberAttribute member, string targetVariable)
+        {
+            _sb.AppendIndentedLine($"case {member.FieldId}:");
+            _sb.IncreaseIndent();
+
+            // Generate wire type check and read logic
+            var wireType = TypeMapping.GetWireType(member.Type, member.DataFormat);
+
+            _sb.AppendIndentedLine($"if (wireType != WireType.{wireType})");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine("reader.SkipField(wireType);");
+            _sb.AppendIndentedLine("break;");
+            _sb.EndBlock();
+
+            // Generate read statement based on type
+            if (member.Type == "int" || member.Type == "System.Int32")
+            {
+                if (member.DataFormat == DataFormat.ZigZag)
+                {
+                    _sb.AppendIndentedLine($"{targetVariable} = reader.ReadZigZagInt32();");
+                }
+                else if (member.DataFormat == DataFormat.FixedSize)
+                {
+                    _sb.AppendIndentedLine($"{targetVariable} = reader.ReadFixed32AsInt();");
+                }
+                else
+                {
+                    _sb.AppendIndentedLine($"{targetVariable} = reader.ReadVarInt32();");
+                }
+            }
+            else if (member.Type == "uint" || member.Type == "System.UInt32")
+            {
+                if (member.DataFormat == DataFormat.FixedSize)
+                {
+                    _sb.AppendIndentedLine($"{targetVariable} = reader.ReadFixed32();");
+                }
+                else
+                {
+                    _sb.AppendIndentedLine($"{targetVariable} = reader.ReadVarUInt32();");
+                }
+            }
+            else if (member.Type.Contains("Enum") || IsEnumType(member.Type))
+            {
+                // Enum type
+                _sb.AppendIndentedLine($"{targetVariable} = ({member.Type})reader.ReadVarInt32();");
+            }
+            else
+            {
+                // Complex type
+                _sb.AppendIndentedLine("var length = reader.ReadVarInt32();");
+                _sb.AppendIndentedLine("var nestedReader = new SpanReader(reader.GetSlice(length));");
+
+                var simpleName = Helpers.TypeNameHelper.GetClassName(member.Type);
+
+                if (member.Namespace == _currentNamespace || string.IsNullOrEmpty(member.Namespace))
+                {
+                    _sb.AppendIndentedLine($"{targetVariable} = SpanReaders.Read{simpleName}Content(ref nestedReader);");
+                }
+                else
+                {
+                    _sb.AppendIndentedLine($"{targetVariable} = global::{member.Namespace}.Serialization.SpanReaders.Read{simpleName}Content(ref nestedReader);");
+                }
+            }
+
+            _sb.AppendIndentedLine("break;");
+            _sb.DecreaseIndent();
+        }
+
+        private bool IsEnumType(string typeName)
+        {
+            // Simple heuristic - can be improved
+            return typeName.Contains("Type") || typeName.Contains("Kind") || typeName.Contains("Status");
         }
 
         private void GenerateReadContentWithInheritance(TypeDefinition type, string className)
@@ -916,8 +1212,48 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             var className = TypeNameHelper.GetClassName(type.FullName);
 
+            // Check if this is a readonly struct with readonly fields
+            bool isReadonlyStruct = false;
+            if (type.IsStruct && type.TypeSymbol != null)
+            {
+                bool hasReadonlyFields = type.ProtoMembers?.Any(m =>
+                {
+                    var member = type.TypeSymbol.GetMembers(m.Name).FirstOrDefault();
+                    if (member is Microsoft.CodeAnalysis.IFieldSymbol field)
+                    {
+                        return field.IsReadOnly;
+                    }
+                    else if (member is Microsoft.CodeAnalysis.IPropertySymbol property)
+                    {
+                        return property.SetMethod == null || property.SetMethod.DeclaredAccessibility != Microsoft.CodeAnalysis.Accessibility.Public;
+                    }
+                    return false;
+                }) ?? false;
+
+                isReadonlyStruct = hasReadonlyFields;
+            }
+
+            // Generate Populate method signature
             _sb.AppendIndentedLine($"public static void Populate{className}(ref SpanReader reader, global::{type.FullName} instance)");
             _sb.StartNewBlock();
+
+            if (isReadonlyStruct)
+            {
+                // For readonly structs, Populate method is a no-op
+                // Fields cannot be modified after construction, so just consume the reader
+                _sb.AppendIndentedLine("// Readonly struct - fields cannot be modified after construction");
+                _sb.AppendIndentedLine("// This method consumes the reader but does not modify the instance");
+                _sb.AppendIndentedLine("while (!reader.IsEnd)");
+                _sb.StartNewBlock();
+                _sb.AppendIndentedLine("reader.ReadWireTypeAndFieldId(out var wireType, out var _);");
+                _sb.AppendIndentedLine("reader.SkipField(wireType);");
+                _sb.EndBlock();
+                _sb.EndBlock();
+                _sb.AppendNewLine();
+                return;
+            }
+
+            // Standard Populate implementation for mutable types
 
             bool hasInheritance = GeneratorHelpers.HasInheritance(type, _registry);
 
@@ -1045,7 +1381,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // Route to appropriate handler based on field type
             if (member.IsMap)
             {
-                var mapHandler = new MapHandler(_sb, _virtualMapRegistry);
+                var mapHandler = new MapHandler(_sb, _virtualMapRegistry, "SpanReaders", _registry);
                 mapHandler.GenerateRead(member, $"instance.{member.Name}");
             }
             else if (member.IsCollection)
@@ -1065,6 +1401,13 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 _primitiveHandler.GenerateRead(_sb, $"instance.{member.Name}", member.Type, member.DataFormat);
             }
+            else if (TypeMapping.IsUnsupportedType(member.Type))
+            {
+                // Unsupported type (e.g., System.Type) - skip field with warning comment
+                _sb.AppendIndentedLine($"// ⚠️ WARNING: Field '{member.Name}' with type '{member.Type}' is unsupported and will be skipped");
+                _sb.AppendIndentedLine($"// Unsupported types: System.Type (reflection metadata cannot be deserialized)");
+                _sb.AppendIndentedLine("reader.SkipField(wireType);");
+            }
             else
             {
                 // Complex type - nested message
@@ -1073,7 +1416,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 _sb.AppendIndentedLine("var nestedReader = new SpanReader(reader.GetSlice(length));");
 
                 // Check if type is from different namespace and qualify the call
-                var typeNamespace = TypeNameHelper.GetNamespace(member.Type);
+                var typeNamespace = _registry.GetNamespaceForType(member.Type);
                 if (!string.IsNullOrEmpty(typeNamespace) && typeNamespace != _currentNamespace)
                 {
                     _sb.AppendIndentedLine($"instance.{member.Name} = global::{typeNamespace}.Serialization.SpanReaders.Read{typeName}Content(ref nestedReader);");
@@ -1272,6 +1615,13 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 _primitiveHandler.GenerateRead(_sb, $"result.{member.Name}", member.Type, member.DataFormat);
             }
+            else if (TypeMapping.IsUnsupportedType(member.Type))
+            {
+                // Unsupported type (e.g., System.Type) - skip field with warning comment
+                _sb.AppendIndentedLine($"// ⚠️ WARNING: Field '{member.Name}' with type '{member.Type}' is unsupported and will be skipped");
+                _sb.AppendIndentedLine($"// Unsupported types: System.Type (reflection metadata cannot be deserialized)");
+                _sb.AppendIndentedLine("reader.SkipField(wireType);");
+            }
             else
             {
                 GenerateComplexTypeReadBody(member);
@@ -1328,6 +1678,13 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             else if (_primitiveHandler.CanHandle(member.Type))
             {
                 _primitiveHandler.GenerateRead(_sb, $"result.{member.Name}", member.Type, member.DataFormat);
+            }
+            else if (TypeMapping.IsUnsupportedType(member.Type))
+            {
+                // Unsupported type (e.g., System.Type) - skip field with warning comment
+                _sb.AppendIndentedLine($"// ⚠️ WARNING: Field '{member.Name}' with type '{member.Type}' is unsupported and will be skipped");
+                _sb.AppendIndentedLine($"// Unsupported types: System.Type (reflection metadata cannot be deserialized)");
+                _sb.AppendIndentedLine("reader.SkipField(wireType);");
             }
             else
             {
@@ -1430,6 +1787,14 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 _primitiveHandler.GenerateRead(_sb, $"result.{member.Name}", member.Type, member.DataFormat);
                 _sb.AppendIndentedLine("continue;");
             }
+            else if (TypeMapping.IsUnsupportedType(member.Type))
+            {
+                // Unsupported type (e.g., System.Type) - skip field with warning comment
+                _sb.AppendIndentedLine($"// ⚠️ WARNING: Field '{member.Name}' with type '{member.Type}' is unsupported and will be skipped");
+                _sb.AppendIndentedLine($"// Unsupported types: System.Type (reflection metadata cannot be deserialized)");
+                _sb.AppendIndentedLine("reader.SkipField(wireType);");
+                _sb.AppendIndentedLine("continue;");
+            }
             else
             {
                 // Complex type - nested message
@@ -1530,7 +1895,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine("var nestedReader = new SpanReader(reader.GetSlice(length));");
 
             // Check if type is from different namespace and qualify the call
-            var typeNamespace = TypeNameHelper.GetNamespace(member.Type);
+            var typeNamespace = _registry.GetNamespaceForType(member.Type);
             if (!string.IsNullOrEmpty(typeNamespace) && typeNamespace != _currentNamespace)
             {
                 _sb.AppendIndentedLine($"result.{member.Name} = global::{typeNamespace}.Serialization.SpanReaders.Read{typeName}Content(ref nestedReader);");

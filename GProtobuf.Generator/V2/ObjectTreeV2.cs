@@ -13,11 +13,14 @@ namespace GProtobuf.Generator.V2
     public class ObjectTreeV2
     {
         private readonly TypeRegistry _registry = new();
+        private readonly Microsoft.CodeAnalysis.Compilation _compilation;
 
         #region Type Registration
 
-        public ObjectTreeV2(HashSet<string> enumTypes)
+        public ObjectTreeV2(HashSet<string> enumTypes, Microsoft.CodeAnalysis.Compilation compilation = null)
         {
+            _compilation = compilation;
+
             // Register all enum types in the TypeRegistry
             if (enumTypes != null)
             {
@@ -54,7 +57,7 @@ namespace GProtobuf.Generator.V2
 
                 // Create shared virtual registries
                 var virtualTupleRegistry = new VirtualTupleTypeRegistry();
-                var virtualMapRegistry = new VirtualMapTypeRegistry(virtualTupleRegistry, _registry);
+                var virtualMapRegistry = new VirtualMapTypeRegistry(virtualTupleRegistry, _registry, _compilation);
 
                 WriteHeader(sb, ns);
 
@@ -210,6 +213,7 @@ namespace GProtobuf.Generator.V2
                 sb.AppendNewLine();
 
                 // Populate method - fills existing instance (zero object allocation)
+                // Generate even for readonly structs (but Populate will be no-op for them)
                 if (!type.IsAbstract)
                 {
                     sb.AppendIndentedLine($"public static void Populate{className}(ReadOnlySpan<byte> data, global::{type.FullName} instance)");
