@@ -26,7 +26,7 @@ namespace GProtobuf.Generator.V2.Handlers.Core
                     return true;
 
                 case "System.TimeSpan":
-                    sb.AppendIndentedLine($"{targetVar} = {readerVar}.ReadTimeSpan(global::GProtobuf.Core.WireType.VarInt);");
+                    sb.AppendIndentedLine($"{targetVar} = {readerVar}.ReadTimeSpan(global::GProtobuf.Core.WireType.Len);"); // TimeSpan is sub-message (Level200)
                     return true;
 
                 default:

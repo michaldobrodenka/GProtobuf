@@ -250,12 +250,48 @@ namespace GProtobuf.Core
         }
 
         /// <summary>
-        /// Reads a TimeSpan value (serialized as Ticks - VarInt64).
-        /// Zero allocations, fast serialization.
+        /// Reads TimeSpan in protobuf-net BCL format (nested message with value/scale fields).
+        /// Wire format: [length][field 1: sint64 value][field 2: int32 scale]
+        /// Supports all TimeSpanScale values for forward/backward compatibility.
+        /// IMPORTANT: TimeSpan is a duration, NOT a timestamp, so no Unix Epoch offset is used.
         /// </summary>
         public static TimeSpan ReadTimeSpan(this ref SpanReader reader, WireType wireType)
         {
-            long ticks = reader.ReadVarInt64();
+            if (wireType != WireType.Len)
+                throw new InvalidOperationException($"Expected WireType.Len for TimeSpan, got {wireType}");
+
+            int length = reader.ReadVarInt32();
+            int startPosition = reader.Position;
+            int endPosition = startPosition + length;
+
+            // Default values (protobuf defaults)
+            long scaledValue = 0;
+            int scale = 5; // Default to Ticks if not specified
+
+            // Parse nested message fields (support field order independence)
+            while (reader.Position < endPosition)
+            {
+                reader.ReadWireTypeAndFieldId(out var innerWireType, out var fieldId);
+
+                switch (fieldId)
+                {
+                    case 1: // value (sint64, ZigZag encoded)
+                        scaledValue = reader.ReadZigZagVarInt64();
+                        break;
+
+                    case 2: // scale (int32)
+                        scale = reader.ReadVarInt32();
+                        break;
+
+                    default:
+                        // Unknown field - skip
+                        reader.SkipField(innerWireType);
+                        break;
+                }
+            }
+
+            // Convert scaled value to ticks
+            long ticks = DateTimeHelper.ConvertTimeSpanToTicks(scaledValue, scale);
             return new TimeSpan(ticks);
         }
 

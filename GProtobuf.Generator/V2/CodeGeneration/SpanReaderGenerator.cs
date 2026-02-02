@@ -36,7 +36,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         {
             _sb = sb;
             _registry = registry;
-            _primitiveHandler = new PrimitiveHandler();
+            _primitiveHandler = new PrimitiveHandler(registry);
             _collectionHandler = new CollectionHandler(sb, registry);
             _virtualTupleRegistry = virtualTupleRegistry ?? new VirtualTupleTypeRegistry();
             _virtualMapRegistry = virtualMapRegistry ?? new VirtualMapTypeRegistry(_virtualTupleRegistry, _registry);
@@ -420,13 +420,23 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 }
             }
 
-            // Handle own fields with lazy initialization
+            // Handle own fields
+            // CRITICAL: Abstract base classes with ProtoMembers MUST deserialize their fields
+            // even though they can't be instantiated directly. The deserialized values
+            // are copied to derived instances via "if (oldResult != null) result.Field = oldResult.Field"
+            // pattern in ProtoInclude case handlers.
+            //
+            // Example: MessageBase (abstract) has RequestsId field that must be read,
+            // even though MessageBase itself is never instantiated.
             string lazyInit = type.IsAbstract ? null : $"result ??= new global::{type.FullName}();";
 
             if (type.ProtoMembers != null)
             {
                 foreach (var member in type.ProtoMembers)
                 {
+                    // For abstract types, we still generate field read cases, but without lazy init
+                    // The values are stored in the result (which may be null for abstract types)
+                    // and copied to derived instances by ProtoInclude handlers
                     GenerateFieldReadCaseWithLazyInit(member, lazyInit);
                 }
             }
@@ -542,16 +552,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine($"switch ({fieldIdVar})");
             _sb.StartNewBlock();
 
-            // Handle this level's ProtoMembers
-            if (currentType.ProtoMembers != null)
-            {
-                foreach (var member in currentType.ProtoMembers)
-                {
-                    GenerateFieldReadCaseForDerived(member, wireTypeVar, readerVar);
-                }
-            }
-
-            // Handle ProtoInclude to next level in chain
+            // CRITICAL: protobuf-net Level200 wire format has ProtoInclude wrapper FIRST, then base fields
+            // 1. FIRST: Handle ProtoInclude to next level in chain
             if (levelIndex + 1 < chain.Count)
             {
                 var nextTypeName = chain[levelIndex + 1];
@@ -560,6 +562,15 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 if (protoInclude != null)
                 {
                     GenerateNestedProtoIncludeCase(protoInclude, chain, levelIndex + 1, readerVar);
+                }
+            }
+
+            // 2. SECOND: Handle this level's ProtoMembers (base fields)
+            if (currentType.ProtoMembers != null)
+            {
+                foreach (var member in currentType.ProtoMembers)
+                {
+                    GenerateFieldReadCaseForDerived(member, wireTypeVar, readerVar);
                 }
             }
 
@@ -677,10 +688,15 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 throw new System.Exception($"CollectionElementType is null for collection member '{member.Name}' of type '{member.Type}'");
             }
 
-            if (_primitiveHandler.CanHandleCollection(member.CollectionElementType))
+            // Check if element type is enum (enums use packed encoding like primitives)
+            var normalizedType = TypeMapping.NormalizeTypeName(member.CollectionElementType);
+            bool isEnumCollection = _registry != null && (_registry.IsEnum(member.CollectionElementType) || _registry.IsEnum(normalizedType));
+
+            if (_primitiveHandler.CanHandleCollection(member.CollectionElementType) || isEnumCollection)
             {
-                // Level200: Primitives use dual-mode packed encoding (packed + unpacked backward compat with MERGE)
-                bool shouldBePacked = member.IsPacked || TypeMapping.ShouldBePackedByDefault(member.CollectionElementType);
+                // Level200: Primitives use UNPACKED encoding by default
+                // Reader must accept both PACKED (for IsPacked=true) and UNPACKED (default) for backward compatibility
+                bool shouldBePacked = member.IsPacked;
 
                 if (shouldBePacked)
                 {
@@ -1443,10 +1459,15 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateCollectionFieldPopulateBody(ProtoMemberAttribute member)
         {
-            if (_primitiveHandler.CanHandleCollection(member.CollectionElementType))
+            // Check if element type is enum (enums use packed encoding like primitives)
+            var normalizedType = TypeMapping.NormalizeTypeName(member.CollectionElementType);
+            bool isEnumCollection = _registry != null && (_registry.IsEnum(member.CollectionElementType) || _registry.IsEnum(normalizedType));
+
+            if (_primitiveHandler.CanHandleCollection(member.CollectionElementType) || isEnumCollection)
             {
-                // Level200: Primitives use dual-mode packed encoding (packed + unpacked backward compat with MERGE)
-                bool shouldBePacked = member.IsPacked || TypeMapping.ShouldBePackedByDefault(member.CollectionElementType);
+                // Level200: Primitives use UNPACKED encoding by default
+                // Reader must accept both PACKED (for IsPacked=true) and UNPACKED (default) for backward compatibility
+                bool shouldBePacked = member.IsPacked;
 
                 if (shouldBePacked)
                 {
@@ -1515,8 +1536,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // Collections: check if packed
             if (member.IsCollection)
             {
-                // Level200: Primitives use packed encoding by default
-                bool shouldBePacked = member.IsPacked || TypeMapping.ShouldBePackedByDefault(member.CollectionElementType);
+                // Level200: Primitives use UNPACKED encoding by default (packed only with IsPacked=true)
+                bool shouldBePacked = member.IsPacked;
 
                 if (shouldBePacked)
                 {
@@ -1548,8 +1569,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // Collections with dual-mode (packed/unpacked) support handle wire type internally
             if (member.IsCollection)
             {
-                // Only primitive collections use dual-mode
-                bool isDualMode = TypeMapping.ShouldBePackedByDefault(member.CollectionElementType) || member.IsPacked;
+                // Only primitive collections with IsPacked=true use dual-mode
+                // (default UNPACKED uses non-packed reader which validates wire type itself)
+                bool isDualMode = member.IsPacked;
                 return !isDualMode;
             }
 
@@ -1726,31 +1748,16 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine("var length = reader.ReadVarInt32();");
             _sb.AppendIndentedLine("var nestedReader = new SpanReader(reader.GetSlice(length));");
 
-            // Save current result to copy fields from
-            _sb.AppendIndentedLine("var oldResult = result;");
-
-            // Read derived content
+            // Read derived content (ONLY derived fields, from nested reader)
             _sb.AppendIndentedLine($"result = Read{derivedClassName}Content(ref nestedReader);");
 
-            // Copy parent fields from old result to new derived result
-            // Get all fields that need to be copied (from root to current type)
-            var rootTypeName = _registry.GetRootType(parentType.FullName);
-            var inheritanceChain = _registry.GetInheritanceChain(parentType.FullName);
+            // CRITICAL FIX: Use 'continue' instead of 'break' to keep reading base fields!
+            // protobuf-net Level200 wire format: [ProtoInclude wrapper [derived fields]] [base fields AFTER wrapper]
+            // We continue the while loop to read base fields that come AFTER the ProtoInclude wrapper.
+            // The reader position was already moved forward by GetSlice(), so we read from the correct position.
+            // Base fields (like RequestsId) will be read by the subsequent case statements in the switch.
+            _sb.AppendIndentedLine("continue;");
 
-            // Generate field copying for all types in the chain
-            foreach (var typeName in inheritanceChain)
-            {
-                var typeInChain = _registry.GetByFullName(typeName);
-                if (typeInChain?.ProtoMembers != null)
-                {
-                    foreach (var member in typeInChain.ProtoMembers)
-                    {
-                        _sb.AppendIndentedLine($"if (oldResult != null) result.{member.Name} = oldResult.{member.Name};");
-                    }
-                }
-            }
-
-            _sb.AppendIndentedLine("break;");
             _sb.DecreaseIndent();
             _sb.AppendIndentedLine("}");
             _sb.DecreaseIndent();
@@ -1834,11 +1841,16 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateCollectionFieldReadBody(ProtoMemberAttribute member)
         {
+            // Check if element type is enum (enums use packed encoding like primitives)
+            var normalizedType = TypeMapping.NormalizeTypeName(member.CollectionElementType);
+            bool isEnumCollection = _registry != null && (_registry.IsEnum(member.CollectionElementType) || _registry.IsEnum(normalizedType));
+
             // Check if it's a primitive collection that can use PrimitiveHandler
-            if (_primitiveHandler.CanHandleCollection(member.CollectionElementType))
+            if (_primitiveHandler.CanHandleCollection(member.CollectionElementType) || isEnumCollection)
             {
-                // Level200: Primitives use dual-mode packed encoding (packed + unpacked backward compat with MERGE)
-                bool shouldBePacked = member.IsPacked || TypeMapping.ShouldBePackedByDefault(member.CollectionElementType);
+                // Level200: Primitives use UNPACKED encoding by default
+                // Reader must accept both PACKED (for IsPacked=true) and UNPACKED (default) for backward compatibility
+                bool shouldBePacked = member.IsPacked;
 
                 if (shouldBePacked)
                 {
@@ -1923,11 +1935,15 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateCollectionFieldRead(ProtoMemberAttribute member)
         {
+            // Check if element type is an enum - enums should use packed encoding
+            var normalizedType = TypeMapping.NormalizeTypeName(member.CollectionElementType);
+            bool isEnumCollection = _registry != null && (_registry.IsEnum(member.CollectionElementType) || _registry.IsEnum(normalizedType));
+
             // Check if it's a primitive collection that can use PrimitiveHandler
-            if (_primitiveHandler.CanHandleCollection(member.CollectionElementType))
+            if (_primitiveHandler.CanHandleCollection(member.CollectionElementType) || isEnumCollection)
             {
                 // Level200: Primitives use dual-mode packed encoding (packed + unpacked backward compat with MERGE)
-                bool shouldBePacked = member.IsPacked || TypeMapping.ShouldBePackedByDefault(member.CollectionElementType);
+                bool shouldBePacked = member.IsPacked || TypeMapping.ShouldBePackedByDefault(member.CollectionElementType) || isEnumCollection;
 
                 if (shouldBePacked)
                 {

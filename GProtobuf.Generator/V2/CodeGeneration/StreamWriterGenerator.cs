@@ -277,13 +277,22 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine($"private static void Write{className}_As{ancestorClassName}(ref {_writerType} writer, global::{type.FullName} instance)");
             _sb.StartNewBlock();
 
-            // Walk from ancestor down to type, generating nested wrappers
-            // For WriteC_AsA with chain [A, B, C]:
-            //   ancestorIndex = 0 (A)
-            //   typeIndex = 2 (C)
-            //   Need to generate: wrapper for B (field 5) containing wrapper for C (field 10)
+            // CRITICAL: protobuf-net Level200 wire format order for WriteC_AsA with chain [A, B, C]:
+            //   1. ProtoInclude wrappers: B wrapper (field 5) containing C wrapper (field 10)
+            //   2. Ancestor A fields AFTER the wrappers
 
+            // Step 1: Generate nested ProtoInclude wrappers (B -> C)
             GenerateNestedWrappersForAsParent(inheritanceChain, ancestorIndex + 1, typeIndex);
+
+            // Step 2: Write ancestor (A) fields AFTER the wrappers
+            var ancestorType = _registry.GetByFullName(ancestorTypeName);
+            if (ancestorType?.ProtoMembers != null)
+            {
+                foreach (var member in ancestorType.ProtoMembers)
+                {
+                    GenerateFieldWrite(member, "instance");
+                }
+            }
 
             _sb.EndBlock();
             _sb.AppendNewLine();
@@ -452,19 +461,25 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateWriteMethodWithInheritance(TypeDefinition type, string className)
         {
-            // Wire format requires parent fields come before derived type wrappers
-            if (type.ProtoMembers != null)
-            {
-                foreach (var member in type.ProtoMembers)
-                {
-                    GenerateFieldWrite(member, "instance");
-                }
-            }
+            // CRITICAL: protobuf-net Level200 wire format requires ProtoInclude wrapper FIRST, then base class fields
+            // When serializing a base type with derived types, we must:
+            // 1. Write ProtoInclude wrapper (if instance is derived type)
+            // 2. Then write base class fields AFTER the wrapper
 
             // For A with B:A and C:B, we need cases for both B and C in WriteA
             var allDerivedTypes = _registry.GetAllDerivedTypes(type.FullName);
             if (allDerivedTypes.Count == 0)
+            {
+                // No derived types - just write base fields directly
+                if (type.ProtoMembers != null)
+                {
+                    foreach (var member in type.ProtoMembers)
+                    {
+                        GenerateFieldWrite(member, "instance");
+                    }
+                }
                 return;
+            }
 
             // Build list of (Type, ImmediateParentFieldId) for switch cases
             var derivedCases = new List<(string Type, int FieldId)>();
@@ -558,7 +573,19 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateWriteMethodForDerived(TypeDefinition type, string className)
         {
-            // Wire format requires parent fields come before derived type wrappers
+            // CRITICAL: protobuf-net Level200 wire format requires ProtoInclude field FIRST, then base class fields
+            // This is opposite to what you might expect, but it's required for compatibility.
+            // Example: MessageDeleteDevicesRequest : MessageBase
+            //   protobuf-net wire: [ProtoInclude field 380][base RequestsId field 1][own fields]
+
+            // Step 1: Write ProtoInclude wrappers FIRST
+            var inheritanceChain = _registry.GetInheritanceChain(type.FullName);
+            if (inheritanceChain.Count >= 2)
+            {
+                GenerateProtoIncludeWrappers(type, inheritanceChain);
+            }
+
+            // Step 2: THEN write base class fields AFTER ProtoInclude
             var rootTypeName = _registry.GetRootType(type.FullName);
             var rootType = _registry.GetByFullName(rootTypeName);
             if (rootType?.ProtoMembers != null)
@@ -567,13 +594,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 {
                     GenerateFieldWrite(member, "instance");
                 }
-            }
-
-            // Then write ProtoInclude wrappers from root to this type
-            var inheritanceChain = _registry.GetInheritanceChain(type.FullName);
-            if (inheritanceChain.Count >= 2)
-            {
-                GenerateProtoIncludeWrappers(type, inheritanceChain);
             }
         }
 

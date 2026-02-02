@@ -218,6 +218,14 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 _sb.StartNewBlock();
                 _sb.AppendIndentedLine("key = _tempList_key.ToArray();");
                 _sb.EndBlock();
+                _sb.AppendIndentedLine("else");
+                _sb.StartNewBlock();
+                // Empty arrays should deserialize as empty arrays, not null (protobuf semantics)
+                var keyElementType = info.KeyTypeInfo.CollectionElementType;
+                var keyElemInfo = info.KeyTypeInfo.CollectionElementTypeInfo;
+                var shortKeyElementType = GetFullTypeName(keyElementType, keyElemInfo);
+                _sb.AppendIndentedLine($"key = global::System.Array.Empty<{shortKeyElementType}>();");
+                _sb.EndBlock();
             }
 
             if (info.ValueTypeInfo.IsArray)
@@ -226,6 +234,14 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 _sb.AppendIndentedLine("if (_tempList_value != null)");
                 _sb.StartNewBlock();
                 _sb.AppendIndentedLine("value = _tempList_value.ToArray();");
+                _sb.EndBlock();
+                _sb.AppendIndentedLine("else");
+                _sb.StartNewBlock();
+                // Empty arrays should deserialize as empty arrays, not null (protobuf semantics)
+                var valueElementType = info.ValueTypeInfo.CollectionElementType;
+                var valueElemInfo = info.ValueTypeInfo.CollectionElementTypeInfo;
+                var shortValueElementType = GetFullTypeName(valueElementType, valueElemInfo);
+                _sb.AppendIndentedLine($"value = global::System.Array.Empty<{shortValueElementType}>();");
                 _sb.EndBlock();
             }
 
@@ -307,7 +323,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 }
                 else if (normalizedElem == "System.TimeSpan")
                 {
-                    _sb.AppendIndentedLine($"{tempListVar}.Add(reader.ReadTimeSpan(global::GProtobuf.Core.WireType.VarInt));");
+                    _sb.AppendIndentedLine($"{tempListVar}.Add(reader.ReadTimeSpan(global::GProtobuf.Core.WireType.Len));"); // TimeSpan is sub-message (Level200)
                 }
                 else if (elemInfo.IsPrimitive)
                 {
@@ -506,7 +522,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 }
                 else if (normalizedElem == "System.TimeSpan")
                 {
-                    _sb.AppendIndentedLine($"{targetVar}.Add(reader.ReadTimeSpan(global::GProtobuf.Core.WireType.VarInt));");
+                    _sb.AppendIndentedLine($"{targetVar}.Add(reader.ReadTimeSpan(global::GProtobuf.Core.WireType.Len));"); // TimeSpan is sub-message (Level200)
                 }
                 else
                 {
@@ -659,20 +675,27 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
 
             if (isEnum)
             {
-                _sb.AppendIndentedLine($"{calcVar}.WriteVarInt32((int){sourceVar});");
+                // Use .Value for nullable enums
+                var enumValue = GetNullableValueAccess(sourceVar, typeName);
+                _sb.AppendIndentedLine($"{calcVar}.WriteVarInt32((int){enumValue});");
                 return;
             }
 
             if (typeInfo.IsPrimitive)
             {
+                // Get value access (adds .Value for nullable types)
+                var actualValue = GetNullableValueAccess(sourceVar, typeName);
+
                 // Try special types (String, Guid)
-                if (SpecialTypeHandler.TryGenerateSize(_sb, sourceVar, typeName, calcVar))
+                if (SpecialTypeHandler.TryGenerateSize(_sb, actualValue, typeName, calcVar))
                 {
                     return;
                 }
 
                 // Use TypeMapping for other primitives
-                var sizeExpr = TypeMapping.GetSizeExpression(typeName, sourceVar, DataFormat.Default, calcVar);
+                // Remove '?' from typeName for GetSizeExpression (it expects base type)
+                var baseTypeName = typeName.EndsWith("?") ? typeName.Substring(0, typeName.Length - 1) : typeName;
+                var sizeExpr = TypeMapping.GetSizeExpression(baseTypeName, actualValue, DataFormat.Default, calcVar);
                 if (sizeExpr != null)
                 {
                     _sb.AppendIndentedLine($"{sizeExpr};");
@@ -853,34 +876,31 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 }
                 else
                 {
-                    // Numeric primitives use packed encoding: single tag + length + all elements
-                    var (_, packedTagBytes) = TypeMapping.PrecomputeTagBytes(fieldId, WireType.Len);
-                    _sb.AppendIndentedLine($"{calcVar}.AddByteLength({packedTagBytes}); // tag for packed field {fieldId}");
-                    _sb.AppendIndentedLine("var packedCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+                    // MapEntry Level200: use UNPACKED encoding for primitives (protobuf-net 2.3.7 compatibility)
+                    // Inside MapEntry, repeated fields are serialized with one tag per element (not packed)
+                    // This differs from top-level repeated fields which use packed encoding
+                    var wireType = TypeMapping.GetWireType(typeInfo.CollectionElementType, DataFormat.Default);
+                    var (_, tagBytes) = TypeMapping.PrecomputeTagBytes(fieldId, wireType);
                     _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
                     _sb.StartNewBlock();
-                    var sizeExpr = TypeMapping.GetElementSizeExpression(typeInfo.CollectionElementType, "item", DataFormat.Default, "packedCalc");
+                    _sb.AppendIndentedLine($"{calcVar}.AddByteLength({tagBytes}); // tag for repeated field {fieldId} (unpacked)");
+                    var sizeExpr = TypeMapping.GetElementSizeExpression(typeInfo.CollectionElementType, "item", DataFormat.Default, calcVar);
                     if (sizeExpr != null)
                     {
                         _sb.AppendIndentedLine($"{sizeExpr};");
                     }
                     _sb.EndBlock();
-                    _sb.AppendIndentedLine($"{calcVar}.WriteVarUInt32((uint)packedCalc.Length);");
-                    _sb.AppendIndentedLine($"{calcVar}.AddByteLength(packedCalc.Length);");
                 }
             }
             else if (elemInfo.IsEnum)
             {
-                // Enum types - use packed encoding like numeric primitives
-                var (_, enumTagBytes) = TypeMapping.PrecomputeTagBytes(fieldId, WireType.Len);
-                _sb.AppendIndentedLine($"{calcVar}.AddByteLength({enumTagBytes}); // tag for packed field {fieldId}");
-                _sb.AppendIndentedLine("var packedCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+                // MapEntry Level200: use UNPACKED encoding for enums (protobuf-net 2.3.7 compatibility)
+                var (_, enumTagBytes) = TypeMapping.PrecomputeTagBytes(fieldId, WireType.VarInt);
                 _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
                 _sb.StartNewBlock();
-                _sb.AppendIndentedLine("packedCalc.WriteVarInt32((int)item);");
+                _sb.AppendIndentedLine($"{calcVar}.AddByteLength({enumTagBytes}); // tag for repeated field {fieldId} (unpacked)");
+                _sb.AppendIndentedLine($"{calcVar}.WriteVarInt32((int)item);");
                 _sb.EndBlock();
-                _sb.AppendIndentedLine($"{calcVar}.WriteVarUInt32((uint)packedCalc.Length);");
-                _sb.AppendIndentedLine($"{calcVar}.AddByteLength(packedCalc.Length);");
             }
             else if (elemInfo.IsCustomType)
             {
@@ -889,11 +909,15 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 var sizeCalcClass = NamespaceHelper.GetSizeCalculatorsClass(typeInfo.CollectionElementType, _typeRegistry);
                 _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
                 _sb.StartNewBlock();
+                // CRITICAL: null check for array/collection elements (protobuf semantics allow null in arrays)
+                _sb.AppendIndentedLine("if (item != null)");
+                _sb.StartNewBlock();
                 _sb.AppendIndentedLine($"{calcVar}.AddByteLength({customTagBytes}); // tag for repeated field {fieldId}");
                 _sb.AppendIndentedLine("var itemCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
                 _sb.AppendIndentedLine($"{sizeCalcClass}.Calculate{elemInfo.ShortTypeName}ContentSize(ref itemCalc, item);");
                 _sb.AppendIndentedLine($"{calcVar}.WriteVarUInt32((uint)itemCalc.Length);");
                 _sb.AppendIndentedLine($"{calcVar}.AddByteLength(itemCalc.Length);");
+                _sb.EndBlock();
                 _sb.EndBlock();
             }
 
@@ -931,20 +955,27 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
 
             if (isEnum)
             {
-                _sb.AppendIndentedLine($"writer.WriteVarInt32((int){sourceVar});");
+                // Use .Value for nullable enums
+                var enumValue = GetNullableValueAccess(sourceVar, typeName);
+                _sb.AppendIndentedLine($"writer.WriteVarInt32((int){enumValue});");
                 return;
             }
 
             if (typeInfo.IsPrimitive)
             {
+                // Get value access (adds .Value for nullable types)
+                var actualValue = GetNullableValueAccess(sourceVar, typeName);
+
                 // Try special types (String, Guid)
-                if (SpecialTypeHandler.TryGenerateWrite(_sb, sourceVar, typeName))
+                if (SpecialTypeHandler.TryGenerateWrite(_sb, actualValue, typeName))
                 {
                     return;
                 }
 
                 // Use TypeMapping for other primitives
-                var writeExpr = TypeMapping.GetElementWriteExpression(typeName, sourceVar, DataFormat.Default, "writer");
+                // Remove '?' from typeName for GetElementWriteExpression (it expects base type)
+                var baseTypeName = typeName.EndsWith("?") ? typeName.Substring(0, typeName.Length - 1) : typeName;
+                var writeExpr = TypeMapping.GetElementWriteExpression(baseTypeName, actualValue, DataFormat.Default, "writer");
                 if (writeExpr != null)
                 {
                     _sb.AppendIndentedLine($"{writeExpr};");
@@ -1121,21 +1152,13 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 }
                 else
                 {
-                    // Numeric primitives use packed encoding: single tag + length + all elements
-                    var (packedBytesString, _) = TypeMapping.PrecomputeTagBytes(fieldId, WireType.Len);
-                    _sb.AppendIndentedLine($"writer.WriteSingleByte({packedBytesString}); // tag for packed field {fieldId}");
-                    _sb.AppendIndentedLine("var packedCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+                    // MapEntry Level200: use UNPACKED encoding for primitives (protobuf-net 2.3.7 compatibility)
+                    // Inside MapEntry, repeated fields are serialized with one tag per element (not packed)
+                    var wireType = TypeMapping.GetWireType(typeInfo.CollectionElementType, DataFormat.Default);
+                    var (bytesString, _) = TypeMapping.PrecomputeTagBytes(fieldId, wireType);
                     _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
                     _sb.StartNewBlock();
-                    var sizeExpr = TypeMapping.GetElementSizeExpression(typeInfo.CollectionElementType, "item", DataFormat.Default, "packedCalc");
-                    if (sizeExpr != null)
-                    {
-                        _sb.AppendIndentedLine($"{sizeExpr};");
-                    }
-                    _sb.EndBlock();
-                    _sb.AppendIndentedLine("writer.WriteVarUInt32((uint)packedCalc.Length);");
-                    _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
-                    _sb.StartNewBlock();
+                    _sb.AppendIndentedLine($"writer.WriteSingleByte({bytesString}); // tag for repeated field {fieldId} (unpacked)");
                     var writeExpr = TypeMapping.GetElementWriteExpression(typeInfo.CollectionElementType, "item", DataFormat.Default, "writer");
                     if (writeExpr != null)
                     {
@@ -1146,17 +1169,11 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             }
             else if (elemInfo.IsEnum)
             {
-                // Enum types - use packed encoding like numeric primitives
-                var (enumBytesString, _) = TypeMapping.PrecomputeTagBytes(fieldId, WireType.Len);
-                _sb.AppendIndentedLine($"writer.WriteSingleByte({enumBytesString}); // tag for packed field {fieldId}");
-                _sb.AppendIndentedLine("var packedCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+                // MapEntry Level200: use UNPACKED encoding for enums (protobuf-net 2.3.7 compatibility)
+                var (enumBytesString, _) = TypeMapping.PrecomputeTagBytes(fieldId, WireType.VarInt);
                 _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
                 _sb.StartNewBlock();
-                _sb.AppendIndentedLine("packedCalc.WriteVarInt32((int)item);");
-                _sb.EndBlock();
-                _sb.AppendIndentedLine("writer.WriteVarUInt32((uint)packedCalc.Length);");
-                _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
-                _sb.StartNewBlock();
+                _sb.AppendIndentedLine($"writer.WriteSingleByte({enumBytesString}); // tag for repeated field {fieldId} (unpacked)");
                 _sb.AppendIndentedLine("writer.WriteVarInt32((int)item);");
                 _sb.EndBlock();
             }
@@ -1168,11 +1185,15 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 var writersClass = NamespaceHelper.GetWritersClass(typeInfo.CollectionElementType, _writerClassName, _typeRegistry);
                 _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
                 _sb.StartNewBlock();
+                // CRITICAL: null check for array/collection elements (protobuf semantics allow null in arrays)
+                _sb.AppendIndentedLine("if (item != null)");
+                _sb.StartNewBlock();
                 _sb.AppendIndentedLine($"writer.WriteSingleByte({customBytesString}); // tag for repeated field {fieldId}");
                 _sb.AppendIndentedLine("var itemCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
                 _sb.AppendIndentedLine($"{sizeCalcClass}.Calculate{elemInfo.ShortTypeName}ContentSize(ref itemCalc, item);");
                 _sb.AppendIndentedLine("writer.WriteVarUInt32((uint)itemCalc.Length);");
                 _sb.AppendIndentedLine($"{writersClass}.Write{elemInfo.ShortTypeName}Content(ref writer, item);");
+                _sb.EndBlock();
                 _sb.EndBlock();
             }
 
@@ -1235,7 +1256,13 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
 
             if (typeInfo.IsPrimitive)
             {
-                return typeInfo.ShortTypeName ?? typeName;
+                var baseType = typeInfo.ShortTypeName ?? typeName;
+                // Preserve nullable marker if present in original typeName
+                if (TypeHelper.IsNullableType(typeName) && !baseType.EndsWith("?"))
+                {
+                    return baseType + "?";
+                }
+                return baseType;
             }
 
             if (typeInfo.IsDictionary)

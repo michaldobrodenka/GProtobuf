@@ -73,18 +73,19 @@ namespace GProtobuf.Generator.V2
 
         /// <summary>
         /// Determines if a repeated field should use packed encoding by default (Level200 compliance).
-        /// Packed encoding is mandatory for primitive types in protobuf-net 2.3.7 CompatibilityLevel.Level200.
+        /// UNPACKED encoding is the default for protobuf-net 2.3.7 CompatibilityLevel.Level200.
         /// </summary>
         /// <remarks>
         /// Level200 requirement: All repeated primitives (int32, int64, float, double, bool, etc.)
-        /// MUST use packed encoding (WireType.LengthDelimited) instead of unpacked (repeated tags).
-        /// This matches protobuf-net 2.3.7 behavior and reduces wire format size.
+        /// use UNPACKED encoding (repeated field tags) by default.
+        /// PACKED encoding (WireType.LengthDelimited) is only used when explicitly marked with IsPacked=true.
+        /// This matches protobuf-net 2.3.7 Level200 actual behavior.
         /// </remarks>
         public static bool ShouldBePackedByDefault(string elementTypeName)
         {
-            // Level200: primitives ALWAYS use packed encoding
-            // Excludes: string, byte (single), Guid, TimeSpan (length-delimited types)
-            return IsPrimitiveArrayType(elementTypeName);
+            // Level200: primitives use UNPACKED encoding by default
+            // PACKED only when explicitly marked with [ProtoMember(N, IsPacked = true)]
+            return false;
         }
 
         /// <summary>
@@ -143,10 +144,9 @@ namespace GProtobuf.Generator.V2
                 "System.Int32" or "System.Int64" or "System.Int16" or "System.SByte" => WireType.VarInt,
                 "System.UInt32" or "System.UInt64" or "System.UInt16" or "System.Byte" => WireType.VarInt,
                 "System.Boolean" or "System.Char" => WireType.VarInt,
-                "System.TimeSpan" => WireType.VarInt, // Serialized as Ticks (long)
                 "System.Single" => WireType.Fixed32b,
                 "System.Double" => WireType.Fixed64b,
-                "System.String" or "System.Byte[]" or "System.Guid" or "System.DateTime" => WireType.Len,
+                "System.String" or "System.Byte[]" or "System.Guid" or "System.DateTime" or "System.TimeSpan" => WireType.Len, // TimeSpan serialized as sub-message (Level200)
                 _ => WireType.Len
             };
         }
@@ -353,7 +353,7 @@ namespace GProtobuf.Generator.V2
                 "System.Char" => $"(char){readerVar}.ReadVarUInt32()",
                 "System.String" => $"{readerVar}.ReadString(WireType.Len)",
                 "System.Guid" => $"{readerVar}.ReadGuid(WireType.Len)",
-                "System.TimeSpan" => $"{readerVar}.ReadTimeSpan(WireType.VarInt)",
+                "System.TimeSpan" => $"{readerVar}.ReadTimeSpan(WireType.Len)", // TimeSpan is sub-message (Level200)
                 _ => null
             };
         }

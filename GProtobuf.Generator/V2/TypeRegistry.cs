@@ -111,6 +111,20 @@ namespace GProtobuf.Generator.V2
                     _typeNamespaceCache[fullTypeName] = ns;
                     return ns;
                 }
+
+                // Check if this candidate is a known namespace (has registered types in it)
+                // This handles nested types in non-ProtoContract classes
+                // Example: GProtobuf.Tests.CustomCollectionTests.TestStatus
+                //   -> candidate becomes GProtobuf.Tests.CustomCollectionTests
+                //   -> not in cache, but we check if GProtobuf.Tests namespace exists
+                //   -> next iteration candidate becomes GProtobuf.Tests
+                //   -> we find types in this namespace, return it
+                if (_byNamespace.ContainsKey(candidate))
+                {
+                    // Found a registered namespace - this is the namespace for the type
+                    _typeNamespaceCache[fullTypeName] = candidate;
+                    return candidate;
+                }
             }
 
             // Fallback: use TypeNameHelper (for types not in registry)

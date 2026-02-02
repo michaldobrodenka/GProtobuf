@@ -216,11 +216,31 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         /// <summary>
         /// Ensures type has global:: prefix if needed.
+        /// Handles nullable types by converting them to System.T? format.
         /// </summary>
         private string EnsureGlobalPrefix(string typeName)
         {
             if (typeName.StartsWith("global::"))
                 return typeName;
+
+            // Handle nullable types (int?, Guid?, etc.)
+            // Convert to System.T? format (e.g., int? -> System.Int32?)
+            if (TypeHelper.IsNullableType(typeName))
+            {
+                var underlyingType = TypeHelper.GetNullableUnderlyingType(typeName);
+                var normalizedUnderlying = TypeMapping.NormalizeTypeName(underlyingType);
+
+                // For primitive nullable types, use System form
+                // e.g., int? -> System.Int32?, not global::int?
+                if (IsPrimitiveType(underlyingType) || normalizedUnderlying.StartsWith("System."))
+                {
+                    return $"{normalizedUnderlying}?";
+                }
+
+                // For custom nullable types, use global:: prefix
+                // e.g., MyEnum? -> global::MyEnum?
+                return $"global::{underlyingType}?";
+            }
 
             // Handle arrays
             if (typeName.EndsWith("[]"))

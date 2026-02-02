@@ -301,12 +301,31 @@ namespace GProtobuf.Core
         }
 
         /// <summary>
-        /// Writes a TimeSpan value (serialized as Ticks - VarInt64).
-        /// Zero allocations, fast serialization.
+        /// Writes TimeSpan in protobuf-net BCL format (nested message with value/scale fields).
+        /// Wire format: [length][field 1: tag 0x08][sint64 value][field 2: tag 0x10][int32 scale]
+        /// Uses optimal Scale to minimize wire size.
+        /// IMPORTANT: TimeSpan is a duration, NOT a timestamp, so no Unix Epoch offset is used.
         /// </summary>
         public void WriteTimeSpan(TimeSpan value)
         {
-            WriteVarInt64(value.Ticks);
+            // Get optimal scale for this TimeSpan value
+            var (scaledValue, scale) = DateTimeHelper.GetOptimalScaleForTimeSpan(value);
+
+            // Calculate nested message size
+            int valueSize = GetZigZagVarintSize(scaledValue);
+            int scaleSize = GetVarintSize((uint)scale);
+            int contentSize = 1 + valueSize + 1 + scaleSize; // 2 tags + 2 values
+
+            // Write nested message length prefix
+            WriteVarUInt32((uint)contentSize);
+
+            // Write field 1: value (sint64, ZigZag encoded)
+            WriteSingleByte(0x08); // tag for field 1, WireType.VarInt
+            WriteZigZagVarInt64(scaledValue);
+
+            // Write field 2: scale (int32)
+            WriteSingleByte(0x10); // tag for field 2, WireType.VarInt
+            WriteVarInt32(scale);
         }
 
         /// <summary>

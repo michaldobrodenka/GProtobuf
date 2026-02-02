@@ -98,6 +98,79 @@ namespace GProtobuf.Core
                 // MinMax: Special case for DateTime.Min/Max
                 (int)TimeSpanScale.MinMax => scaledValue == -1 ? 0 : DateTime.MaxValue.Ticks,
 
+                        _ => throw new InvalidOperationException($"Unknown TimeSpanScale: {scale}")
+            };
+        }
+
+        /// <summary>
+        /// Determines the optimal scale for a TimeSpan value to minimize wire size.
+        /// Matches protobuf-net BCL behavior for TimeSpan (duration, not timestamp).
+        /// Does NOT use Unix Epoch offset (unlike DateTime).
+        /// </summary>
+        /// <returns>Tuple of (scaled value, scale enum value)</returns>
+        public static (long scaledValue, int scale) GetOptimalScaleForTimeSpan(TimeSpan value)
+        {
+            long ticks = value.Ticks;
+
+            // Special case: zero duration
+            if (ticks == 0)
+                return (0, (int)TimeSpanScale.Days); // protobuf-net uses Days for zero
+
+            // Try Days first (largest unit)
+            if (ticks % TicksPerDay == 0)
+            {
+                long days = ticks / TicksPerDay;
+                return (days, (int)TimeSpanScale.Days);
+            }
+
+            // Try Hours
+            if (ticks % TicksPerHour == 0)
+            {
+                long hours = ticks / TicksPerHour;
+                return (hours, (int)TimeSpanScale.Hours);
+            }
+
+            // Try Minutes
+            if (ticks % TicksPerMinute == 0)
+            {
+                long minutes = ticks / TicksPerMinute;
+                return (minutes, (int)TimeSpanScale.Minutes);
+            }
+
+            // Try Seconds
+            if (ticks % TicksPerSecond == 0)
+            {
+                long seconds = ticks / TicksPerSecond;
+                return (seconds, (int)TimeSpanScale.Seconds);
+            }
+
+            // Try Milliseconds
+            if (ticks % TicksPerMillisecond == 0)
+            {
+                long milliseconds = ticks / TicksPerMillisecond;
+                return (milliseconds, (int)TimeSpanScale.Milliseconds);
+            }
+
+            // Fallback to Ticks (for high-precision durations)
+            return (ticks, (int)TimeSpanScale.Ticks);
+        }
+
+        /// <summary>
+        /// Converts a scaled TimeSpan value back to .NET ticks based on the scale.
+        /// Supports all protobuf-net BCL TimeSpanScale values for forward/backward compatibility.
+        /// Does NOT use Unix Epoch offset (TimeSpan is a duration, not a timestamp).
+        /// </summary>
+        public static long ConvertTimeSpanToTicks(long scaledValue, int scale)
+        {
+            return scale switch
+            {
+                (int)TimeSpanScale.Days => scaledValue * TicksPerDay,
+                (int)TimeSpanScale.Hours => scaledValue * TicksPerHour,
+                (int)TimeSpanScale.Minutes => scaledValue * TicksPerMinute,
+                (int)TimeSpanScale.Seconds => scaledValue * TicksPerSecond,
+                (int)TimeSpanScale.Milliseconds => scaledValue * TicksPerMillisecond,
+                (int)TimeSpanScale.Ticks => scaledValue,
+                (int)TimeSpanScale.MinMax => scaledValue == -1 ? long.MinValue : long.MaxValue,
                 _ => throw new InvalidOperationException($"Unknown TimeSpanScale: {scale}")
             };
         }

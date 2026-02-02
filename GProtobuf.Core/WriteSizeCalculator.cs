@@ -283,11 +283,22 @@ namespace GProtobuf.Core
         }
 
         /// <summary>
-        /// Calculates size for TimeSpan (serialized as Ticks - VarInt64).
+        /// Calculates size for TimeSpan in protobuf-net BCL format (nested message).
+        /// Wire format: [length prefix][field 1: tag + value][field 2: tag + scale]
         /// </summary>
         public void WriteTimeSpan(TimeSpan value)
         {
-            WriteVarInt64(value.Ticks);
+            // Get optimal scale for this TimeSpan value
+            var (scaledValue, scale) = DateTimeHelper.GetOptimalScaleForTimeSpan(value);
+
+            // Calculate nested message size
+            int valueSize = GetZigZagVarintSize(scaledValue);
+            int scaleSize = GetVarintSize((uint)scale);
+            int contentSize = 1 + valueSize + 1 + scaleSize; // 2 tags + 2 values
+
+            // Add length prefix size + content size
+            WriteVarUInt32((uint)contentSize); // Length prefix
+            Length += contentSize;              // Nested content
         }
 
         /// <summary>

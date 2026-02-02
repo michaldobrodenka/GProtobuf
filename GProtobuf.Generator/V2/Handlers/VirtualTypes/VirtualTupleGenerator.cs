@@ -310,7 +310,17 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 return TypeMapping.GetWireType(normalized);
             }
 
-            // String, Guid, enums, and complex types use Len
+            // Check if it's an enum - enums use VarInt (protobuf wire format)
+            if (_registry != null)
+            {
+                var normalizedType = TypeMapping.NormalizeTypeName(typeName);
+                if (_registry.IsEnum(typeName) || _registry.IsEnum(normalizedType))
+                {
+                    return WireType.VarInt;
+                }
+            }
+
+            // String, Guid, and complex types use Len
             return WireType.Len;
         }
 

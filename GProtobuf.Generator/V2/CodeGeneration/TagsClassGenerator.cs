@@ -118,8 +118,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 {
                     if (member.IsCollection)
                     {
-                        // Level200: Primitives MUST use packed encoding by default
-                        bool shouldBePacked = member.IsPacked || TypeMapping.ShouldBePackedByDefault(member.CollectionElementType);
+                        // Level200: Primitives use UNPACKED encoding by default (packed only with IsPacked=true)
+                        bool shouldBePacked = member.IsPacked;
 
                         // Packed collections use WireType.Len
                         if (shouldBePacked)

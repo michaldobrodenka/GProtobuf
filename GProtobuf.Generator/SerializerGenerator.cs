@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Linq;
 using GProtobuf.Generator.V2;
@@ -50,7 +51,8 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                 return enumTypes;
             });
 
-        var pipeline = context.SyntaxProvider.ForAttributeWithMetadataName(
+        // Pipeline 1: Types with [ProtoContract]
+        var protoContractPipeline = context.SyntaxProvider.ForAttributeWithMetadataName(
             fullyQualifiedMetadataName: "ProtoBuf.ProtoContractAttribute",
             predicate: static (node, _) => node is ClassDeclarationSyntax or StructDeclarationSyntax or EnumDeclarationSyntax,
             transform: static (syntaxContext, _) =>
@@ -73,12 +75,57 @@ public sealed class SerializerGenerator : IIncrementalGenerator
 
                 return (namespaceName, typeDefinition);
             });
-        
+
+        // Pipeline 2: Types with [ProtoInclude] but WITHOUT [ProtoContract]
+        // This matches protobuf-net behavior where base classes with ProtoInclude don't need ProtoContract
+        var protoIncludePipeline = context.SyntaxProvider.ForAttributeWithMetadataName(
+            fullyQualifiedMetadataName: "ProtoBuf.ProtoIncludeAttribute",
+            predicate: static (node, _) => node is ClassDeclarationSyntax or StructDeclarationSyntax,
+            transform: (syntaxContext, _) =>
+            {
+                var typeWithAttribute = (syntaxContext.TargetSymbol as INamedTypeSymbol)!;
+
+                // Skip if already has ProtoContract (will be handled by first pipeline)
+                if (typeWithAttribute.GetAttributes().Any(a => a.AttributeClass?.ToDisplayString() == "ProtoBuf.ProtoContractAttribute"))
+                {
+                    return ((string)null, (TypeDefinition)null)!;
+                }
+
+                var namespaceName = syntaxContext.TargetSymbol.ContainingNamespace.ToDisplayString();
+                var protoIncludes = GetProtoIncludeAttributes(typeWithAttribute);
+                var protoMembers = GetProtoMemberAttributes(typeWithAttribute);
+                var hasParameterlessConstructor = HasParameterlessConstructor(typeWithAttribute);
+
+                var typeDefinition = new TypeDefinition(
+                    IsStruct: typeWithAttribute.TypeKind == Microsoft.CodeAnalysis.TypeKind.Struct,
+                    IsAbstract: typeWithAttribute.IsAbstract,
+                    IsEnum: typeWithAttribute.TypeKind == Microsoft.CodeAnalysis.TypeKind.Enum,
+                    typeWithAttribute.ToDisplayString(),
+                    protoIncludes,
+                    protoMembers,
+                    hasParameterlessConstructor,
+                    TypeSymbol: typeWithAttribute);
+
+                return (namespaceName, typeDefinition);
+            });
+
+        // Combine both pipelines and filter out nulls
+        var combinedPipeline = protoContractPipeline
+            .Collect()
+            .Combine(protoIncludePipeline.Collect())
+            .Select(static (pair, _) =>
+            {
+                var combined = new List<(string namespaceName, TypeDefinition typeDefinition)>();
+                combined.AddRange(pair.Left);
+                combined.AddRange(pair.Right.Where(x => x.Item1 != null && x.Item2 != null));
+                return combined.ToImmutableArray();
+            });
+
         context.RegisterSourceOutput(
-            pipeline.Collect().Combine(configOptions).Combine(enumTypesProvider).Combine(context.CompilationProvider),
+            combinedPipeline.Combine(configOptions).Combine(enumTypesProvider).Combine(context.CompilationProvider),
             static (context, provider) =>
             {
-                var typeDefinitions = provider.Left.Left.Left;
+                var typeDefinitions = provider.Left.Left.Left; // Already combined pipeline
                 var shouldUsedRefactored = provider.Left.Left.Right;
                 var enumTypes = provider.Left.Right;
                 var compilation = provider.Right;

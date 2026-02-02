@@ -9,6 +9,13 @@ namespace GProtobuf.Generator.V2.Handlers
     /// </summary>
     internal class PrimitiveHandler
     {
+        private readonly TypeRegistry _registry;
+
+        public PrimitiveHandler(TypeRegistry registry = null)
+        {
+            _registry = registry;
+        }
+
         #region Type Classification
 
         /// <summary>
@@ -25,6 +32,16 @@ namespace GProtobuf.Generator.V2.Handlers
         public bool CanHandleCollection(string elementTypeName)
         {
             return TypeMapping.IsNonPackedArrayType(elementTypeName);
+        }
+
+        /// <summary>
+        /// Checks if the given type is an enum.
+        /// </summary>
+        private bool IsEnumType(string typeName)
+        {
+            if (_registry == null) return false;
+            var normalized = TypeMapping.NormalizeTypeName(typeName);
+            return _registry.IsEnum(typeName) || _registry.IsEnum(normalized);
         }
 
         #endregion
@@ -78,8 +95,32 @@ namespace GProtobuf.Generator.V2.Handlers
             var readExpr = TypeMapping.GetPackedArrayReadExpression(elementTypeName, format, readerVar);
             if (readExpr != null)
             {
-                var assignment = GenerateCollectionAssignment(targetVar, elementTypeName, collectionKind, collectionTypeName, readExpr);
-                sb.AppendIndentedLine(assignment);
+                // For custom collections, generate separate loop (no constructor with array parameter)
+                if (collectionKind == CollectionKind.ConcreteCollection && !string.IsNullOrEmpty(collectionTypeName))
+                {
+                    bool isSystemHashSet = collectionTypeName == "System.Collections.Generic.HashSet" ||
+                                           collectionTypeName.StartsWith("System.Collections.Generic.HashSet<");
+                    bool isSystemList = collectionTypeName == "System.Collections.Generic.List" ||
+                                       collectionTypeName.StartsWith("System.Collections.Generic.List<");
+
+                    if (!isSystemHashSet && !isSystemList)
+                    {
+                        // Custom collection - read to temp array first, then create instance and add elements
+                        sb.AppendIndentedLine($"var tempArray = {readExpr};");
+                        sb.AppendIndentedLine($"{targetVar} = new global::{collectionTypeName}();");
+                        sb.AppendIndentedLine($"foreach (var item in tempArray) {targetVar}.Add(item);");
+                    }
+                    else
+                    {
+                        var assignment = GenerateCollectionAssignment(targetVar, elementTypeName, collectionKind, collectionTypeName, readExpr);
+                        sb.AppendIndentedLine(assignment);
+                    }
+                }
+                else
+                {
+                    var assignment = GenerateCollectionAssignment(targetVar, elementTypeName, collectionKind, collectionTypeName, readExpr);
+                    sb.AppendIndentedLine(assignment);
+                }
             }
         }
 
@@ -115,8 +156,16 @@ namespace GProtobuf.Generator.V2.Handlers
         {
             var normalized = TypeMapping.NormalizeTypeName(elementTypeName);
             var shortType = TypeMapping.GetShortTypeName(elementTypeName);
-            var elementReadExpr = TypeMapping.GetElementReadExpression(elementTypeName, format, readerVar);
-            var expectedWireType = TypeMapping.GetWireTypeString(elementTypeName, format);
+
+            // Check if element type is enum
+            bool isEnum = IsEnumType(elementTypeName);
+
+            // For enums, use cast from ReadVarInt32, otherwise use TypeMapping
+            var elementReadExpr = isEnum
+                ? $"({shortType}){readerVar}.ReadVarInt32()"
+                : TypeMapping.GetElementReadExpression(elementTypeName, format, readerVar);
+
+            var expectedWireType = isEnum ? "WireType.VarInt" : TypeMapping.GetWireTypeString(elementTypeName, format);
 
             // Generate unique loop variable names to avoid conflicts with outer scope
             var wireTypeLoopVar = wireTypeVar + "_loop";
@@ -131,7 +180,8 @@ namespace GProtobuf.Generator.V2.Handlers
                 sb.AppendIndentedLine($"while ({fieldIdLoopVar} == {fieldId} && {wireTypeLoopVar} == {expectedWireType})");
                 sb.StartNewBlock();
                 sb.AppendIndentedLine($"tempList.Add({elementReadExpr});");
-                sb.AppendIndentedLine($"if ({readerVar}.EndOfData) break;");
+                sb.AppendIndentedLine($"// Level200: Check EndOfData BEFORE peek to avoid reading past buffer");
+                sb.AppendIndentedLine($"if ({readerVar}.IsEnd) break;");
                 sb.AppendIndentedLine($"var p = {readerVar}.Position;");
                 sb.AppendIndentedLine($"({wireTypeLoopVar}, {fieldIdLoopVar}) = {readerVar}.ReadKey();");
                 sb.AppendIndentedLine($"if ({fieldIdLoopVar} != {fieldId})");
@@ -142,8 +192,31 @@ namespace GProtobuf.Generator.V2.Handlers
                 sb.EndBlock();
 
                 // Generate assignment based on collection kind
-                var assignment = GenerateCollectionAssignment(targetVar, elementTypeName, collectionKind, collectionTypeName, "tempList.ToArray()");
-                sb.AppendIndentedLine(assignment);
+                // For custom collections, generate separate loop (no constructor with array parameter)
+                if (collectionKind == CollectionKind.ConcreteCollection && !string.IsNullOrEmpty(collectionTypeName))
+                {
+                    bool isSystemHashSet = collectionTypeName == "System.Collections.Generic.HashSet" ||
+                                           collectionTypeName.StartsWith("System.Collections.Generic.HashSet<");
+                    bool isSystemList = collectionTypeName == "System.Collections.Generic.List" ||
+                                       collectionTypeName.StartsWith("System.Collections.Generic.List<");
+
+                    if (!isSystemHashSet && !isSystemList)
+                    {
+                        // Custom collection - create empty instance and add elements via loop
+                        sb.AppendIndentedLine($"{targetVar} = new global::{collectionTypeName}();");
+                        sb.AppendIndentedLine($"foreach (var item in tempList) {targetVar}.Add(item);");
+                    }
+                    else
+                    {
+                        var assignment = GenerateCollectionAssignment(targetVar, elementTypeName, collectionKind, collectionTypeName, "tempList.ToArray()");
+                        sb.AppendIndentedLine(assignment);
+                    }
+                }
+                else
+                {
+                    var assignment = GenerateCollectionAssignment(targetVar, elementTypeName, collectionKind, collectionTypeName, "tempList.ToArray()");
+                    sb.AppendIndentedLine(assignment);
+                }
             }
             else
             {
@@ -154,7 +227,8 @@ namespace GProtobuf.Generator.V2.Handlers
                 sb.AppendIndentedLine($"while ({fieldIdLoopVar} == {fieldId} && {wireTypeLoopVar} == {expectedWireType})");
                 sb.StartNewBlock();
                 sb.AppendIndentedLine($"resultCollector.Add({elementReadExpr});");
-                sb.AppendIndentedLine($"if ({readerVar}.EndOfData) break;");
+                sb.AppendIndentedLine($"// Level200: Check IsEnd BEFORE peek to avoid reading past buffer");
+                sb.AppendIndentedLine($"if ({readerVar}.IsEnd) break;");
                 sb.AppendIndentedLine($"var p = {readerVar}.Position;");
                 sb.AppendIndentedLine($"({wireTypeLoopVar}, {fieldIdLoopVar}) = {readerVar}.ReadKey();");
                 sb.AppendIndentedLine($"if ({fieldIdLoopVar} != {fieldId})");
@@ -165,8 +239,31 @@ namespace GProtobuf.Generator.V2.Handlers
                 sb.EndBlock();
 
                 // Generate assignment based on collection kind
-                var assignment = GenerateCollectionAssignment(targetVar, elementTypeName, collectionKind, collectionTypeName, "resultCollector.ToArray()");
-                sb.AppendIndentedLine(assignment);
+                // For custom collections, generate separate loop (no constructor with array parameter)
+                if (collectionKind == CollectionKind.ConcreteCollection && !string.IsNullOrEmpty(collectionTypeName))
+                {
+                    bool isSystemHashSet = collectionTypeName == "System.Collections.Generic.HashSet" ||
+                                           collectionTypeName.StartsWith("System.Collections.Generic.HashSet<");
+                    bool isSystemList = collectionTypeName == "System.Collections.Generic.List" ||
+                                       collectionTypeName.StartsWith("System.Collections.Generic.List<");
+
+                    if (!isSystemHashSet && !isSystemList)
+                    {
+                        // Custom collection - create empty instance and add elements via loop
+                        sb.AppendIndentedLine($"{targetVar} = new global::{collectionTypeName}();");
+                        sb.AppendIndentedLine($"foreach (var item in resultCollector.ToArray()) {targetVar}.Add(item);");
+                    }
+                    else
+                    {
+                        var assignment = GenerateCollectionAssignment(targetVar, elementTypeName, collectionKind, collectionTypeName, "resultCollector.ToArray()");
+                        sb.AppendIndentedLine(assignment);
+                    }
+                }
+                else
+                {
+                    var assignment = GenerateCollectionAssignment(targetVar, elementTypeName, collectionKind, collectionTypeName, "resultCollector.ToArray()");
+                    sb.AppendIndentedLine(assignment);
+                }
             }
         }
 
@@ -195,18 +292,29 @@ namespace GProtobuf.Generator.V2.Handlers
         {
             var normalized = TypeMapping.NormalizeTypeName(elementTypeName);
             var shortType = TypeMapping.GetShortTypeName(elementTypeName);
-            var elementReadExpr = TypeMapping.GetElementReadExpression(elementTypeName, format, readerVar);
-            var packedWireType = "WireType.Len";
-            var unpackedWireType = TypeMapping.GetWireTypeString(elementTypeName, format);
 
-            // Determine if we can add directly to collection (List, ICollection, IList) or need tempList (Array, HashSet, IEnumerable)
+            // Check if element type is enum
+            bool isEnum = IsEnumType(elementTypeName);
+
+            // For enums, use cast from ReadVarInt32, otherwise use TypeMapping
+            var elementReadExpr = isEnum
+                ? $"({shortType}){readerVar}.ReadVarInt32()"
+                : TypeMapping.GetElementReadExpression(elementTypeName, format, readerVar);
+
+            var packedWireType = "WireType.Len";
+            var unpackedWireType = isEnum ? "WireType.VarInt" : TypeMapping.GetWireTypeString(elementTypeName, format);
+
+            // Determine if we can add directly to collection (List, ICollection, IList, CustomCollection) or need tempList (Array, HashSet, IEnumerable)
             // IEnumerable is read-only, so we need tempList for it
+            // CustomCollection and CustomEnumerable implement IEnumerable<T> + Add(T), so they support direct addition
             bool isListLike = (collectionKind == CollectionKind.ConcreteCollection &&
                               collectionTypeName != null &&
                               (collectionTypeName.Contains("List<") || collectionTypeName.Contains("System.Collections.Generic.List<"))) ||
                              (collectionKind == CollectionKind.InterfaceCollection &&
                               collectionTypeName != null &&
-                              !collectionTypeName.Contains("IEnumerable<") && !collectionTypeName.Contains("System.Collections.Generic.IEnumerable<"));
+                              !collectionTypeName.Contains("IEnumerable<") && !collectionTypeName.Contains("System.Collections.Generic.IEnumerable<")) ||
+                             collectionKind == CollectionKind.CustomCollection ||
+                             collectionKind == CollectionKind.CustomEnumerable;
 
             // Generate wire type check for dual mode
             sb.AppendIndentedLine($"if ({wireTypeVar} == {packedWireType})");
@@ -300,24 +408,45 @@ namespace GProtobuf.Generator.V2.Handlers
                 case CollectionKind.ConcreteCollection:
                     if (collectionTypeName != null)
                     {
-                        if (collectionTypeName.Contains("HashSet<") || collectionTypeName.Contains("System.Collections.Generic.HashSet<"))
+                        // Check for System.Collections.Generic.HashSet specifically (not custom HashSet types)
+                        bool isSystemHashSet = collectionTypeName == "System.Collections.Generic.HashSet" ||
+                                               collectionTypeName.StartsWith("System.Collections.Generic.HashSet<");
+                        bool isSystemList = collectionTypeName == "System.Collections.Generic.List" ||
+                                           collectionTypeName.StartsWith("System.Collections.Generic.List<");
+
+                        if (isSystemHashSet)
                         {
-                            // HashSet requires temp list for MERGE
+                            // System HashSet requires temp list for MERGE
                             sb.AppendIndentedLine($"var tempList = {targetVar} != null ? new global::System.Collections.Generic.List<{shortElementType}>({targetVar}) : new global::System.Collections.Generic.List<{shortElementType}>();");
                         }
-                        else if (collectionTypeName.Contains("List<") || collectionTypeName.Contains("System.Collections.Generic.List<"))
+                        else if (isSystemList)
                         {
-                            // List can MERGE directly
+                            // System List can MERGE directly
                             sb.AppendIndentedLine($"{targetVar} ??= new global::System.Collections.Generic.List<{shortElementType}>();");
                         }
                         else
                         {
-                            // Fallback: generic ICollection
-                            sb.AppendIndentedLine($"{targetVar} ??= new global::System.Collections.Generic.List<{shortElementType}>();");
+                            // Fallback: custom collection type - use temp list for packed arrays
+                            sb.AppendIndentedLine($"var tempList = {targetVar} != null ? new global::System.Collections.Generic.List<{shortElementType}>({targetVar}) : new global::System.Collections.Generic.List<{shortElementType}>();");
                         }
                     }
                     else
                     {
+                        sb.AppendIndentedLine($"{targetVar} ??= new global::System.Collections.Generic.List<{shortElementType}>();");
+                    }
+                    break;
+
+                case CollectionKind.CustomCollection:
+                case CollectionKind.CustomEnumerable:
+                    // Custom collection types (e.g., CustomIntHashSet, CustomHashSet<T>)
+                    // Initialize the actual custom type directly for MERGE semantics
+                    if (!string.IsNullOrEmpty(collectionTypeName))
+                    {
+                        sb.AppendIndentedLine($"{targetVar} ??= new global::{collectionTypeName}();");
+                    }
+                    else
+                    {
+                        // Fallback to List if type is unknown
                         sb.AppendIndentedLine($"{targetVar} ??= new global::System.Collections.Generic.List<{shortElementType}>();");
                     }
                     break;
@@ -350,16 +479,46 @@ namespace GProtobuf.Generator.V2.Handlers
                     break;
 
                 case CollectionKind.ConcreteCollection:
-                    if (collectionTypeName != null && (collectionTypeName.Contains("HashSet<") || collectionTypeName.Contains("System.Collections.Generic.HashSet<")))
+                    if (collectionTypeName != null)
+                    {
+                        // Check for System.Collections.Generic.HashSet specifically (not custom HashSet types)
+                        bool isSystemHashSet = collectionTypeName == "System.Collections.Generic.HashSet" ||
+                                               collectionTypeName.StartsWith("System.Collections.Generic.HashSet<");
+
+                        if (isSystemHashSet)
+                        {
+                            // System HashSet - create from tempList
+                            sb.AppendIndentedLine($"if ({targetVar} == null)");
+                            sb.StartNewBlock();
+                            sb.AppendIndentedLine($"{targetVar} = new global::System.Collections.Generic.HashSet<{shortElementType}>(tempList);");
+                            sb.EndBlock();
+                            sb.AppendIndentedLine("else");
+                            sb.StartNewBlock();
+                            sb.AppendIndentedLine($"foreach (var item in tempList) {targetVar}.Add(item);");
+                            sb.EndBlock();
+                        }
+                        else
+                        {
+                            // Custom collection type - instantiate custom type and add items from tempList
+                            sb.AppendIndentedLine($"if ({targetVar} == null)");
+                            sb.StartNewBlock();
+                            sb.AppendIndentedLine($"{targetVar} = new global::{collectionTypeName}();");
+                            sb.EndBlock();
+                            sb.AppendIndentedLine($"foreach (var item in tempList) {targetVar}.Add(item);");
+                        }
+                    }
+                    break;
+
+                case CollectionKind.CustomCollection:
+                case CollectionKind.CustomEnumerable:
+                    // Custom collection types - instantiate custom type and add items from tempList
+                    if (!string.IsNullOrEmpty(collectionTypeName))
                     {
                         sb.AppendIndentedLine($"if ({targetVar} == null)");
                         sb.StartNewBlock();
-                        sb.AppendIndentedLine($"{targetVar} = new global::System.Collections.Generic.HashSet<{shortElementType}>(tempList);");
+                        sb.AppendIndentedLine($"{targetVar} = new global::{collectionTypeName}();");
                         sb.EndBlock();
-                        sb.AppendIndentedLine("else");
-                        sb.StartNewBlock();
                         sb.AppendIndentedLine($"foreach (var item in tempList) {targetVar}.Add(item);");
-                        sb.EndBlock();
                     }
                     break;
             }
@@ -382,21 +541,45 @@ namespace GProtobuf.Generator.V2.Handlers
                 case CollectionKind.Array:
                     return $"{targetVar} = {arrayExpr};";
 
+                case CollectionKind.CustomCollection:
+                case CollectionKind.CustomEnumerable:
+                    // Custom collection types (e.g., CustomIntHashSet, CustomHashSet<T>)
+                    // Create instance of the custom type directly
+                    if (!string.IsNullOrEmpty(collectionTypeName))
+                    {
+                        return $"{targetVar} = new global::{collectionTypeName}({arrayExpr});";
+                    }
+                    // Fallback if no collection type name provided
+                    return $"{targetVar} = {arrayExpr};";
+
                 case CollectionKind.InterfaceCollection:
+                    // Interface collections always use List as implementation
+                    return $"{targetVar} = new global::System.Collections.Generic.List<{shortElementType}>({arrayExpr});";
+
                 case CollectionKind.ConcreteCollection:
-                    // Check for specific collection types
+                    // Check for specific System collection types (not custom types)
                     if (collectionTypeName != null)
                     {
-                        if (collectionTypeName.Contains("HashSet<") || collectionTypeName.Contains("System.Collections.Generic.HashSet<"))
+                        bool isSystemHashSet = collectionTypeName == "System.Collections.Generic.HashSet" ||
+                                               collectionTypeName.StartsWith("System.Collections.Generic.HashSet<");
+                        bool isSystemList = collectionTypeName == "System.Collections.Generic.List" ||
+                                           collectionTypeName.StartsWith("System.Collections.Generic.List<");
+
+                        if (isSystemHashSet)
                         {
                             return $"{targetVar} = new global::System.Collections.Generic.HashSet<{shortElementType}>({arrayExpr});";
                         }
-                        else if (collectionTypeName.Contains("List<") || collectionTypeName.Contains("System.Collections.Generic.List<"))
+                        else if (isSystemList)
                         {
                             return $"{targetVar} = new global::System.Collections.Generic.List<{shortElementType}>({arrayExpr});";
                         }
+                        else
+                        {
+                            // Custom collection type - create instance of custom type
+                            return $"{targetVar} = new global::{collectionTypeName}({arrayExpr});";
+                        }
                     }
-                    // Default to List for interface collections
+                    // Default to List if no collection type name
                     return $"{targetVar} = new global::System.Collections.Generic.List<{shortElementType}>({arrayExpr});";
 
                 default:
@@ -509,6 +692,22 @@ namespace GProtobuf.Generator.V2.Handlers
             sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
             sb.StartNewBlock();
 
+            // Add null validation for string and byte[] (Level200 compatibility)
+            var normalizedType = TypeMapping.NormalizeTypeName(elementTypeName);
+            bool isString = normalizedType == "System.String";
+            bool isByteArray = normalizedType == "System.Byte[]";
+
+            if (isString || isByteArray)
+            {
+                var shortTypeName = TypeMapping.GetShortTypeName(elementTypeName);
+                // Extract just the class name for error message
+                var simpleTypeName = shortTypeName.Contains(".") ? shortTypeName.Substring(shortTypeName.LastIndexOf('.') + 1) : shortTypeName;
+                sb.AppendIndentedLine("if (item == null)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine("continue; // Level200: skip null elements (protobuf-net behavior)");
+                sb.EndBlock();
+            }
+
             GenerateWriteTag(sb, fieldId, wireType, writerVar);
             var elementWriteExpr = TypeMapping.GetElementWriteExpression(elementTypeName, "item", format, writerVar);
             sb.AppendIndentedLine($"{elementWriteExpr};");
@@ -611,6 +810,22 @@ namespace GProtobuf.Generator.V2.Handlers
             sb.StartNewBlock();
             sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
             sb.StartNewBlock();
+
+            // Add null validation for string and byte[] (Level200 compatibility)
+            var normalizedType = TypeMapping.NormalizeTypeName(elementTypeName);
+            bool isString = normalizedType == "System.String";
+            bool isByteArray = normalizedType == "System.Byte[]";
+
+            if (isString || isByteArray)
+            {
+                var shortTypeName = TypeMapping.GetShortTypeName(elementTypeName);
+                // Extract just the class name for error message
+                var simpleTypeName = shortTypeName.Contains(".") ? shortTypeName.Substring(shortTypeName.LastIndexOf('.') + 1) : shortTypeName;
+                sb.AppendIndentedLine("if (item == null)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine("continue; // Level200: skip null elements (protobuf-net behavior)");
+                sb.EndBlock();
+            }
 
             GenerateSizeTag(sb, fieldId, wireType, calculatorVar);
             var elementSizeExpr = TypeMapping.GetElementSizeExpression(elementTypeName, "item", format, calculatorVar);

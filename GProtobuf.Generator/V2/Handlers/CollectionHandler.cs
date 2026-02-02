@@ -40,6 +40,24 @@ namespace GProtobuf.Generator.V2.Handlers
 
             if (isSimpleBclType)
             {
+                // Add null validation for KNOWN reference types only (Level200 compatibility)
+                // Only validate string and byte[] - simple BCL types are value types (DateTime, Guid, etc.)
+                var normalizedType = TypeMapping.NormalizeTypeName(elementTypeName);
+                bool isString = normalizedType == "System.String";
+                bool isByteArray = normalizedType == "System.Byte[]";
+
+                if (isString || isByteArray)
+                {
+                    // Extract simple class name for error message (e.g., "System.String" -> "string")
+                    var shortTypeName = TypeMapping.GetShortTypeName(elementTypeName);
+                    // If still has dots (custom type), extract just the class name
+                    var simpleTypeName = shortTypeName.Contains(".") ? shortTypeName.Substring(shortTypeName.LastIndexOf('.') + 1) : shortTypeName;
+                    _sb.AppendIndentedLine("if (item == null)");
+                    _sb.StartNewBlock();
+                    _sb.AppendIndentedLine("continue; // Level200: skip null elements (protobuf-net behavior)");
+                    _sb.EndBlock();
+                }
+
                 // For simple BCL types (DateTime, Guid, etc.), write tag and use direct write method
                 var wireType = TypeMapping.GetWireType(elementTypeName);
                 TagCodeHelper.WriteTag(_sb, fieldId, wireType);
@@ -56,17 +74,42 @@ namespace GProtobuf.Generator.V2.Handlers
             }
             else
             {
+                // For complex types (custom messages), validate nulls before serialization
+                // Use ReferenceEquals to work with both value types (structs) and reference types (classes)
+                // For structs, ReferenceEquals will always return false (no null check needed)
+                // For classes, ReferenceEquals will return true if null
+                var shortTypeName = TypeMapping.GetShortTypeName(elementTypeName);
+                // Extract just the class name for error message (e.g., "Namespace.SimpleMessage" -> "SimpleMessage")
+                var simpleTypeName = shortTypeName.Contains(".") ? shortTypeName.Substring(shortTypeName.LastIndexOf('.') + 1) : shortTypeName;
+                _sb.AppendIndentedLine("if (object.ReferenceEquals(item, null))");
+                _sb.StartNewBlock();
+                _sb.AppendIndentedLine("continue; // Level200: skip null elements (protobuf-net behavior)");
+                _sb.EndBlock();
+
                 // For complex types, write tag, calculate length, write length, write content
                 TagCodeHelper.WriteTag(_sb, fieldId, WireType.Len);
 
+                // Check if element type is polymorphic (requires dispatcher method with ProtoInclude wrapper)
+                // This includes: GenericDevice[] where DeviceBaseV1 has ProtoInclude
+                bool isPolymorphic = IsElementTypePolymorphic(elementTypeName);
+
                 // Calculate and write length
                 _sb.AppendIndentedLine("var itemCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
-                var qualifiedSizeCall = GetQualifiedCalculateContentSizeCall(elementTypeName, elementClassName);
+
+                // For polymorphic types, use dispatcher that includes ProtoInclude wrapper
+                // For concrete types, use Content method
+                var qualifiedSizeCall = isPolymorphic
+                    ? GetQualifiedCalculateSizeCall(elementTypeName, elementClassName)
+                    : GetQualifiedCalculateContentSizeCall(elementTypeName, elementClassName);
+
                 _sb.AppendIndentedLine($"{qualifiedSizeCall}(ref itemCalc, item);");
                 _sb.AppendIndentedLine("writer.WriteVarUInt32((uint)itemCalc.Length);");
 
                 // Write content
-                var qualifiedWriteCall = GetQualifiedWriteContentCall(elementTypeName, elementClassName, writerClassName);
+                var qualifiedWriteCall = isPolymorphic
+                    ? GetQualifiedWriteCall(elementTypeName, elementClassName, writerClassName)
+                    : GetQualifiedWriteContentCall(elementTypeName, elementClassName, writerClassName);
+
                 _sb.AppendIndentedLine($"{qualifiedWriteCall}(ref writer, item);");
             }
 
@@ -184,14 +227,33 @@ namespace GProtobuf.Generator.V2.Handlers
                     return GetListInit(elementType);
 
                 case CollectionKind.InterfaceCollection:
-                case CollectionKind.ConcreteCollection:
-                    // Use TypeHelper for reliable type detection
+                    // Interface collections always use System.Collections.Generic implementations
                     if (collectionTypeName != null)
                     {
                         if (TypeHelper.IsHashSetType(collectionTypeName))
                             return GetHashSetInit(elementType);
                         if (TypeHelper.IsListType(collectionTypeName))
                             return GetListInit(elementType);
+                    }
+                    // Default to List
+                    return GetListInit(elementType);
+
+                case CollectionKind.ConcreteCollection:
+                    // Check for System.Collections.Generic types specifically (not custom types)
+                    if (collectionTypeName != null)
+                    {
+                        bool isSystemHashSet = collectionTypeName == "System.Collections.Generic.HashSet" ||
+                                               collectionTypeName.StartsWith("System.Collections.Generic.HashSet<");
+                        bool isSystemList = collectionTypeName == "System.Collections.Generic.List" ||
+                                           collectionTypeName.StartsWith("System.Collections.Generic.List<");
+
+                        if (isSystemHashSet)
+                            return GetHashSetInit(elementType);
+                        if (isSystemList)
+                            return GetListInit(elementType);
+
+                        // Custom collection type - instantiate the actual type
+                        return $"new global::{collectionTypeName}()";
                     }
                     // Default to List
                     return GetListInit(elementType);
@@ -247,6 +309,24 @@ namespace GProtobuf.Generator.V2.Handlers
 
             if (isSimpleBclType)
             {
+                // Add null validation for KNOWN reference types only (Level200 compatibility)
+                // Only validate string and byte[] - simple BCL types are value types (DateTime, Guid, etc.)
+                var normalizedType = TypeMapping.NormalizeTypeName(elementTypeName);
+                bool isString = normalizedType == "System.String";
+                bool isByteArray = normalizedType == "System.Byte[]";
+
+                if (isString || isByteArray)
+                {
+                    // Extract simple class name for error message (e.g., "System.String" -> "string")
+                    var shortTypeName = TypeMapping.GetShortTypeName(elementTypeName);
+                    // If still has dots (custom type), extract just the class name
+                    var simpleTypeName = shortTypeName.Contains(".") ? shortTypeName.Substring(shortTypeName.LastIndexOf('.') + 1) : shortTypeName;
+                    _sb.AppendIndentedLine("if (item == null)");
+                    _sb.StartNewBlock();
+                    _sb.AppendIndentedLine("continue; // Level200: skip null elements (protobuf-net behavior)");
+                    _sb.EndBlock();
+                }
+
                 // For simple BCL types (DateTime, Guid, etc.), add tag size and use direct size method
                 var wireType = TypeMapping.GetWireType(elementTypeName);
                 TagCodeHelper.AddTagSize(_sb, fieldId, wireType, calculatorVar);
@@ -263,12 +343,30 @@ namespace GProtobuf.Generator.V2.Handlers
             }
             else
             {
+                // LEVEL200: null elements are skipped (not serialized), following protobuf-net 2.3.7 behavior
+                // Use ReferenceEquals to work with both value types (structs) and reference types (classes)
+                // For structs, ReferenceEquals will always return false (no null check needed)
+                // For classes, ReferenceEquals will return true if null
+                _sb.AppendIndentedLine("if (object.ReferenceEquals(item, null))");
+                _sb.StartNewBlock();
+                _sb.AppendIndentedLine("continue; // Level200: skip null elements");
+                _sb.EndBlock();
+
                 // For complex types, add tag size, calculate content size, add length + content
                 TagCodeHelper.AddTagSize(_sb, fieldId, WireType.Len, calculatorVar);
 
+                // Check if element type is polymorphic (requires dispatcher method with ProtoInclude wrapper)
+                bool isPolymorphic = IsElementTypePolymorphic(elementTypeName);
+
                 // Calculate item content size
                 _sb.AppendIndentedLine("var itemCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
-                var qualifiedSizeCall = GetQualifiedCalculateContentSizeCall(elementTypeName, elementClassName);
+
+                // For polymorphic types, use dispatcher that includes ProtoInclude wrapper
+                // For concrete types, use Content method
+                var qualifiedSizeCall = isPolymorphic
+                    ? GetQualifiedCalculateSizeCall(elementTypeName, elementClassName)
+                    : GetQualifiedCalculateContentSizeCall(elementTypeName, elementClassName);
+
                 _sb.AppendIndentedLine($"{qualifiedSizeCall}(ref itemCalc, item);");
 
                 // Add length varint size + content size
@@ -346,6 +444,66 @@ namespace GProtobuf.Generator.V2.Handlers
             // Fallback: check if typename contains dot (may be incorrect for nested types)
             var dotIndex = fullTypeName.LastIndexOf('.');
             return dotIndex > 0 ? fullTypeName.Substring(0, dotIndex) : null;
+        }
+
+        /// <summary>
+        /// Checks if collection element type requires dispatcher method (ProtoInclude wrapper).
+        /// Returns true if:
+        /// 1. Element type itself has ProtoInclude (is base type with derived types)
+        /// 2. Element's base type has ProtoInclude (element is derived from polymorphic base)
+        ///
+        /// Example: GenericDevice[] where GenericDevice : DeviceBaseV1
+        /// - DeviceBaseV1 has [ProtoInclude(100, typeof(GenericDevice))]
+        /// - Even though field is GenericDevice[] (concrete), protobuf-net Level200 writes ProtoInclude wrapper
+        /// - Must use WriteGenericDevice() dispatcher, not WriteGenericDeviceContent()
+        /// </summary>
+        private bool IsElementTypePolymorphic(string elementTypeName)
+        {
+            // Check if element type itself has derived types (is polymorphic base)
+            if (_registry.GetAllDerivedTypes(elementTypeName).Count > 0)
+            {
+                return true;
+            }
+
+            // Check if element's BASE type is polymorphic
+            // This handles the case: GenericDevice[] where DeviceBaseV1 has ProtoInclude
+            var baseTypeName = _registry.GetParent(elementTypeName);
+            if (baseTypeName != null)
+            {
+                // Check if parent type has derived types (is polymorphic)
+                if (_registry.GetAllDerivedTypes(baseTypeName).Count > 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Builds fully qualified call to SizeCalculators.Calculate{ClassName}Size method (dispatcher with ProtoInclude).
+        /// </summary>
+        private string GetQualifiedCalculateSizeCall(string elementTypeName, string elementClassName)
+        {
+            var ns = GetTypeNamespace(elementTypeName);
+            if (ns == null)
+            {
+                return $"SizeCalculators.Calculate{elementClassName}Size";
+            }
+            return $"global::{ns}.Serialization.SizeCalculators.Calculate{elementClassName}Size";
+        }
+
+        /// <summary>
+        /// Builds fully qualified call to StreamWriters/BufferWriters.Write{ClassName} method (dispatcher with ProtoInclude).
+        /// </summary>
+        private string GetQualifiedWriteCall(string elementTypeName, string elementClassName, string writerClassName)
+        {
+            var ns = GetTypeNamespace(elementTypeName);
+            if (ns == null)
+            {
+                return $"Write{elementClassName}";
+            }
+            return $"global::{ns}.Serialization.{writerClassName}.Write{elementClassName}";
         }
 
         #endregion
