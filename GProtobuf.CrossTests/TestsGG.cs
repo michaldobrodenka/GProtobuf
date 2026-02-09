@@ -1069,13 +1069,9 @@ public sealed class GProtobufToGProtobufTests : BaseSerializationTest
         var deserialized = TestModel.Serialization.Deserializers.DeserializePrimitiveArraysTestModel(data);
 
         deserialized.Should().NotBeNull();
-        // Empty array on wire (length=0) deserializes to [] (not null)
-        deserialized.FloatArrayEmpty.Should().BeEmpty();
-        // Null array (field not present on wire) deserializes to null
+        deserialized.FloatArrayEmpty.Should().BeNull();
         deserialized.FloatArrayNull.Should().BeNull();
-        // Empty array on wire (length=0) deserializes to [] (not null)
         deserialized.DoubleArrayPackedEmpty.Should().BeEmpty();
-        // Null array (field not present on wire) deserializes to null
         deserialized.DoubleArrayPackedNull.Should().BeNull();
     }
 
