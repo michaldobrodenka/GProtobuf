@@ -21,9 +21,10 @@ namespace GProtobuf.Generator.V2.Handlers.Core
             }
             else
             {
-                // Use static ReadOnlySpan from Tags class for zero-allocation
-                var tagPropertyName = TagsGenerator.GetTagPropertyName(fieldId, wireType);
-                sb.AppendIndentedLine($"{writerVar}.WriteBytes(Tags.{tagPropertyName});");
+                // Generate inline WriteVarUInt32 for multi-byte tags
+                // This avoids dependency on Tags constants which may not be generated for all fields
+                var tagValue = (fieldId << 3) | (int)wireType;
+                sb.AppendIndentedLine($"{writerVar}.WriteVarUInt32({tagValue}u);");
             }
         }
 

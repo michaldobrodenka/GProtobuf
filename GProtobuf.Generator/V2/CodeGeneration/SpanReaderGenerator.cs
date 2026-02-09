@@ -382,15 +382,31 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateReadMethodWithInheritance(TypeDefinition type, string className)
         {
-            if (_registry.IsDerivedType(type.FullName))
+            // Check if this is ProtoInclude-based inheritance or flat inheritance
+            bool hasProtoInclude = type.ProtoIncludes != null && type.ProtoIncludes.Count > 0;
+            bool isProtoIncludeDerived = _registry.IsDerivedType(type.FullName);
+            bool isFlatInheritance = _registry.HasFlatInheritance(type.FullName);
+
+            if (isProtoIncludeDerived)
             {
-                // For derived types, generate code that handles the full inheritance chain
+                // For ProtoInclude derived types, generate code that handles the full inheritance chain
                 GenerateReadMethodForDerived(type, className);
             }
-            else
+            else if (hasProtoInclude)
             {
                 // For base types with ProtoIncludes, use polymorphic reading
                 GenerateReadMethodForBaseWithIncludes(type, className);
+            }
+            else if (isFlatInheritance)
+            {
+                // For flat inheritance (без ProtoInclude), use simple delegation
+                // Merged field switch is already generated in Content method
+                _sb.AppendIndentedLine($"return Read{className}Content(ref reader);");
+            }
+            else
+            {
+                // Fallback: simple delegation (should not reach here if HasInheritance is correct)
+                _sb.AppendIndentedLine($"return Read{className}Content(ref reader);");
             }
         }
 
@@ -450,6 +466,21 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             _sb.EndBlock();
             _sb.EndBlock();
+
+            // FIX: For non-abstract base types, ensure we always return an instance (never null)
+            // This matches protobuf-net 2.3.7 Level200 behavior:
+            // - Empty base class (0 bytes) deserializes to new instance, not null
+            // - Unknown ProtoInclude field ID deserializes to base instance (forward compatibility)
+            if (!type.IsAbstract)
+            {
+                _sb.AppendNewLine();
+                _sb.AppendIndentedLine("// Fallback: if no ProtoInclude field found, create base type instance");
+                _sb.AppendIndentedLine("if (result == null)");
+                _sb.StartNewBlock();
+                _sb.AppendIndentedLine($"result = new global::{type.FullName}();");
+                _sb.EndBlock();
+            }
+
             _sb.AppendIndentedLine("return result;");
         }
 
@@ -759,13 +790,21 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             // Check if type is from different namespace and qualify the call
             var typeNamespace = _registry.GetNamespaceForType(member.Type);
+
+            // CRITICAL FIX: Check if this type is a derived type with ProtoInclude wrapper
+            // Derived types need Read{TypeName} (handles ProtoInclude wrapper at field 100)
+            // Non-derived types need Read{TypeName}Content (reads fields directly)
+            var parentType = _registry.GetParent(member.Type);
+            bool isDerivedType = !string.IsNullOrEmpty(parentType);
+            string methodSuffix = isDerivedType ? "" : "Content";
+
             if (!string.IsNullOrEmpty(typeNamespace) && typeNamespace != _currentNamespace)
             {
-                _sb.AppendIndentedLine($"result.{member.Name} = global::{typeNamespace}.Serialization.SpanReaders.Read{typeName}Content(ref nestedReader);");
+                _sb.AppendIndentedLine($"result.{member.Name} = global::{typeNamespace}.Serialization.SpanReaders.Read{typeName}{methodSuffix}(ref nestedReader);");
             }
             else
             {
-                _sb.AppendIndentedLine($"result.{member.Name} = Read{typeName}Content(ref nestedReader);");
+                _sb.AppendIndentedLine($"result.{member.Name} = Read{typeName}{methodSuffix}(ref nestedReader);");
             }
         }
 
@@ -1126,7 +1165,23 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendNewLine();
 
             // Declare temp lists for array fields and IEnumerable interface fields (same as in Populate)
-            var fieldsNeedingTempList = type.ProtoMembers?
+            // For flat inheritance, use merged fields; otherwise use own fields
+            bool hasFlatInheritance = _registry.HasFlatInheritance(type.FullName);
+            List<ProtoMemberAttribute> allMembers;
+
+            if (hasFlatInheritance && (type.ProtoIncludes == null || type.ProtoIncludes.Count == 0))
+            {
+                // Flat inheritance: use merged fields
+                var mergedFields = _registry.GetMergedFields(type.FullName);
+                allMembers = mergedFields.Select(mf => mf.Field).ToList();
+            }
+            else
+            {
+                // ProtoInclude or no inheritance: use own fields
+                allMembers = type.ProtoMembers?.ToList() ?? new List<ProtoMemberAttribute>();
+            }
+
+            var fieldsNeedingTempList = allMembers
                 .Where(m => m.IsCollection && (
                     m.CollectionKind == CollectionKind.Array ||
                     (m.CollectionKind == CollectionKind.InterfaceCollection && m.Type != null &&
@@ -1165,12 +1220,30 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 }
             }
 
-            // Handle own fields
-            if (type.ProtoMembers != null)
+            // Check if this is flat inheritance (without ProtoInclude) - hasFlatInheritance already declared above
+            if (hasFlatInheritance && (type.ProtoIncludes == null || type.ProtoIncludes.Count == 0))
             {
-                foreach (var member in type.ProtoMembers)
+                // Flat inheritance: generate merged switch (base + derived fields with shadowing)
+                var mergedFields = _registry.GetMergedFields(type.FullName);
+
+                if (mergedFields.Count > 0)
                 {
-                    GenerateFieldReadCase(member);
+                    _sb.AppendIndentedLine($"// Merged fields from inheritance chain (derived shadows base)");
+                    foreach (var mergedField in mergedFields)
+                    {
+                        GenerateFieldReadCase(mergedField.Field);
+                    }
+                }
+            }
+            else
+            {
+                // ProtoInclude inheritance or no inheritance: use own fields only
+                if (type.ProtoMembers != null)
+                {
+                    foreach (var member in type.ProtoMembers)
+                    {
+                        GenerateFieldReadCase(member);
+                    }
                 }
             }
 
@@ -1748,8 +1821,27 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine("var length = reader.ReadVarInt32();");
             _sb.AppendIndentedLine("var nestedReader = new SpanReader(reader.GetSlice(length));");
 
+            // CRITICAL FIX: Save old result to preserve fields read before wrapper
+            // When ReadDerivedContent returns a more derived type (e.g., D instead of B),
+            // we must preserve fields already read from current type (e.g., StringB in B)
+            _sb.AppendIndentedLine($"var oldResult = result;");
+
             // Read derived content (ONLY derived fields, from nested reader)
             _sb.AppendIndentedLine($"result = Read{derivedClassName}Content(ref nestedReader);");
+
+            // Copy fields from old result to new result (if old result had values)
+            _sb.AppendIndentedLine("if (oldResult != null)");
+            _sb.StartNewBlock();
+            if (parentType.ProtoMembers != null)
+            {
+                foreach (var member in parentType.ProtoMembers)
+                {
+                    // Copy each field from old result to new result
+                    // This preserves values read before the ProtoInclude wrapper
+                    _sb.AppendIndentedLine($"result.{member.Name} = oldResult.{member.Name};");
+                }
+            }
+            _sb.EndBlock();
 
             // CRITICAL FIX: Use 'continue' instead of 'break' to keep reading base fields!
             // protobuf-net Level200 wire format: [ProtoInclude wrapper [derived fields]] [base fields AFTER wrapper]
@@ -1903,6 +1995,118 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         private void GenerateComplexTypeReadBody(ProtoMemberAttribute member)
         {
             var typeName = TypeNameHelper.GetClassName(member.Type);
+
+            // Check if field is a concrete nested derived type (requires ProtoInclude wrapper detection)
+            bool isNestedDerivedType = _registry.IsConcreteNestedDerivedType(member);
+
+            if (isNestedDerivedType)
+            {
+                // CRITICAL: Field declared as concrete derived type - detect and read ProtoInclude wrapper
+                GenerateNestedDerivedTypeReadBody(member, typeName);
+            }
+            else
+            {
+                // Standard complex type read (no wrapper)
+                GenerateStandardComplexTypeReadBody(member, typeName);
+            }
+        }
+
+        /// <summary>
+        /// Generates read code for nested derived type fields (with ProtoInclude wrapper detection).
+        /// Wire format: [field tag][total length] [wrapper tag][wrapper length] [derived fields] [base fields AFTER]
+        /// Uses PeekTag() for non-destructive wrapper detection.
+        /// </summary>
+        private void GenerateNestedDerivedTypeReadBody(ProtoMemberAttribute member, string typeName)
+        {
+            var typeNamespace = _registry.GetNamespaceForType(member.Type);
+
+            // Get parent type and expected wrapper tag
+            var parentTypeFullName = _registry.GetParent(member.Type);
+            var parentType = _registry.GetByFullName(parentTypeFullName);
+            var protoInclude = parentType?.ProtoIncludes?.FirstOrDefault(p => p.Type == member.Type);
+
+            if (protoInclude == null)
+            {
+                _sb.AppendIndentedLine($"// WARNING: No ProtoInclude found for {member.Type} in {parentTypeFullName}");
+                GenerateStandardComplexTypeReadBody(member, typeName);
+                return;
+            }
+
+            var wrapperTag = (protoInclude.FieldId << 3) | (int)WireType.Len;
+            var parentTypeName = TypeNameHelper.GetClassName(parentTypeFullName);
+
+            _sb.AppendIndentedLine($"// ProtoInclude wrapper detection for nested derived type {typeName}");
+            _sb.AppendIndentedLine("var length = reader.ReadVarInt32();");
+            _sb.AppendIndentedLine("var nestedReader = new SpanReader(reader.GetSlice(length));");
+            _sb.AppendNewLine();
+
+            // Peek at first tag to detect wrapper
+            _sb.AppendIndentedLine($"// Detect ProtoInclude wrapper (tag {wrapperTag} for field {protoInclude.FieldId})");
+            _sb.AppendIndentedLine("var firstTag = nestedReader.PeekTag();");
+            _sb.AppendIndentedLine($"if (firstTag == {wrapperTag}u)");
+            _sb.StartNewBlock();
+
+            // Wrapper detected - read wrapper and derived fields
+            _sb.AppendIndentedLine("// Wrapper present - read derived fields from wrapper");
+            _sb.AppendIndentedLine("nestedReader.ReadWireTypeAndFieldId(out var wrapperWireType, out var wrapperFieldId);");
+            _sb.AppendIndentedLine("var wrapperLength = nestedReader.ReadVarInt32();");
+            _sb.AppendIndentedLine("var wrapperReader = new SpanReader(nestedReader.GetSlice(wrapperLength));");
+            _sb.AppendNewLine();
+
+            // Read derived content (wrapper + base fields)
+            // IMPORTANT: Read{Type}Content for derived type already handles:
+            // 1. Reading derived-specific fields from wrapperReader
+            // 2. Reading base fields from nestedReader (after wrapper)
+            // We need to read ONLY the wrapper content here, then let ReadContent handle base fields
+
+            string derivedReaderPrefix = !string.IsNullOrEmpty(typeNamespace) && typeNamespace != _currentNamespace
+                ? $"global::{typeNamespace}.Serialization.SpanReaders."
+                : "";
+
+            _sb.AppendIndentedLine($"// Read derived object from wrapper (derived fields only)");
+            _sb.AppendIndentedLine($"result.{member.Name} = new global::{member.Type}();");
+            _sb.AppendIndentedLine($"{derivedReaderPrefix}Populate{typeName}(ref wrapperReader, result.{member.Name});");
+            _sb.AppendNewLine();
+
+            // Read remaining base fields (AFTER wrapper) by reading parent instance and copying fields
+            _sb.AppendIndentedLine($"// Read base fields (AFTER wrapper) - read as parent type and copy fields");
+
+            // Get parent type reader prefix
+            var parentNamespace = _registry.GetNamespaceForType(parentTypeFullName);
+            string parentReaderPrefix = !string.IsNullOrEmpty(parentNamespace) && parentNamespace != _currentNamespace
+                ? $"global::{parentNamespace}.Serialization.SpanReaders."
+                : "";
+
+            // Read parent instance
+            _sb.AppendIndentedLine($"var baseInstance = {parentReaderPrefix}Read{parentTypeName}Content(ref nestedReader);");
+
+            // Copy base fields from parent instance to derived instance
+            var parentTypeDef = parentType;
+            if (parentTypeDef?.ProtoMembers != null && parentTypeDef.ProtoMembers.Any())
+            {
+                _sb.AppendIndentedLine($"// Copy base fields from parent instance to derived instance");
+                foreach (var baseMember in parentTypeDef.ProtoMembers)
+                {
+                    _sb.AppendIndentedLine($"result.{member.Name}.{baseMember.Name} = baseInstance.{baseMember.Name};");
+                }
+            }
+
+            _sb.EndBlock();
+            _sb.AppendIndentedLine("else");
+            _sb.StartNewBlock();
+
+            // No wrapper - direct deserialization (backward compatibility or base type instance)
+            _sb.AppendIndentedLine("// No wrapper - read as standard type");
+            _sb.AppendIndentedLine($"result.{member.Name} = {derivedReaderPrefix}Read{typeName}Content(ref nestedReader);");
+
+            _sb.EndBlock();
+        }
+
+        /// <summary>
+        /// Generates standard read code for complex types (no wrapper detection).
+        /// </summary>
+        private void GenerateStandardComplexTypeReadBody(ProtoMemberAttribute member, string typeName)
+        {
             _sb.AppendIndentedLine("var length = reader.ReadVarInt32();");
             _sb.AppendIndentedLine("var nestedReader = new SpanReader(reader.GetSlice(length));");
 

@@ -324,9 +324,9 @@ namespace GProtobuf.Generator.V2.Handlers
             // Initialize collection if needed (MERGE semantics)
             GenerateCollectionInitialization(sb, targetVar, shortType, collectionKind, collectionTypeName);
 
-            sb.AppendIndentedLine("int length = reader.ReadVarInt32();");
-            sb.AppendIndentedLine("int endPos = reader.Position + length;");
-            sb.AppendIndentedLine("while (reader.Position < endPos)");
+            sb.AppendIndentedLine($"int length = {readerVar}.ReadVarInt32();");
+            sb.AppendIndentedLine($"int endPos = {readerVar}.Position + length;");
+            sb.AppendIndentedLine($"while ({readerVar}.Position < endPos)");
             sb.StartNewBlock();
 
             if (isListLike)
@@ -594,6 +594,9 @@ namespace GProtobuf.Generator.V2.Handlers
         /// <summary>
         /// Generates write code for a single primitive value with tag.
         /// Includes default value check for non-nullable types.
+        /// protobuf-net 2.3.7 Level200 behavior:
+        /// - IsRequired on non-nullable types → ALWAYS serialize (bypass default check)
+        /// - IsRequired on nullable types → IGNORED (normal nullable check applies)
         /// </summary>
         public void GenerateWrite(
             StringBuilderWithIndent sb,
@@ -602,6 +605,7 @@ namespace GProtobuf.Generator.V2.Handlers
             DataFormat format,
             int fieldId,
             bool isNullable,
+            bool isRequired = false,
             string writerVar = "writer")
         {
             var wireType = TypeMapping.GetWireType(typeName, format);
@@ -610,20 +614,28 @@ namespace GProtobuf.Generator.V2.Handlers
             if (!TypeMapping.IsSimpleType(typeName)) return;
 
             // Generate condition
+            // protobuf-net 2.3.7 Level200: IsRequired is IGNORED for nullable types
             if (isNullable)
             {
+                // Nullable types: always use HasValue check (IsRequired ignored)
                 sb.AppendIndentedLine($"if ({sourceVar}.HasValue)");
+                sb.StartNewBlock();
+            }
+            else if (isRequired)
+            {
+                // Non-nullable + IsRequired: ALWAYS serialize (no condition needed)
+                // Generate unconditional write
             }
             else
             {
+                // Non-nullable + NOT required: proto2 default value check
                 var defaultCheck = TypeMapping.GetDefaultValueCheck(typeName, sourceVar);
                 if (defaultCheck != null)
                 {
                     sb.AppendIndentedLine($"if ({defaultCheck})");
+                    sb.StartNewBlock();
                 }
             }
-
-            sb.StartNewBlock();
 
             // Write tag
             GenerateWriteTag(sb, fieldId, wireType, writerVar);
@@ -633,7 +645,11 @@ namespace GProtobuf.Generator.V2.Handlers
             var actualWriteExpr = TypeMapping.GetWriteExpression(typeName, valueExpr, format, writerVar);
             sb.AppendIndentedLine($"{actualWriteExpr};");
 
-            sb.EndBlock();
+            // Close block if condition was generated
+            if (isNullable || (!isRequired && TypeMapping.GetDefaultValueCheck(typeName, sourceVar) != null))
+            {
+                sb.EndBlock();
+            }
         }
 
         /// <summary>
@@ -704,7 +720,7 @@ namespace GProtobuf.Generator.V2.Handlers
                 var simpleTypeName = shortTypeName.Contains(".") ? shortTypeName.Substring(shortTypeName.LastIndexOf('.') + 1) : shortTypeName;
                 sb.AppendIndentedLine("if (item == null)");
                 sb.StartNewBlock();
-                sb.AppendIndentedLine("continue; // Level200: skip null elements (protobuf-net behavior)");
+                sb.AppendIndentedLine($"throw new System.InvalidOperationException(\"An element of type {simpleTypeName} was null; this might be as contents in a list/array\");");
                 sb.EndBlock();
             }
 
@@ -722,6 +738,9 @@ namespace GProtobuf.Generator.V2.Handlers
 
         /// <summary>
         /// Generates size calculation for a single primitive value.
+        /// protobuf-net 2.3.7 Level200 behavior:
+        /// - IsRequired on non-nullable types → ALWAYS calculate size (bypass default check)
+        /// - IsRequired on nullable types → IGNORED (normal nullable check applies)
         /// </summary>
         public void GenerateSize(
             StringBuilderWithIndent sb,
@@ -730,25 +749,34 @@ namespace GProtobuf.Generator.V2.Handlers
             DataFormat format,
             int fieldId,
             bool isNullable,
+            bool isRequired = false,
             string calculatorVar = "calculator")
         {
             var wireType = TypeMapping.GetWireType(typeName, format);
 
             // Generate condition
+            // protobuf-net 2.3.7 Level200: IsRequired is IGNORED for nullable types
             if (isNullable)
             {
+                // Nullable types: always use HasValue check (IsRequired ignored)
                 sb.AppendIndentedLine($"if ({sourceVar}.HasValue)");
+                sb.StartNewBlock();
+            }
+            else if (isRequired)
+            {
+                // Non-nullable + IsRequired: ALWAYS calculate size (no condition needed)
+                // Generate unconditional size calculation
             }
             else
             {
+                // Non-nullable + NOT required: proto2 default value check
                 var defaultCheck = TypeMapping.GetDefaultValueCheck(typeName, sourceVar);
                 if (defaultCheck != null)
                 {
                     sb.AppendIndentedLine($"if ({defaultCheck})");
+                    sb.StartNewBlock();
                 }
             }
-
-            sb.StartNewBlock();
 
             // Add tag size
             GenerateSizeTag(sb, fieldId, wireType, calculatorVar);
@@ -758,7 +786,11 @@ namespace GProtobuf.Generator.V2.Handlers
             var sizeExpr = TypeMapping.GetSizeExpression(typeName, valueExpr, format, calculatorVar);
             sb.AppendIndentedLine($"{sizeExpr};");
 
-            sb.EndBlock();
+            // Close block if condition was generated
+            if (isNullable || (!isRequired && TypeMapping.GetDefaultValueCheck(typeName, sourceVar) != null))
+            {
+                sb.EndBlock();
+            }
         }
 
         /// <summary>
@@ -823,7 +855,7 @@ namespace GProtobuf.Generator.V2.Handlers
                 var simpleTypeName = shortTypeName.Contains(".") ? shortTypeName.Substring(shortTypeName.LastIndexOf('.') + 1) : shortTypeName;
                 sb.AppendIndentedLine("if (item == null)");
                 sb.StartNewBlock();
-                sb.AppendIndentedLine("continue; // Level200: skip null elements (protobuf-net behavior)");
+                sb.AppendIndentedLine($"throw new System.InvalidOperationException(\"An element of type {simpleTypeName} was null; this might be as contents in a list/array\");");
                 sb.EndBlock();
             }
 

@@ -25,7 +25,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration.Core
         }
 
         /// <summary>
-        /// Checks if a type has inheritance (either as base type with ProtoIncludes or as derived type).
+        /// Checks if a type has inheritance (ProtoInclude-based OR flat inheritance).
+        /// Returns true if:
+        /// - Type has ProtoIncludes (base type with derived types)
+        /// - Type is derived via ProtoInclude (has parent)
+        /// - Type has flat inheritance (has BaseClass without ProtoInclude)
         /// </summary>
         /// <param name="type">The type definition to check</param>
         /// <param name="registry">The type registry for checking derived types</param>
@@ -33,7 +37,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration.Core
         public static bool HasInheritance(TypeDefinition type, TypeRegistry registry)
         {
             return (type.ProtoIncludes != null && type.ProtoIncludes.Count > 0)
-                   || registry.IsDerivedType(type.FullName);
+                   || registry.IsDerivedType(type.FullName)
+                   || registry.HasFlatInheritance(type.FullName);
         }
     }
 }

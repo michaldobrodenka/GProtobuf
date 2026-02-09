@@ -54,7 +54,7 @@ namespace GProtobuf.Generator.V2.Handlers
                     var simpleTypeName = shortTypeName.Contains(".") ? shortTypeName.Substring(shortTypeName.LastIndexOf('.') + 1) : shortTypeName;
                     _sb.AppendIndentedLine("if (item == null)");
                     _sb.StartNewBlock();
-                    _sb.AppendIndentedLine("continue; // Level200: skip null elements (protobuf-net behavior)");
+                    _sb.AppendIndentedLine($"throw new System.InvalidOperationException(\"An element of type {simpleTypeName} was null; this might be as contents in a list/array\");");
                     _sb.EndBlock();
                 }
 
@@ -83,7 +83,7 @@ namespace GProtobuf.Generator.V2.Handlers
                 var simpleTypeName = shortTypeName.Contains(".") ? shortTypeName.Substring(shortTypeName.LastIndexOf('.') + 1) : shortTypeName;
                 _sb.AppendIndentedLine("if (object.ReferenceEquals(item, null))");
                 _sb.StartNewBlock();
-                _sb.AppendIndentedLine("continue; // Level200: skip null elements (protobuf-net behavior)");
+                _sb.AppendIndentedLine($"throw new System.InvalidOperationException(\"An element of type {simpleTypeName} was null; this might be as contents in a list/array\");");
                 _sb.EndBlock();
 
                 // For complex types, write tag, calculate length, write length, write content
@@ -209,8 +209,16 @@ namespace GProtobuf.Generator.V2.Handlers
                 _sb.AppendIndentedLine($"var length = {readerVar}.ReadVarInt32();");
                 _sb.AppendIndentedLine($"var nestedReader = new SpanReader({readerVar}.GetSlice(length));");
 
-                // Generate fully qualified call to Read{ClassName}Content
-                var qualifiedCall = GetQualifiedReadContentCall(elementTypeName, elementClassName);
+                // Check if element type is polymorphic (requires Read() with ProtoInclude wrapper detection)
+                // Polymorphic types: base types with ProtoInclude OR derived types from polymorphic base
+                bool isPolymorphic = IsElementTypePolymorphic(elementTypeName);
+
+                // For polymorphic types, use Read{ClassName} (handles ProtoInclude wrapper)
+                // For concrete types, use Read{ClassName}Content (reads fields directly)
+                var qualifiedCall = isPolymorphic
+                    ? GetQualifiedReadCall(elementTypeName, elementClassName)
+                    : GetQualifiedReadContentCall(elementTypeName, elementClassName);
+
                 _sb.AppendIndentedLine($"var item = {qualifiedCall}(ref nestedReader);");
             }
 
@@ -323,7 +331,7 @@ namespace GProtobuf.Generator.V2.Handlers
                     var simpleTypeName = shortTypeName.Contains(".") ? shortTypeName.Substring(shortTypeName.LastIndexOf('.') + 1) : shortTypeName;
                     _sb.AppendIndentedLine("if (item == null)");
                     _sb.StartNewBlock();
-                    _sb.AppendIndentedLine("continue; // Level200: skip null elements (protobuf-net behavior)");
+                    _sb.AppendIndentedLine($"throw new System.InvalidOperationException(\"An element of type {simpleTypeName} was null; this might be as contents in a list/array\");");
                     _sb.EndBlock();
                 }
 
@@ -343,13 +351,16 @@ namespace GProtobuf.Generator.V2.Handlers
             }
             else
             {
-                // LEVEL200: null elements are skipped (not serialized), following protobuf-net 2.3.7 behavior
+                // LEVEL200: Null elements in collections must throw exception (protobuf-net 2.3.7 behavior)
                 // Use ReferenceEquals to work with both value types (structs) and reference types (classes)
                 // For structs, ReferenceEquals will always return false (no null check needed)
                 // For classes, ReferenceEquals will return true if null
+                var shortTypeName = TypeMapping.GetShortTypeName(elementTypeName);
+                // Extract just the class name for error message (e.g., "Namespace.SimpleMessage" -> "SimpleMessage")
+                var simpleTypeName = shortTypeName.Contains(".") ? shortTypeName.Substring(shortTypeName.LastIndexOf('.') + 1) : shortTypeName;
                 _sb.AppendIndentedLine("if (object.ReferenceEquals(item, null))");
                 _sb.StartNewBlock();
-                _sb.AppendIndentedLine("continue; // Level200: skip null elements");
+                _sb.AppendIndentedLine($"throw new System.InvalidOperationException(\"An element of type {simpleTypeName} was null; this might be as contents in a list/array\");");
                 _sb.EndBlock();
 
                 // For complex types, add tag size, calculate content size, add length + content
@@ -394,6 +405,20 @@ namespace GProtobuf.Generator.V2.Handlers
                 return $"Read{elementClassName}Content";
             }
             return $"global::{ns}.Serialization.SpanReaders.Read{elementClassName}Content";
+        }
+
+        /// <summary>
+        /// Builds fully qualified call to SpanReaders.Read{ClassName} method (dispatcher with ProtoInclude).
+        /// </summary>
+        private string GetQualifiedReadCall(string elementTypeName, string elementClassName)
+        {
+            var ns = GetTypeNamespace(elementTypeName);
+            if (ns == null)
+            {
+                // No namespace, call directly
+                return $"Read{elementClassName}";
+            }
+            return $"global::{ns}.Serialization.SpanReaders.Read{elementClassName}";
         }
 
         /// <summary>

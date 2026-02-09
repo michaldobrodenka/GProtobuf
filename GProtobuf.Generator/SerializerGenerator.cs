@@ -62,6 +62,7 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                 var protoIncludes = GetProtoIncludeAttributes(typeWithAttribute);
                 var protoMembers = GetProtoMemberAttributes(typeWithAttribute);
                 var hasParameterlessConstructor = HasParameterlessConstructor(typeWithAttribute);
+                var baseClass = GetBaseClass(typeWithAttribute);
 
                 var typeDefinition = new TypeDefinition(
                     IsStruct: typeWithAttribute.TypeKind == Microsoft.CodeAnalysis.TypeKind.Struct,
@@ -71,7 +72,8 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                     protoIncludes,
                     protoMembers,
                     hasParameterlessConstructor,
-                    TypeSymbol: typeWithAttribute);
+                    TypeSymbol: typeWithAttribute,
+                    BaseClass: baseClass);
 
                 return (namespaceName, typeDefinition);
             });
@@ -95,6 +97,7 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                 var protoIncludes = GetProtoIncludeAttributes(typeWithAttribute);
                 var protoMembers = GetProtoMemberAttributes(typeWithAttribute);
                 var hasParameterlessConstructor = HasParameterlessConstructor(typeWithAttribute);
+                var baseClass = GetBaseClass(typeWithAttribute);
 
                 var typeDefinition = new TypeDefinition(
                     IsStruct: typeWithAttribute.TypeKind == Microsoft.CodeAnalysis.TypeKind.Struct,
@@ -104,7 +107,8 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                     protoIncludes,
                     protoMembers,
                     hasParameterlessConstructor,
-                    TypeSymbol: typeWithAttribute);
+                    TypeSymbol: typeWithAttribute,
+                    BaseClass: baseClass);
 
                 return (namespaceName, typeDefinition);
             });
@@ -672,6 +676,28 @@ public sealed class SerializerGenerator : IIncrementalGenerator
         }
 
         return (false, null, null, false, null, false, null);
+    }
+
+    /// <summary>
+    /// Extracts the base class full name for flat inheritance tracking.
+    /// Returns null if:
+    /// - No base class (type inherits from System.Object directly)
+    /// - Base class is System.Object
+    /// - Base class is System.ValueType (for structs)
+    /// </summary>
+    private static string? GetBaseClass(INamedTypeSymbol typeSymbol)
+    {
+        var baseType = typeSymbol.BaseType;
+
+        // No base type or base is System.Object or System.ValueType
+        if (baseType == null ||
+            baseType.SpecialType == SpecialType.System_Object ||
+            baseType.SpecialType == SpecialType.System_ValueType)
+        {
+            return null;
+        }
+
+        return baseType.ToDisplayString();
     }
 
     /// <summary>
