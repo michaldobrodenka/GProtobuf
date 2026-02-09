@@ -7,9 +7,39 @@ using GProtobuf.Generator.V2.Helpers;
 namespace GProtobuf.Generator.V2
 {
     /// <summary>
-    /// V2 implementation of ObjectTree that uses modular code generators.
-    /// Orchestrates TypeRegistry and all code generators.
+    /// Orchestrates all code generation for protobuf serialization/deserialization.
+    /// Coordinates TypeRegistry, virtual type generators, and modular code generators.
     /// </summary>
+    /// <remarks>
+    /// <para><b>Architecture (Modular V2 Design):</b></para>
+    /// - TypeRegistry: Central type metadata store
+    /// - Virtual Type Registries: Track compiler-generated types (Map entries, Tuples)
+    /// - Code Generators: SpanReader, BufferWriter, StreamWriter, SizeCalculator, Tags, KeyValue
+    /// - Output: One {Namespace}.Serialization.cs file per namespace
+    ///
+    /// <para><b>Generated Code Structure:</b></para>
+    /// Each .cs file contains:
+    /// - Tags: Static readonly byte[] precomputed tags (optimization)
+    /// - Deserializers: Public entry point methods (Deserialize{Type}(ReadOnlySpan&lt;byte&gt;))
+    /// - Serializers: Public entry point methods (Serialize{Type}(T obj, IBufferWriter&lt;byte&gt;))
+    /// - SpanReaders: Internal Read{Type} methods (ref SpanReader -> T)
+    /// - StreamWriters: Internal Write{Type} methods (T -> Stream)
+    /// - BufferWriters: Internal Write{Type} methods (T -> IBufferWriter)
+    /// - SizeCalculators: Internal Calculate{Type}Size methods (T -> int)
+    /// - KeyValue{K}{V}: Generated structs for Dictionary&lt;K,V&gt; serialization
+    ///
+    /// <para><b>Virtual Types:</b></para>
+    /// - Map entries: KeyValue{K}{V} structs for Dictionary serialization
+    /// - Tuples: Generated for nested tuples in collections (e.g., List&lt;(int, string)&gt;)
+    ///
+    /// <para><b>Code Generation Order:</b></para>
+    /// 1. Register enums in constructor
+    /// 2. AddType() called by SerializerGenerator for each [ProtoContract] type
+    /// 3. GenerateCode() invokes per-namespace generation
+    /// 4. Tags collected from all types (base + virtual)
+    /// 5. Code generators execute (Span, Stream, Buffer, Size, KeyValue)
+    /// 6. Tags class inserted at beginning of file
+    /// </remarks>
     public class ObjectTreeV2
     {
         private readonly TypeRegistry _registry = new();
@@ -17,6 +47,15 @@ namespace GProtobuf.Generator.V2
 
         #region Type Registration
 
+        /// <summary>
+        /// Initializes a new ObjectTreeV2 with enum types pre-registered.
+        /// Called by SerializerGenerator after Roslyn analysis phase.
+        /// </summary>
+        /// <param name="enumTypes">Set of fully qualified enum type names discovered during analysis.</param>
+        /// <param name="compilation">
+        /// Roslyn Compilation context (optional).
+        /// Used for advanced type resolution in VirtualMapTypeRegistry (e.g., nested generic constraints).
+        /// </param>
         public ObjectTreeV2(HashSet<string> enumTypes, Microsoft.CodeAnalysis.Compilation compilation = null)
         {
             _compilation = compilation;
@@ -31,6 +70,12 @@ namespace GProtobuf.Generator.V2
             }
         }
 
+        /// <summary>
+        /// Registers a type definition for code generation.
+        /// Called by SerializerGenerator for each [ProtoContract] or [ProtoInclude] type discovered.
+        /// </summary>
+        /// <param name="namespace">Namespace where type is declared (determines output .cs file).</param>
+        /// <param name="type">Type metadata captured from Roslyn analysis.</param>
         public void AddType(string @namespace, TypeDefinition type)
         {
             _registry.Register(@namespace, type);
@@ -40,6 +85,22 @@ namespace GProtobuf.Generator.V2
 
         #region Code Generation
 
+        /// <summary>
+        /// Generates serialization code for all registered types.
+        /// Produces one {Namespace}.Serialization.cs file per namespace.
+        /// </summary>
+        /// <returns>
+        /// Collection of (FileName, FileCode) tuples.
+        /// Each tuple represents one generated .cs file.
+        /// </returns>
+        /// <remarks>
+        /// <para><b>Output Files:</b></para>
+        /// - MyApp.Models.Serialization.cs (for MyApp.Models namespace)
+        /// - MyApp.DTOs.Serialization.cs (for MyApp.DTOs namespace)
+        ///
+        /// <para><b>Error Handling:</b></para>
+        /// Exceptions during generation include namespace context in message for debugging.
+        /// </remarks>
         public IEnumerable<(string FileName, string FileCode)> GenerateCode()
         {
             foreach (var ns in _registry.GetAllNamespaces())

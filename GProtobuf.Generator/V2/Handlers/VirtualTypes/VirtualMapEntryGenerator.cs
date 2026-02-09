@@ -42,45 +42,6 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             return NamespaceHelper.GetSpanReadersClass(fullTypeName, _typeRegistry);
         }
 
-        // OLD IMPLEMENTATION (kept for reference, can be removed later)
-        /*
-        private string GetSpanReadersClass_OLD(string fullTypeName)
-        {
-            // Try to get namespace from TypeRegistry first (handles nested classes correctly)
-            if (_typeRegistry != null)
-            {
-                // Try different type name variants (for nested classes, we need to find the outer class)
-                var typeVariantsToTry = new System.Collections.Generic.List<string> { fullTypeName };
-
-                // For nested classes like "A.B.C.OuterClass.NestedClass", try "A.B.C.OuterClass"
-                var lastDot = fullTypeName.LastIndexOf('.');
-                while (lastDot > 0)
-                {
-                    var parentType = fullTypeName.Substring(0, lastDot);
-                    typeVariantsToTry.Add(parentType);
-                    lastDot = parentType.LastIndexOf('.');
-                }
-
-                // Search for any of these type variants in TypeRegistry
-                foreach (var typeToTry in typeVariantsToTry)
-                {
-                    foreach (var ns in _typeRegistry.GetAllNamespaces())
-                    {
-                        var typesInNs = _typeRegistry.GetByNamespace(ns);
-                        if (typesInNs.Any(t => t.FullName == typeToTry))
-                        {
-                            // Found the type (or its outer class) - return the namespace
-                            return $"global::{ns}.Serialization.SpanReaders";
-                        }
-                    }
-                }
-            }
-
-            // Fallback to NamespaceHelper if TypeRegistry is not available or type not found
-            return NamespaceHelper.GetSpanReadersClass(fullTypeName);
-        }
-        */
-
         #region SpanReader Generation
 
         /// <summary>

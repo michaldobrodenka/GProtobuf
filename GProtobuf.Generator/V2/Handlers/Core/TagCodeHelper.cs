@@ -23,7 +23,10 @@ namespace GProtobuf.Generator.V2.Handlers.Core
             {
                 // Generate inline WriteVarUInt32 for multi-byte tags
                 // This avoids dependency on Tags constants which may not be generated for all fields
-                var tagValue = (fieldId << 3) | (int)wireType;
+                // Tag encoding formula: (fieldId << 3) | wireType
+                // This matches WireFormatHelpers.EncodeTag implementation
+                const int WireTypeBitWidth = 3; // Same as ProtobufConstants.WireTypeBitWidth
+                var tagValue = (fieldId << WireTypeBitWidth) | (int)wireType;
                 sb.AppendIndentedLine($"{writerVar}.WriteVarUInt32({tagValue}u);");
             }
         }

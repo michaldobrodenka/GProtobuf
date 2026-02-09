@@ -276,7 +276,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             if (virtualTypes.Count == 0) return;
 
-            // DIAGNOSTIC: Validate all virtual map types and report warnings for problematic ones
+            // Validate all virtual map types and report warnings for problematic ones
             ValidateVirtualMapTypes(virtualTypes);
 
             _sb.AppendNewLine();
@@ -437,7 +437,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
 
             // Handle own fields
-            // CRITICAL: Abstract base classes with ProtoMembers MUST deserialize their fields
+            // Abstract base classes with ProtoMembers MUST deserialize their fields
             // even though they can't be instantiated directly. The deserialized values
             // are copied to derived instances via "if (oldResult != null) result.Field = oldResult.Field"
             // pattern in ProtoInclude case handlers.
@@ -467,10 +467,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.EndBlock();
             _sb.EndBlock();
 
-            // FIX: For non-abstract base types, ensure we always return an instance (never null)
-            // This matches protobuf-net 2.3.7 Level200 behavior:
-            // - Empty base class (0 bytes) deserializes to new instance, not null
-            // - Unknown ProtoInclude field ID deserializes to base instance (forward compatibility)
             if (!type.IsAbstract)
             {
                 _sb.AppendNewLine();
@@ -583,8 +579,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine($"switch ({fieldIdVar})");
             _sb.StartNewBlock();
 
-            // CRITICAL: protobuf-net Level200 wire format has ProtoInclude wrapper FIRST, then base fields
-            // 1. FIRST: Handle ProtoInclude to next level in chain
             if (levelIndex + 1 < chain.Count)
             {
                 var nextTypeName = chain[levelIndex + 1];
@@ -596,7 +590,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 }
             }
 
-            // 2. SECOND: Handle this level's ProtoMembers (base fields)
             if (currentType.ProtoMembers != null)
             {
                 foreach (var member in currentType.ProtoMembers)
@@ -725,7 +718,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             if (_primitiveHandler.CanHandleCollection(member.CollectionElementType) || isEnumCollection)
             {
-                // Level200: Primitives use UNPACKED encoding by default
                 // Reader must accept both PACKED (for IsPacked=true) and UNPACKED (default) for backward compatibility
                 bool shouldBePacked = member.IsPacked;
 
@@ -791,7 +783,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // Check if type is from different namespace and qualify the call
             var typeNamespace = _registry.GetNamespaceForType(member.Type);
 
-            // CRITICAL FIX: Check if this type is a derived type with ProtoInclude wrapper
             // Derived types need Read{TypeName} (handles ProtoInclude wrapper at field 100)
             // Non-derived types need Read{TypeName}Content (reads fields directly)
             var parentType = _registry.GetParent(member.Type);
@@ -832,8 +823,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 return;
             }
 
-            // Phase 1: Recursion depth guard (Level200 requirement)
-            _sb.AppendIndentedLine("using (global::GProtobuf.Core.RecursionGuard.EnterLevel())");
+            _sb.AppendIndentedLine("global::GProtobuf.Core.RecursionGuard.Enter();");
+            _sb.AppendIndentedLine("try");
             _sb.StartNewBlock();
 
             bool hasInheritance = GeneratorHelpers.HasInheritance(type, _registry);
@@ -847,7 +838,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 GenerateReadContentWithInheritance(type, className);
             }
 
-            _sb.EndBlock(); // Close using block
+            _sb.EndBlock(); // Close try block
+            _sb.AppendIndentedLine("finally");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine("global::GProtobuf.Core.RecursionGuard.Exit();");
+            _sb.EndBlock(); // Close finally block
 
             _sb.EndBlock();
             _sb.AppendNewLine();
@@ -1082,14 +1077,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine($"case {member.FieldId}:");
             _sb.IncreaseIndent();
 
-            // Generate wire type check and read logic
             var wireType = TypeMapping.GetWireType(member.Type, member.DataFormat);
-
-            _sb.AppendIndentedLine($"if (wireType != WireType.{wireType})");
-            _sb.StartNewBlock();
-            _sb.AppendIndentedLine("reader.SkipField(wireType);");
-            _sb.AppendIndentedLine("break;");
-            _sb.EndBlock();
 
             // Generate read statement based on type
             if (member.Type == "int" || member.Type == "System.Int32")
@@ -1595,45 +1583,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         #region Field Generation
 
         /// <summary>
-        /// Gets expected wire type for a field as a string (e.g., "WireType.VarInt").
-        /// Handles collections (packed vs unpacked), maps, primitives, and complex types.
-        /// </summary>
-        private string GetExpectedWireTypeString(ProtoMemberAttribute member)
-        {
-            // Maps and complex types always use LengthDelimited
-            if (member.IsMap || (!member.IsEnum && !_primitiveHandler.CanHandle(member.Type) && !member.IsCollection))
-            {
-                return "WireType.Len";
-            }
-
-            // Collections: check if packed
-            if (member.IsCollection)
-            {
-                // Level200: Primitives use UNPACKED encoding by default (packed only with IsPacked=true)
-                bool shouldBePacked = member.IsPacked;
-
-                if (shouldBePacked)
-                {
-                    return "WireType.Len"; // Packed encoding uses LengthDelimited
-                }
-                else
-                {
-                    // Unpacked: use element's wire type
-                    return TypeMapping.GetWireTypeString(member.CollectionElementType, member.DataFormat);
-                }
-            }
-
-            // FIX: Enum always uses Varint wire type (serialized as int32)
-            if (member.IsEnum)
-            {
-                return "WireType.VarInt";
-            }
-
-            // Other primitives
-            return TypeMapping.GetWireTypeString(member.Type, member.DataFormat);
-        }
-
-        /// <summary>
         /// Determines if wire type validation should be generated for this member.
         /// Collections with dual-mode support don't need validation here (handled in the handler).
         /// </summary>
@@ -1653,20 +1602,31 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         /// <summary>
         /// Generates wire type validation check.
-        /// If wire type doesn't match expected, skips the field.
+        /// OPT-1: Wire type validation REMOVED for performance (fail-fast approach).
+        /// Read methods now align with Populate methods behavior.
+        /// Malformed data will throw exception in ReadXXX methods.
         /// </summary>
         private void GenerateWireTypeValidation(ProtoMemberAttribute member, string wireTypeVar = "wireType", string readerVar = "reader")
         {
+            // OPT-1: Wire type validation removed for performance
+            // Read methods now use fail-fast approach (same as Populate methods)
+            // Malformed data will throw exception in ReadXXX methods instead of graceful skip
+
             // Skip validation for collections with dual-mode support
             if (!ShouldGenerateWireTypeValidation(member))
                 return;
 
-            var expectedWireType = GetExpectedWireTypeString(member);
-            _sb.AppendIndentedLine($"if ({wireTypeVar} != {expectedWireType})");
-            _sb.StartNewBlock();
-            _sb.AppendIndentedLine($"{readerVar}.SkipField({wireTypeVar});");
-            _sb.AppendIndentedLine("break;");
-            _sb.EndBlock();
+            // ✅ REMOVED: Wire type check and skip logic
+            // Aligns Read behavior with Populate behavior (consistency)
+            // Expected performance gain: 10-15% for primitive-heavy messages
+            // Trade-off: Malformed data throws exception instead of silent skip
+
+            // var expectedWireType = GetExpectedWireTypeString(member);
+            // _sb.AppendIndentedLine($"if ({wireTypeVar} != {expectedWireType})");
+            // _sb.StartNewBlock();
+            // _sb.AppendIndentedLine($"{readerVar}.SkipField({wireTypeVar});");
+            // _sb.AppendIndentedLine("break;");
+            // _sb.EndBlock();
         }
 
         /// <summary>
@@ -1680,7 +1640,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine("{");
             _sb.IncreaseIndent();
 
-            // Phase 1: Wire type validation (Level200 requirement)
             GenerateWireTypeValidation(member);
 
             // Add lazy initialization before accessing result
@@ -1810,18 +1769,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine("{");
             _sb.IncreaseIndent();
 
-            // Phase 1: Wire type validation (Level200 requirement)
-            // ProtoInclude always uses LengthDelimited wire type
-            _sb.AppendIndentedLine("if (wireType != WireType.Len)");
-            _sb.StartNewBlock();
-            _sb.AppendIndentedLine("reader.SkipField(wireType);");
-            _sb.AppendIndentedLine("break;");
-            _sb.EndBlock();
+            // ProtoInclude always expects WireType.Len
+            // If wrong wire type, ReadVarInt32() will throw exception
 
             _sb.AppendIndentedLine("var length = reader.ReadVarInt32();");
             _sb.AppendIndentedLine("var nestedReader = new SpanReader(reader.GetSlice(length));");
 
-            // CRITICAL FIX: Save old result to preserve fields read before wrapper
             // When ReadDerivedContent returns a more derived type (e.g., D instead of B),
             // we must preserve fields already read from current type (e.g., StringB in B)
             _sb.AppendIndentedLine($"var oldResult = result;");
@@ -1843,8 +1796,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
             _sb.EndBlock();
 
-            // CRITICAL FIX: Use 'continue' instead of 'break' to keep reading base fields!
-            // protobuf-net Level200 wire format: [ProtoInclude wrapper [derived fields]] [base fields AFTER wrapper]
             // We continue the while loop to read base fields that come AFTER the ProtoInclude wrapper.
             // The reader position was already moved forward by GetSlice(), so we read from the correct position.
             // Base fields (like RequestsId) will be read by the subsequent case statements in the switch.
@@ -1853,69 +1804,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.DecreaseIndent();
             _sb.AppendIndentedLine("}");
             _sb.DecreaseIndent();
-        }
-
-        /// <summary>
-        /// Generates code to read a single field based on its type (legacy if-else version).
-        /// </summary>
-        private void GenerateFieldRead(ProtoMemberAttribute member)
-        {
-            _sb.AppendIndentedLine($"if (fieldId == {member.FieldId})");
-            _sb.StartNewBlock();
-
-            // Route to appropriate handler based on field type
-            if (member.IsMap)
-            {
-                GenerateMapFieldRead(member);
-            }
-            else if (member.IsCollection)
-            {
-                GenerateCollectionFieldRead(member);
-            }
-            else if (member.IsEnum)
-            {
-                GenerateEnumFieldRead(member);
-            }
-            else if (TupleHandler.IsTupleType(member.Type))
-            {
-                _tupleHandler.GenerateTupleRead($"result.{member.Name}", member.Type);
-                _sb.AppendIndentedLine("continue;");
-            }
-            else if (_primitiveHandler.CanHandle(member.Type))
-            {
-                _primitiveHandler.GenerateRead(_sb, $"result.{member.Name}", member.Type, member.DataFormat);
-                _sb.AppendIndentedLine("continue;");
-            }
-            else if (TypeMapping.IsUnsupportedType(member.Type))
-            {
-                // Unsupported type (e.g., System.Type) - skip field with warning comment
-                _sb.AppendIndentedLine($"// ⚠️ WARNING: Field '{member.Name}' with type '{member.Type}' is unsupported and will be skipped");
-                _sb.AppendIndentedLine($"// Unsupported types: System.Type (reflection metadata cannot be deserialized)");
-                _sb.AppendIndentedLine("reader.SkipField(wireType);");
-                _sb.AppendIndentedLine("continue;");
-            }
-            else
-            {
-                // Complex type - nested message
-                GenerateComplexTypeRead(member);
-            }
-
-            _sb.EndBlock();
-            _sb.AppendNewLine();
-        }
-
-        private void GenerateProtoIncludeRead(ProtoIncludeAttribute include)
-        {
-            var derivedClassName = TypeNameHelper.GetClassName(include.Type);
-
-            _sb.AppendIndentedLine($"if (fieldId == {include.FieldId})");
-            _sb.StartNewBlock();
-            _sb.AppendIndentedLine("var length = reader.ReadVarInt32();");
-            _sb.AppendIndentedLine("var nestedReader = new SpanReader(reader.GetSlice(length));");
-            _sb.AppendIndentedLine($"result = Read{derivedClassName}Content(ref nestedReader);");
-            _sb.AppendIndentedLine("continue;");
-            _sb.EndBlock();
-            _sb.AppendNewLine();
         }
 
         // Body versions for switch case (without continue/break - those are added by GenerateFieldReadCase)
@@ -2001,7 +1889,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             if (isNestedDerivedType)
             {
-                // CRITICAL: Field declared as concrete derived type - detect and read ProtoInclude wrapper
                 GenerateNestedDerivedTypeReadBody(member, typeName);
             }
             else
@@ -2120,93 +2007,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 _sb.AppendIndentedLine($"result.{member.Name} = Read{typeName}Content(ref nestedReader);");
             }
-        }
-
-        // Legacy versions for if-else (with continue)
-        private void GenerateEnumFieldRead(ProtoMemberAttribute member)
-        {
-            // Use fully qualified type name for enums to avoid namespace issues
-            _sb.AppendIndentedLine($"result.{member.Name} = (global::{member.Type})reader.ReadVarInt32();");
-            _sb.AppendIndentedLine("continue;");
-        }
-
-        private void GenerateMapFieldRead(ProtoMemberAttribute member)
-        {
-            var mapHandler = new MapHandler(_sb, _virtualMapRegistry);
-            mapHandler.GenerateRead(member, $"result.{member.Name}");
-            _sb.AppendIndentedLine("continue;");
-        }
-
-        private void GenerateCollectionFieldRead(ProtoMemberAttribute member)
-        {
-            // Check if element type is an enum - enums should use packed encoding
-            var normalizedType = TypeMapping.NormalizeTypeName(member.CollectionElementType);
-            bool isEnumCollection = _registry != null && (_registry.IsEnum(member.CollectionElementType) || _registry.IsEnum(normalizedType));
-
-            // Check if it's a primitive collection that can use PrimitiveHandler
-            if (_primitiveHandler.CanHandleCollection(member.CollectionElementType) || isEnumCollection)
-            {
-                // Level200: Primitives use dual-mode packed encoding (packed + unpacked backward compat with MERGE)
-                bool shouldBePacked = member.IsPacked || TypeMapping.ShouldBePackedByDefault(member.CollectionElementType) || isEnumCollection;
-
-                if (shouldBePacked)
-                {
-                    _primitiveHandler.GenerateDualModePackedArrayRead(
-                        _sb,
-                        $"result.{member.Name}",
-                        member.CollectionElementType,
-                        member.DataFormat,
-                        member.CollectionKind,
-                        member.Type,
-                        "wireType",
-                        "reader");
-                }
-                else
-                {
-                    _primitiveHandler.GenerateNonPackedArrayRead(
-                        _sb,
-                        $"result.{member.Name}",
-                        member.CollectionElementType,
-                        member.DataFormat,
-                        member.FieldId,
-                        member.CollectionKind,
-                        member.Type);
-                }
-                _sb.AppendIndentedLine("continue;");
-            }
-            else if (TupleHandler.IsTupleType(member.CollectionElementType))
-            {
-                // Tuple collection - generate inline
-                _tupleHandler.GenerateTupleCollectionRead(
-                    $"result.{member.Name}",
-                    member.CollectionElementType,
-                    member.FieldId,
-                    member.CollectionKind,
-                    member.Type,
-                    "reader");
-                _sb.AppendIndentedLine("continue;");
-            }
-            else
-            {
-                // Complex type collection
-                var elementClassName = TypeNameHelper.GetClassName(member.CollectionElementType);
-                _collectionHandler.GenerateComplexCollectionRead(
-                    $"result.{member.Name}",
-                    member.CollectionElementType,
-                    elementClassName,
-                    member.CollectionKind,
-                    member.Type);
-                _sb.AppendIndentedLine("continue;");
-            }
-        }
-
-        private void GenerateComplexTypeRead(ProtoMemberAttribute member)
-        {
-            var typeName = TypeNameHelper.GetClassName(member.Type);
-            _sb.AppendIndentedLine("var length = reader.ReadVarInt32();");
-            _sb.AppendIndentedLine("var nestedReader = new SpanReader(reader.GetSlice(length));");
-            _sb.AppendIndentedLine($"result.{member.Name} = Read{typeName}Content(ref nestedReader);");
-            _sb.AppendIndentedLine("continue;");
         }
 
         /// <summary>

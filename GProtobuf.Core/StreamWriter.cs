@@ -16,7 +16,6 @@ namespace GProtobuf.Core
     public ref struct StreamWriter
     {
         public Stream Stream { get; private set; }
-        //private byte[] buffer;
         private int bufferPosition;
 
         private Span<byte> buffer;
@@ -30,7 +29,6 @@ namespace GProtobuf.Core
         public StreamWriter(Stream stream, scoped Span<byte> buffer)
         {
             Stream = stream;
-            //buffer = ArrayPool<byte>.Shared.Rent(1024);
             bufferPosition = 0;
             unsafe
             {
@@ -42,20 +40,9 @@ namespace GProtobuf.Core
 
         public void WriteTag(int fieldId, WireType wireType)
         {
-            int tag = (fieldId << 3) | (int)wireType;
-            WriteVarInt32(tag);
+            uint tag = WireFormatHelpers.EncodeTag(fieldId, wireType);
+            WriteVarUInt32(tag);
         }
-
-        //// Optimized version for unsigned/positive values only (lengths, byte, ushort, uint)
-        //public void WriteVarUInt32(uint value)
-        //{
-        //    while (value > 0x7F)
-        //    {
-        //        WriteSingleByte((byte)((value & 0x7F) | 0x80));
-        //        value >>= 7;
-        //    }
-        //    WriteSingleByte((byte)value);
-        //}
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void WriteVarUInt32(uint value)
@@ -97,11 +84,6 @@ namespace GProtobuf.Core
             WriteToBuffer(MemoryMarshal.Cast<int, byte>(MemoryMarshal.CreateReadOnlySpan(ref intValue, 1)));
         }
 
-        //public void WriteFixed64(ulong ulongValue)
-        //{
-        //    WriteToBuffer(MemoryMarshal.Cast<ulong, byte>(MemoryMarshal.CreateReadOnlySpan(ref ulongValue, 1)));
-        //}
-
         public void WriteVarInt32(int intValue)
         {
             WriteVarUInt32((uint)intValue);
@@ -109,12 +91,12 @@ namespace GProtobuf.Core
 
         public void WriteZigZag32(int value)
         {
-            WriteVarInt32((value << 1) ^ (value >> 31));
+            WriteVarUInt32(WireFormatHelpers.EncodeZigZag32(value));
         }
 
         public void WriteZigZag64(long value)
         {
-            WriteVarInt64((value << 1) ^ (value >> 63));
+            WriteVarUInt64(WireFormatHelpers.EncodeZigZag64(value));
         }
 
         public void WriteBool(bool value)
@@ -231,42 +213,6 @@ namespace GProtobuf.Core
             }
         }
 
-        //public void WriteString(string value)
-        //{
-        //    // FAST PATH: ak sa zmestí aj v "worst-case" (UTF-8 max 4 B/char),
-        //    // urob jedno GetBytes bez dočasných alokácií.
-        //    int available = buffer.Length - bufferPosition;
-        //    int worstCase = Encoding.UTF8.GetMaxByteCount(value.Length);
-        //    if (available >= worstCase)
-        //    {
-        //        int written = Encoding.UTF8.GetBytes(value.AsSpan(), buffer.Slice(bufferPosition));
-        //        bufferPosition += written;
-        //        return;
-        //    }
-
-        //    // STREAM PATH: kóduj po častiach priamo do bufferu, bez ArrayPoolu.
-        //    Encoder enc = Encoding.UTF8.GetEncoder();
-        //    ReadOnlySpan<char> chars = value.AsSpan();
-
-        //    while (true)
-        //    {
-        //        if (bufferPosition == buffer.Length)
-        //            Flush(); // po návrate nech je k dispozícii aspoň pár bajtov
-
-        //        Span<byte> dest = buffer.Slice(bufferPosition);
-        //        // 'flush' nastavíme na true v momente, keď máme šancu dobehnúť koniec
-        //        bool flushNow = chars.Length <= dest.Length;
-
-        //        enc.Convert(chars, dest, flushNow,
-        //                    out int charsUsed, out int bytesUsed, out bool completed);
-
-        //        bufferPosition += bytesUsed;
-        //        chars = chars.Slice(charsUsed);
-
-        //        if (completed) break; // všetko zakódované + stav encoderu vyprázdnený
-        //    }
-        //}
-
         /// <summary>
         /// Writes Guid in protobuf-net BCL format (nested message with lo/hi fixed64 fields).
         /// Wire format: [length=18][tag 0x09][8 bytes lo][tag 0x11][8 bytes hi]
@@ -281,10 +227,10 @@ namespace GProtobuf.Core
 
             // Write nested message length = 18 bytes total
             // (1 byte tag + 8 bytes lo + 1 byte tag + 8 bytes hi)
-            WriteVarUInt32(18);
+            WriteVarUInt32(BclTypeFormats.Guid.NestedContentSize);
 
             // Write field 1 (lo): tag 0x09 (field 1, WireType.Fixed64)
-            WriteSingleByte(0x09);
+            WriteSingleByte(BclTypeFormats.Guid.FieldLoTag);
 
             // Write low 8 bytes (little-endian, directly from guidBytes)
             EnsureBufferSpace(8);
@@ -292,7 +238,7 @@ namespace GProtobuf.Core
             bufferPosition += 8;
 
             // Write field 2 (hi): tag 0x11 (field 2, WireType.Fixed64)
-            WriteSingleByte(0x11);
+            WriteSingleByte(BclTypeFormats.Guid.FieldHiTag);
 
             // Write high 8 bytes (little-endian, directly from guidBytes)
             EnsureBufferSpace(8);
@@ -320,11 +266,11 @@ namespace GProtobuf.Core
             WriteVarUInt32((uint)contentSize);
 
             // Write field 1: value (sint64, ZigZag encoded)
-            WriteSingleByte(0x08); // tag for field 1, WireType.VarInt
+            WriteSingleByte(BclTypeFormats.DateTimeTimeSpan.FieldValueTag);
             WriteZigZagVarInt64(scaledValue);
 
             // Write field 2: scale (int32)
-            WriteSingleByte(0x10); // tag for field 2, WireType.VarInt
+            WriteSingleByte(BclTypeFormats.DateTimeTimeSpan.FieldScaleTag);
             WriteVarInt32(scale);
         }
 
@@ -332,7 +278,7 @@ namespace GProtobuf.Core
         /// Writes DateTime in protobuf-net BCL format (nested message with value/scale fields).
         /// Wire format: [length][field 1: tag 0x08][sint64 value][field 2: tag 0x10][int32 scale]
         /// Uses optimal Scale to minimize wire size (Seconds for API timestamps, Ticks for high-precision).
-        /// Level200: DateTimeKind is NOT serialized (protobuf-net 2.3.7 behavior).
+        /// Level200: DateTimeKind is NOT serialized.
         /// </summary>
         public void WriteDateTime(DateTime value)
         {
@@ -348,11 +294,11 @@ namespace GProtobuf.Core
             WriteVarUInt32((uint)contentSize);
 
             // Write field 1: value (sint64, ZigZag encoded)
-            WriteSingleByte(0x08); // tag for field 1, WireType.VarInt
+            WriteSingleByte(BclTypeFormats.DateTimeTimeSpan.FieldValueTag);
             WriteZigZagVarInt64(scaledValue);
 
             // Write field 2: scale (int32)
-            WriteSingleByte(0x10); // tag for field 2, WireType.VarInt
+            WriteSingleByte(BclTypeFormats.DateTimeTimeSpan.FieldScaleTag);
             WriteVarInt32(scale);
 
             // Level200: field 3 (kind) is NOT written
@@ -360,33 +306,20 @@ namespace GProtobuf.Core
 
         /// <summary>
         /// Helper method to calculate varint size for unsigned values.
+        /// Delegates to WireFormatHelpers for canonical implementation.
         /// </summary>
         private static int GetVarintSize(uint value)
         {
-            if (value < (1 << 7)) return 1;
-            if (value < (1 << 14)) return 2;
-            if (value < (1 << 21)) return 3;
-            if (value < (1 << 28)) return 4;
-            return 5;
+            return WireFormatHelpers.GetVarintSize(value);
         }
 
         /// <summary>
         /// Helper method to calculate ZigZag varint size for signed values.
+        /// Delegates to WireFormatHelpers for canonical implementation.
         /// </summary>
         private static int GetZigZagVarintSize(long value)
         {
-            ulong zigzag = (ulong)((value << 1) ^ (value >> 63));
-
-            if (zigzag < (1UL << 7)) return 1;
-            if (zigzag < (1UL << 14)) return 2;
-            if (zigzag < (1UL << 21)) return 3;
-            if (zigzag < (1UL << 28)) return 4;
-            if (zigzag < (1UL << 35)) return 5;
-            if (zigzag < (1UL << 42)) return 6;
-            if (zigzag < (1UL << 49)) return 7;
-            if (zigzag < (1UL << 56)) return 8;
-            if (zigzag < (1UL << 63)) return 9;
-            return 10;
+            return WireFormatHelpers.GetZigZagVarintSize(value);
         }
 
 
@@ -428,29 +361,8 @@ namespace GProtobuf.Core
         /// </summary>
         public void WriteZigZagVarInt64(long value)
         {
-            ulong zigzagValue = (ulong)((value << 1) ^ (value >> 63));
-            WriteVarUInt64(zigzagValue);
+            WriteVarUInt64(WireFormatHelpers.EncodeZigZag64(value));
         }
-
-        ///// <summary>
-        ///// Writes a fixed-size 64-bit signed integer (8 bytes, little-endian) to the stream.
-        ///// </summary>
-        //public void WriteFixedInt64(long value)
-        //{
-        //    EnsureBufferSpace(8);
-        //    BinaryPrimitives.WriteInt64LittleEndian(buffer.Slice(bufferPosition, 8), value);
-        //    bufferPosition += 8;
-        //}
-
-        ///// <summary>
-        ///// Writes a fixed-size 64-bit unsigned integer (8 bytes, little-endian) to the stream.
-        ///// </summary>
-        //public void WriteFixedUInt64(ulong value)
-        //{
-        //    EnsureBufferSpace(8);
-        //    BinaryPrimitives.WriteInt64LittleEndian(buffer.Slice(bufferPosition, 8), (uint)value);
-        //    bufferPosition += 8;
-        //}
 
         public void WriteFixed64(double value)
         {
@@ -566,7 +478,6 @@ namespace GProtobuf.Core
                 Stream.Write(buffer.Slice(0, bufferPosition));
                 bufferPosition = 0;
             }
-            //ArrayPool<byte>.Shared.Return(buffer);
         }
     }
 }

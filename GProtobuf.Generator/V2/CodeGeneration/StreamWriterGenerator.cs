@@ -937,9 +937,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
         }
 
-        // Old ProtoInclude wrapper methods removed - will be rewritten in Phase 2
-        // See PROTOINCLUDE_CLEAN_REWRITE_PLAN.md for new implementation
-
         #endregion
 
         #region Content Method

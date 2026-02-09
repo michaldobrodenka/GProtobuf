@@ -18,23 +18,12 @@ namespace GProtobuf.Core
             Length = 0;
         }
 
-        //public void WriteVarInt32(uint value)
-        //{
-        //    //WriteVarUInt32(value); // Delegate to optimized version
-        //}
-
         // Optimized version for unsigned/positive values only (lengths, byte, ushort, uint)
         public void WriteVarUInt32(uint value)
         {
             // 0 → 1 bajt; inak zaokrúhlenie nahor po 7 bitoch
             int nbits = 32 - BitOperations.LeadingZeroCount(value);
             this.Length += nbits == 0 ? 1 : (nbits + 6) / 7;
-            //while (value > 0x7F)
-            //{
-            //    Length++;
-            //    value >>= 7;
-            //}
-            //Length++;
         }
 
         public void WriteFixedSizeInt32(int intValue)
@@ -44,38 +33,18 @@ namespace GProtobuf.Core
 
         public void WriteVarInt32(int value)
         {
-            //var value = (uint)intValue; // Convert int to uint for proper Varint encoding for int32 in Protobuf
-            //while (value > 0x7F)
-            //{
-            //    Length++;
-            //    value >>= 7;
-            //}
-            //Length++;
             int nbits = 32 - BitOperations.LeadingZeroCount((uint)value);
             this.Length += nbits == 0 ? 1 : (nbits + 6) / 7;
         }
 
-        //public void WriteVarInt64(long value)
-        //{
-        //    //ulong uValue = (ulong)value; // Convert to unsigned for proper bit operations
-        //    //while (uValue > 0x7F)
-        //    //{
-        //    //    Length++;
-        //    //    uValue >>= 7;
-        //    //}
-        //    //Length++;
-        //    int nbits = 64 - BitOperations.LeadingZeroCount((ulong)value);
-        //    this.Length += nbits == 0 ? 1 : (nbits + 6) / 7;
-        //}
-
         public void WriteZigZag32(int value)
         {
-            WriteVarInt32((value << 1) ^ (value >> 31));
+            WriteVarUInt32(WireFormatHelpers.EncodeZigZag32(value));
         }
 
         public void WriteZigZag64(long value)
         {
-            WriteVarInt64((value << 1) ^ (value >> 63));
+            WriteVarUInt64(WireFormatHelpers.EncodeZigZag64(value));
         }
 
         public void WriteDouble(double value)
@@ -322,33 +291,20 @@ namespace GProtobuf.Core
 
         /// <summary>
         /// Helper method to calculate varint size for unsigned values.
+        /// Delegates to WireFormatHelpers for canonical implementation.
         /// </summary>
         private static int GetVarintSize(uint value)
         {
-            if (value < (1 << 7)) return 1;
-            if (value < (1 << 14)) return 2;
-            if (value < (1 << 21)) return 3;
-            if (value < (1 << 28)) return 4;
-            return 5;
+            return WireFormatHelpers.GetVarintSize(value);
         }
 
         /// <summary>
         /// Helper method to calculate ZigZag varint size for signed values.
+        /// Delegates to WireFormatHelpers for canonical implementation.
         /// </summary>
         private static int GetZigZagVarintSize(long value)
         {
-            ulong zigzag = (ulong)((value << 1) ^ (value >> 63));
-
-            if (zigzag < (1UL << 7)) return 1;
-            if (zigzag < (1UL << 14)) return 2;
-            if (zigzag < (1UL << 21)) return 3;
-            if (zigzag < (1UL << 28)) return 4;
-            if (zigzag < (1UL << 35)) return 5;
-            if (zigzag < (1UL << 42)) return 6;
-            if (zigzag < (1UL << 49)) return 7;
-            if (zigzag < (1UL << 56)) return 8;
-            if (zigzag < (1UL << 63)) return 9;
-            return 10;
+            return WireFormatHelpers.GetZigZagVarintSize(value);
         }
 
         // Packed array methods

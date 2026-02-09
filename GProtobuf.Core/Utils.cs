@@ -9,36 +9,26 @@ namespace GProtobuf.Core
 {
     public static class Utils
     {
+        /// <summary>
+        /// [DEPRECATED] Use WireFormatHelpers.EncodeTag instead.
+        /// Encodes a field number and wire type into a protobuf tag.
+        /// </summary>
+        [Obsolete("Use WireFormatHelpers.EncodeTag instead. This method will be removed in a future version.")]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static int GetTagAndWireType(int tag, WireType wireType)
         {
-            return (tag << 3) | (int)wireType;
+            return (int)WireFormatHelpers.EncodeTag(tag, wireType);
         }
 
+        /// <summary>
+        /// [DEPRECATED] Use WireFormatHelpers.GetVarintSize instead.
+        /// Calculates the varint-encoded size for an unsigned 32-bit integer.
+        /// </summary>
+        [Obsolete("Use WireFormatHelpers.GetVarintSize instead. This method will be removed in a future version.")]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static int GetVarintSize(uint value)
         {
-            if (value == 0)
-            {
-                return 1;
-            }
-
-            int count = 0;
-            while (value > 0)
-            {
-                count++;
-                value >>= 7; // Posun o 7 bitov doprava
-            }
-            return count;
-
-            // Alternativna, bitovejsia implementacia:
-            // int count = 1; // Zatial 1 byt
-            // while ((value & ~0x7F) != 0) // Kym existuju bity vyssie ako spodnych 7
-            // {
-            //     count++;
-            //     value >>= 7; // Posunieme, aby sme skontrolovali dalsiu 7-bitovu skupinu
-            // }
-            // return count;
+            return WireFormatHelpers.GetVarintSize(value);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -52,7 +42,7 @@ namespace GProtobuf.Core
             int totalSize = 0;
             for (int i = 0; i < array.Length; i++)
             {
-                totalSize += GetVarintSize((uint)array[i]);
+                totalSize += WireFormatHelpers.GetVarintSize((uint)array[i]);
             }
             return totalSize;
         }
@@ -68,7 +58,7 @@ namespace GProtobuf.Core
             int totalSize = 0;
             for (int i = 0; i < list.Count; i++)
             {
-                totalSize += GetVarintSize((uint)list[i]);
+                totalSize += WireFormatHelpers.GetVarintSize((uint)list[i]);
             }
             return totalSize;
         }
@@ -85,7 +75,7 @@ namespace GProtobuf.Core
             foreach (var item in collection)
             {
                 // Prekonvertujeme int na uint pre spravne Varint kodovanie pre int32 v Protobuf
-                totalSize += GetVarintSize((uint)item);
+                totalSize += WireFormatHelpers.GetVarintSize((uint)item);
             }
             return totalSize;
         }
@@ -102,7 +92,7 @@ namespace GProtobuf.Core
             foreach (var item in collection)
             {
                 // Prekonvertujeme int na uint pre spravne Varint kodovanie pre int32 v Protobuf
-                totalSize += GetVarintSize(item);
+                totalSize += WireFormatHelpers.GetVarintSize(item);
             }
             return totalSize;
         }
@@ -118,9 +108,7 @@ namespace GProtobuf.Core
             int totalSize = 0;
             for (int i = 0; i < array.Length; i++)
             {
-                // ZigZag encode the value first, then calculate varint size
-                uint zigzagValue = (uint)((array[i] << 1) ^ (array[i] >> 31));
-                totalSize += GetVarintSize(zigzagValue);
+                totalSize += WireFormatHelpers.GetZigZagVarintSize(array[i]);
             }
             return totalSize;
         }
@@ -136,9 +124,7 @@ namespace GProtobuf.Core
             int totalSize = 0;
             for (int i = 0; i < list.Count; i++)
             {
-                // ZigZag encode the value first, then calculate varint size
-                uint zigzagValue = (uint)((list[i] << 1) ^ (list[i] >> 31));
-                totalSize += GetVarintSize(zigzagValue);
+                totalSize += WireFormatHelpers.GetZigZagVarintSize(list[i]);
             }
             return totalSize;
         }
@@ -154,9 +140,7 @@ namespace GProtobuf.Core
             int totalSize = 0;
             foreach (var item in collection)
             {
-                // ZigZag encode the value first, then calculate varint size
-                uint zigzagValue = (uint)((item << 1) ^ (item >> 31));
-                totalSize += GetVarintSize(zigzagValue);
+                totalSize += WireFormatHelpers.GetZigZagVarintSize(item);
             }
             return totalSize;
         }
@@ -174,7 +158,7 @@ namespace GProtobuf.Core
             int totalSize = 0;
             foreach (var item in array)
             {
-                totalSize += GetVarInt64Size(item);
+                totalSize += WireFormatHelpers.GetVarintSize((ulong)item);
             }
             return totalSize;
         }
@@ -190,9 +174,7 @@ namespace GProtobuf.Core
             int totalSize = 0;
             foreach (var item in array)
             {
-                // ZigZag encode the long value first, then calculate varint size
-                ulong zigzagValue = (ulong)((item << 1) ^ (item >> 63));
-                totalSize += GetVarUInt64Size(zigzagValue);
+                totalSize += WireFormatHelpers.GetZigZagVarintSize(item);
             }
             return totalSize;
         }
@@ -219,25 +201,23 @@ namespace GProtobuf.Core
         #region VarInt64 Size Calculation
 
         /// <summary>
+        /// [DEPRECATED] Use WireFormatHelpers.GetVarintSize(ulong) instead.
         /// Calculates the size in bytes for a VarInt64 value.
         /// </summary>
+        [Obsolete("Use WireFormatHelpers.GetVarintSize(ulong) instead. This method will be removed in a future version.")]
         public static int GetVarInt64Size(long value)
         {
-            return GetVarUInt64Size((ulong)value);
+            return WireFormatHelpers.GetVarintSize((ulong)value);
         }
 
         /// <summary>
+        /// [DEPRECATED] Use WireFormatHelpers.GetVarintSize(ulong) instead.
         /// Calculates the size in bytes for a VarUInt64 value.
         /// </summary>
+        [Obsolete("Use WireFormatHelpers.GetVarintSize(ulong) instead. This method will be removed in a future version.")]
         public static int GetVarUInt64Size(ulong value)
         {
-            int size = 1;
-            while (value >= 0x80)
-            {
-                value >>= 7;
-                size++;
-            }
-            return size;
+            return WireFormatHelpers.GetVarintSize(value);
         }
 
         #endregion
@@ -255,7 +235,7 @@ namespace GProtobuf.Core
             int totalSize = 0;
             foreach (var item in array)
             {
-                totalSize += GetVarintSize((uint)item);
+                totalSize += WireFormatHelpers.GetVarintSize((uint)item);
             }
             return totalSize;
         }
@@ -271,9 +251,7 @@ namespace GProtobuf.Core
             int totalSize = 0;
             foreach (var item in array)
             {
-                // ZigZag encode the sbyte value first, then calculate varint size
-                uint zigzagValue = (uint)((item << 1) ^ (item >> 31));
-                totalSize += GetVarintSize(zigzagValue);
+                totalSize += WireFormatHelpers.GetZigZagVarintSize(item);
             }
             return totalSize;
         }
@@ -293,7 +271,7 @@ namespace GProtobuf.Core
             int totalSize = 0;
             foreach (var item in array)
             {
-                totalSize += GetVarintSize((uint)item);
+                totalSize += WireFormatHelpers.GetVarintSize((uint)item);
             }
             return totalSize;
         }
@@ -309,9 +287,7 @@ namespace GProtobuf.Core
             int totalSize = 0;
             foreach (var item in array)
             {
-                // ZigZag encode the short value first, then calculate varint size
-                uint zigzagValue = (uint)((item << 1) ^ (item >> 31));
-                totalSize += GetVarintSize(zigzagValue);
+                totalSize += WireFormatHelpers.GetZigZagVarintSize(item);
             }
             return totalSize;
         }
@@ -331,7 +307,7 @@ namespace GProtobuf.Core
             int totalSize = 0;
             foreach (var item in array)
             {
-                totalSize += GetVarintSize((uint)item);
+                totalSize += WireFormatHelpers.GetVarintSize((uint)item);
             }
             return totalSize;
         }
@@ -351,7 +327,7 @@ namespace GProtobuf.Core
             int totalSize = 0;
             foreach (var item in array)
             {
-                totalSize += GetVarintSize(item);
+                totalSize += WireFormatHelpers.GetVarintSize(item);
             }
             return totalSize;
         }
@@ -371,7 +347,7 @@ namespace GProtobuf.Core
             int totalSize = 0;
             foreach (var item in array)
             {
-                totalSize += GetVarUInt64Size(item);
+                totalSize += WireFormatHelpers.GetVarintSize(item);
             }
             return totalSize;
         }

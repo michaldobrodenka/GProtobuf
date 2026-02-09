@@ -742,15 +742,23 @@ namespace GProtobuf.Generator.V2
         /// </summary>
         public static (string BytesString, int ByteCount) PrecomputeTagBytes(int fieldId, WireType wireType)
         {
-            uint tag = (uint)((fieldId << 3) | (int)wireType);
+            // Tag encoding formula: (fieldId << 3) | wireType
+            // This matches ProtobufConstants and WireFormatHelpers
+            const int WireTypeBitWidth = 3;
+            const byte VarintContinuationBit = 0x80;
+            const byte VarintValueMask = 0x7F;
+            const int VarintShift = 7;
+            const int MaxVarint32Size = 5;
 
-            var tagBytes = new byte[5];
+            uint tag = (uint)((fieldId << WireTypeBitWidth) | (int)wireType);
+
+            var tagBytes = new byte[MaxVarint32Size];
             int byteCount = 0;
 
-            while (tag > 0x7F)
+            while (tag >= VarintContinuationBit)
             {
-                tagBytes[byteCount++] = (byte)((tag & 0x7F) | 0x80);
-                tag >>= 7;
+                tagBytes[byteCount++] = (byte)((tag & VarintValueMask) | VarintContinuationBit);
+                tag >>= VarintShift;
             }
             tagBytes[byteCount++] = (byte)tag;
 

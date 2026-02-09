@@ -645,7 +645,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateEnumFieldSize(ProtoMemberAttribute member, string sourceVar)
         {
-            // protobuf-net 2.3.7 Level200: IsRequired on nullable → ignored, on non-nullable → always serialize
             if (member.IsNullable)
             {
                 // Nullable enum: always use HasValue check (IsRequired ignored)

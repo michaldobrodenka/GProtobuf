@@ -318,7 +318,6 @@ namespace GProtobuf.Generator.V2.Handlers
 
         #region Helpers
 
-        //Todo: need to use collection helper instead
         private string GenerateCollectionInitialization(string elementType, CollectionKind kind, string collectionTypeName)
         {
             switch (kind)

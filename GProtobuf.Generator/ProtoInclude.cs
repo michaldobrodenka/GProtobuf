@@ -91,15 +91,77 @@ namespace GProtobuf.Generator
         CustomEnumerable
     }
 
+    /// <summary>
+    /// Marks a type as protobuf-serializable, enabling source code generation for serialization/deserialization.
+    /// Applied to classes, structs, enums, or interfaces at compile-time.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Usage:</b></para>
+    /// - Classes/Structs: Generates Deserialize{ClassName}, Read{ClassName}, Write{ClassName} methods
+    /// - Enums: Generates varint encoding/decoding for enum values
+    /// - Interfaces: Marks interface for ProtoInclude polymorphism (base type tracking)
+    ///
+    /// <para><b>Requirements:</b></para>
+    /// - Type must have [ProtoContract] OR [ProtoInclude] (detected by SerializerGenerator)
+    /// - Members must be marked with [ProtoMember(fieldId)] to be serialized
+    /// - Field IDs must be unique within type hierarchy
+    ///
+    /// <para><b>CompatibilityLevel.Level200:</b></para>
+    /// - Default values are NOT serialized on wire
+    /// - Unknown fields are skipped (not preserved for round-tripping)
+    /// - Packed encoding for repeated primitives
+    /// </remarks>
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct | AttributeTargets.Enum | AttributeTargets.Interface, AllowMultiple = false, Inherited = false)]
     public sealed class ProtoContractAttribute : Attribute
     {
+        /// <summary>
+        /// Optional custom name for the type (not currently used in code generation).
+        /// Reserved for future schema generation or debugging purposes.
+        /// </summary>
         public string Name { get; set; }
     }
 
+    /// <summary>
+    /// Declares a derived type in a protobuf inheritance hierarchy (polymorphism support).
+    /// Applied to base class/interface to specify derived types and their field IDs.
+    /// Multiple [ProtoInclude] attributes can be applied to support multiple derived types.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Wire Format (Level200):</b></para>
+    /// Base class fields serialize first, followed by a length-delimited wrapper for derived type:
+    /// <code>
+    /// [base field 1][base field 2]...[fieldId: derived wrapper][length][derived field 1][derived field 2]...
+    /// </code>
+    ///
+    /// <para><b>Deserialization Strategy:</b></para>
+    /// - Reads base class fields first
+    /// - Peeks at next tag to detect ProtoInclude wrapper field ID
+    /// - If wrapper detected: Reads length prefix, deserializes derived type content
+    /// - If no wrapper: Creates base class instance
+    ///
+    /// <para><b>Requirements:</b></para>
+    /// - Field IDs must NOT conflict with base class [ProtoMember] field IDs
+    /// - Field IDs must be unique across all [ProtoInclude] in same type
+    /// - Derived types should have [ProtoContract] (optional but recommended)
+    ///
+    /// <para><b>Example:</b></para>
+    /// <code>
+    /// [ProtoContract]
+    /// [ProtoInclude(10, typeof(Dog))]
+    /// [ProtoInclude(11, typeof(Cat))]
+    /// public abstract class Animal { }
+    /// </code>
+    /// </remarks>
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface, AllowMultiple = true, Inherited = false)]
     public class ProtoIncludeAttribute : Attribute
     {
+        /// <summary>
+        /// Initializes a new ProtoIncludeAttribute with field ID, type name, and namespace.
+        /// Called by SerializerGenerator during Roslyn analysis phase.
+        /// </summary>
+        /// <param name="fieldId">Field ID for the derived type wrapper (must be unique in hierarchy).</param>
+        /// <param name="type">Fully qualified type name of derived type.</param>
+        /// <param name="nmspace">Namespace of derived type.</param>
         public ProtoIncludeAttribute(int fieldId, string type, string nmspace)
         {
             FieldId = fieldId;
@@ -107,37 +169,120 @@ namespace GProtobuf.Generator
             this.Namespace = nmspace;
         }
 
+        /// <summary>
+        /// Field ID for the length-delimited wrapper containing derived type content.
+        /// Must NOT conflict with base class [ProtoMember] field IDs.
+        /// </summary>
         public int FieldId { get; set; }
 
+        /// <summary>
+        /// Namespace of the derived type (used for code generation and type resolution).
+        /// </summary>
         public string Namespace { get; set; }
 
+        /// <summary>
+        /// Fully qualified type name of the derived type.
+        /// </summary>
         public string Type { get; set; }
     }
 
+    /// <summary>
+    /// Marks a field or property for protobuf serialization, assigning a unique field ID (tag).
+    /// Applied to members at compile-time to include them in generated serialization code.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Field ID Requirements:</b></para>
+    /// - Must be unique within type (and base types if using inheritance)
+    /// - Range: 1-536870911 (field 0 reserved, 19000-19999 reserved by protobuf spec)
+    /// - Lower field IDs (1-15) use 1-byte tags (more efficient)
+    /// - Field IDs 16-2047 use 2-byte tags
+    ///
+    /// <para><b>Serialization Behavior (Level200):</b></para>
+    /// - Default values: NOT serialized on wire (0, null, empty string, etc.)
+    /// - Repeated fields (collections): MUST use packed encoding for primitives
+    /// - Unknown fields: Skipped during deserialization (forward compatibility)
+    /// - Field order: Can appear in any order on wire (last value wins for non-repeated)
+    ///
+    /// <para><b>Property vs Field:</b></para>
+    /// - Properties: Must have setter (get-only properties ignored)
+    /// - Fields: Can be readonly (for struct initialization via constructor)
+    ///
+    /// <para><b>Supported Types:</b></para>
+    /// - Primitives: int, long, bool, string, byte[], Guid, DateTime, TimeSpan, etc.
+    /// - Collections: T[], List&lt;T&gt;, ICollection&lt;T&gt;, custom IEnumerable&lt;T&gt; + Add method
+    /// - Maps: Dictionary&lt;K,V&gt;, IDictionary&lt;K,V&gt;, ICollection&lt;KeyValuePair&lt;K,V&gt;&gt;
+    /// - Messages: Other [ProtoContract] types (nested messages)
+    /// - Enums: Serialized as varint
+    /// </remarks>
     [AttributeUsage(AttributeTargets.Property | AttributeTargets.Field, AllowMultiple = false, Inherited = true)]
     public class ProtoMemberAttribute : Attribute
     {
+        /// <summary>
+        /// Initializes a new ProtoMemberAttribute with required field ID.
+        /// </summary>
+        /// <param name="fieldId">
+        /// Unique field ID (tag) for this member within the type hierarchy.
+        /// Range: 1-536870911 (avoid 19000-19999).
+        /// </param>
         public ProtoMemberAttribute(int fieldId)
         {
             this.FieldId = fieldId;
         }
 
+        /// <summary>
+        /// Unique field ID (tag) for this member. Encoded in wire format as (fieldId &lt;&lt; 3) | wireType.
+        /// </summary>
         public int FieldId { get; set; }
 
+        /// <summary>
+        /// Fully qualified type name of the member (populated by SerializerGenerator during analysis).
+        /// Example: "System.Int32", "System.Collections.Generic.List&lt;string&gt;".
+        /// </summary>
         public string Type { get; set; }
 
+        /// <summary>
+        /// Namespace of the containing type (populated by SerializerGenerator during analysis).
+        /// Used for code generation and type resolution.
+        /// </summary>
         public string Namespace { get; set; }
 
+        /// <summary>
+        /// Name of the property or field (populated by SerializerGenerator during analysis).
+        /// Used in generated code for property access (e.g., "obj.PropertyName").
+        /// </summary>
         public string Name { get; set; }
 
+        /// <summary>
+        /// For repeated fields (collections): Use packed encoding (Length-delimited with contiguous values).
+        /// Level200: Packed encoding is REQUIRED for repeated primitives (int, long, bool, etc.).
+        /// Ignored for non-repeated fields and non-primitive collections.
+        /// </summary>
         public bool IsPacked { get; set; }
 
+        /// <summary>
+        /// Marks field as required (validation only, not enforced in Level200 wire format).
+        /// If true, deserializer may throw if field is missing (implementation-specific).
+        /// Level200: Optional feature, typically not enforced for backwards compatibility.
+        /// </summary>
         public bool IsRequired { get; set; }
 
+        /// <summary>
+        /// Specifies wire encoding format for numeric types.
+        /// See <see cref="DataFormat"/> enum for options (Default, ZigZag, FixedSize, etc.).
+        /// </summary>
         public DataFormat DataFormat { get; set; }
+
+        /// <summary>
+        /// List of interfaces implemented by the member's type (populated during analysis).
+        /// Used to detect ICollection&lt;T&gt;, IDictionary&lt;K,V&gt;, etc. for code generation.
+        /// </summary>
         public List<string> Interfaces { get; set; }
-        
-        /// Is nullable non reference type
+
+        /// <summary>
+        /// True if member is a nullable value type (e.g., int?, Guid?, DateTime?).
+        /// Does NOT apply to reference types (which are always nullable).
+        /// Used to generate null-checking logic in serialization code.
+        /// </summary>
         public bool IsNullable { get; set; }
         
         /// <summary>

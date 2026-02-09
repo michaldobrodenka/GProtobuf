@@ -91,46 +91,6 @@ namespace GProtobuf.Core
             return fixedSizeResult;
         }
 
-        //public int[] ReadPackedVarIntInt32Array(bool zigZag)
-        //{
-        //    var length = ReadVarInt32();
-
-        //    if (length == 0)
-        //        return Array.Empty<int>();
-
-        //    if (position + length > buffer.Length)
-        //        throw new InvalidOperationException("Buffer overrun");
-
-        //    if (zigZag)
-        //    {
-        //        //position += length;
-
-        //        List<int> result = new();
-        //        int end = position + length;
-
-        //        while (position < end)
-        //        {
-        //            result.Add(ReadZigZagVarInt32());
-        //        }
-
-        //        return result.ToArray();
-        //    }
-        //    else
-        //    {
-        //        //position += length;
-
-        //        List<int> result = new();
-        //        int end = position + length;
-
-        //        while (position < end)
-        //        {
-        //            result.Add(ReadVarInt32());
-        //        }
-
-        //        return result.ToArray();
-        //    }
-        //}
-
         public int[] ReadPackedVarIntInt32Array(bool zigZag)
         {
             var length = ReadVarInt32();

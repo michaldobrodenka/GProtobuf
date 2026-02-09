@@ -5,23 +5,77 @@ using System.Linq;
 namespace GProtobuf.Generator.V2
 {
     /// <summary>
-    /// Registry for managing type definitions and their inheritance relationships.
+    /// Centralized registry for managing type definitions, inheritance hierarchies, and namespace resolution.
+    /// Popul ated during SerializerGenerator analysis phase, queried during code generation.
     /// </summary>
+    /// <remarks>
+    /// <para><b>Design Rationale:</b></para>
+    /// - Single source of truth for all type metadata during code generation
+    /// - O(1) lookups by type name, namespace, or inheritance relationships
+    /// - Separates two inheritance models: ProtoInclude (polymorphism) vs flat (field merging)
+    ///
+    /// <para><b>Inheritance Models:</b></para>
+    /// 1. **ProtoInclude Inheritance** (polymorphism):
+    ///    - Tracked via _parentOf/_childrenOf dictionaries
+    ///    - Used for runtime type dispatch (deserializing abstract base types)
+    ///    - Generates wrapper fields for derived types in wire format
+    ///
+    /// 2. **Flat Inheritance** (field aggregation):
+    ///    - Tracked via _baseClassOf dictionary
+    ///    - Used when class inherits from base WITHOUT [ProtoInclude]
+    ///    - Merges ProtoMembers from base + derived (derived shadows base on same FieldId)
+    ///
+    /// <para><b>Thread Safety:</b></para>
+    /// - NOT thread-safe during registration phase (SerializerGenerator is single-threaded)
+    /// - Thread-safe during code generation (read-only after registration completes)
+    ///
+    /// <para><b>Namespace Resolution:</b></para>
+    /// - Handles nested types (A.B.C.Parent.Nested)
+    /// - Caches lookups for performance (O(1) after first query)
+    /// - Falls back to TypeNameHelper for types not in registry
+    /// </remarks>
     public class TypeRegistry
     {
+        // Fast lookups by type identity
         private readonly Dictionary<string, TypeDefinition> _byFullName = new Dictionary<string, TypeDefinition>();
         private readonly Dictionary<string, List<TypeDefinition>> _byNamespace = new Dictionary<string, List<TypeDefinition>>();
-        private readonly Dictionary<string, string> _parentOf = new Dictionary<string, string>(); // ProtoInclude-based inheritance
-        private readonly Dictionary<string, HashSet<string>> _childrenOf = new Dictionary<string, HashSet<string>>();
+
+        // ProtoInclude-based inheritance (polymorphism)
+        private readonly Dictionary<string, string> _parentOf = new Dictionary<string, string>(); // derivedType -> baseType
+        private readonly Dictionary<string, HashSet<string>> _childrenOf = new Dictionary<string, HashSet<string>>(); // baseType -> derivedTypes
+
+        // Enum detection
         private readonly HashSet<string> _enumTypes = new HashSet<string>();
+
+        // Namespace resolution cache
         private readonly Dictionary<string, string> _typeNamespaceCache = new Dictionary<string, string>();
-        private readonly Dictionary<string, string> _baseClassOf = new Dictionary<string, string>(); // Flat inheritance (без ProtoInclude)
+
+        // Flat inheritance (field aggregation without ProtoInclude)
+        private readonly Dictionary<string, string> _baseClassOf = new Dictionary<string, string>(); // derivedType -> baseType
 
         private static readonly string[] EmptyStringArray = Array.Empty<string>();
         private static readonly TypeDefinition[] EmptyTypeArray = Array.Empty<TypeDefinition>();
 
         #region Registration
 
+        /// <summary>
+        /// Registers a type definition with its namespace.
+        /// Called by SerializerGenerator for each [ProtoContract] or [ProtoInclude] type discovered during analysis.
+        /// </summary>
+        /// <param name="namespace">Namespace where the type is declared (used for code generation).</param>
+        /// <param name="type">Type metadata captured from Roslyn analysis.</param>
+        /// <remarks>
+        /// <para><b>Side Effects:</b></para>
+        /// - Indexes type by FullName for O(1) lookup
+        /// - Groups type by namespace for per-namespace code generation
+        /// - Tracks ProtoInclude relationships (parent/children dictionaries)
+        /// - Tracks flat inheritance (BaseClass without ProtoInclude)
+        ///
+        /// <para><b>Inheritance Tracking:</b></para>
+        /// - If type.ProtoIncludes exists: Populates _parentOf/_childrenOf (polymorphism model)
+        /// - If type.BaseClass exists BUT no ProtoInclude: Populates _baseClassOf (flat model)
+        /// - ProtoInclude takes precedence over flat inheritance
+        /// </remarks>
         public void Register(string @namespace, TypeDefinition type)
         {
             _byFullName[type.FullName] = type;
@@ -64,6 +118,15 @@ namespace GProtobuf.Generator.V2
             }
         }
 
+        /// <summary>
+        /// Registers an enum type name for enum detection during code generation.
+        /// Called by SerializerGenerator for each enum type discovered during Roslyn analysis.
+        /// </summary>
+        /// <param name="enumTypeName">Fully qualified enum type name.</param>
+        /// <remarks>
+        /// Used by code generators to distinguish enum fields from other types.
+        /// Enums are serialized as varint-encoded underlying values (not nested messages).
+        /// </remarks>
         public void RegisterEnum(string enumTypeName)
         {
             _enumTypes.Add(enumTypeName);
@@ -73,25 +136,55 @@ namespace GProtobuf.Generator.V2
 
         #region Lookups
 
+        /// <summary>
+        /// Retrieves type definition by fully qualified name.
+        /// Returns null if type not registered.
+        /// </summary>
+        /// <param name="fullName">Fully qualified type name (e.g., "MyNamespace.MyClass").</param>
+        /// <returns>TypeDefinition if found, null otherwise. O(1) lookup.</returns>
         public TypeDefinition GetByFullName(string fullName)
         {
             return _byFullName.TryGetValue(fullName, out var type) ? type : null;
         }
 
+        /// <summary>
+        /// Retrieves all types registered in the specified namespace.
+        /// Used by ObjectTreeV2 for per-namespace code file generation.
+        /// </summary>
+        /// <param name="ns">Namespace name (e.g., "MyNamespace").</param>
+        /// <returns>Collection of types in namespace, or empty collection if none. O(1) lookup.</returns>
         public IEnumerable<TypeDefinition> GetByNamespace(string ns)
         {
             return _byNamespace.TryGetValue(ns, out var list) ? list : EmptyTypeArray;
         }
 
+        /// <summary>
+        /// Gets all registered namespaces (used to generate one .cs file per namespace).
+        /// </summary>
+        /// <returns>Collection of namespace names.</returns>
         public IEnumerable<string> GetAllNamespaces() => _byNamespace.Keys;
 
+        /// <summary>
+        /// Gets all registered type definitions (used for cross-type analysis during code generation).
+        /// </summary>
+        /// <returns>Collection of all TypeDefinitions.</returns>
         public IEnumerable<TypeDefinition> GetAllTypes() => _byFullName.Values;
 
+        /// <summary>
+        /// Checks if a type is an enum.
+        /// Used by code generators to determine serialization strategy (varint vs nested message).
+        /// </summary>
+        /// <param name="typeName">Fully qualified type name.</param>
+        /// <returns>True if type is enum, false otherwise. O(1) lookup.</returns>
         public bool IsEnum(string typeName)
         {
             return _enumTypes.Contains(typeName);
         }
 
+        /// <summary>
+        /// Gets all registered enum type names.
+        /// </summary>
+        /// <returns>Collection of fully qualified enum type names.</returns>
         public IReadOnlyCollection<string> GetAllEnums() => _enumTypes;
 
         /// <summary>
@@ -150,11 +243,31 @@ namespace GProtobuf.Generator.V2
 
         #region Inheritance
 
+        /// <summary>
+        /// Gets the direct parent type in ProtoInclude inheritance hierarchy.
+        /// Returns null if type has no parent (is root type or not part of ProtoInclude hierarchy).
+        /// </summary>
+        /// <param name="typeName">Fully qualified derived type name.</param>
+        /// <returns>Parent type name, or null if no parent. O(1) lookup.</returns>
+        /// <remarks>
+        /// Only tracks ProtoInclude-based inheritance (not flat inheritance).
+        /// For flat inheritance, use GetFlatBaseClass().
+        /// </remarks>
         public string GetParent(string typeName)
         {
             return _parentOf.TryGetValue(typeName, out var parent) ? parent : null;
         }
 
+        /// <summary>
+        /// Gets all direct children of a base type in ProtoInclude hierarchy.
+        /// Returns empty collection if type has no children.
+        /// </summary>
+        /// <param name="typeName">Fully qualified base type name.</param>
+        /// <returns>Collection of direct child type names. O(1) lookup.</returns>
+        /// <remarks>
+        /// Only returns DIRECT children (not transitive).
+        /// For all descendants, use GetAllDerivedTypes().
+        /// </remarks>
         public IReadOnlyCollection<string> GetChildren(string typeName)
         {
             return _childrenOf.TryGetValue(typeName, out var children)
@@ -191,6 +304,15 @@ namespace GProtobuf.Generator.V2
             return chain;
         }
 
+        /// <summary>
+        /// Gets the root type of an inheritance hierarchy (type with no parent).
+        /// Returns typeName itself if it has no parent.
+        /// </summary>
+        /// <param name="typeName">Type to find root for.</param>
+        /// <returns>Root type name (top of inheritance chain). O(depth) traversal.</returns>
+        /// <remarks>
+        /// Example: For hierarchy Animal -> Dog -> Bulldog, returns "Animal" for all three types.
+        /// </remarks>
         public string GetRootType(string typeName)
         {
             var current = typeName;
@@ -201,21 +323,46 @@ namespace GProtobuf.Generator.V2
             return current;
         }
 
+        /// <summary>
+        /// Checks if type is part of any ProtoInclude inheritance hierarchy (as base or derived).
+        /// </summary>
+        /// <param name="typeName">Type to check.</param>
+        /// <returns>True if type is base (has children) or derived (has parent), false otherwise. O(1) lookup.</returns>
         public bool IsPartOfHierarchy(string typeName)
         {
             return IsDerivedType(typeName) || IsBaseType(typeName);
         }
 
+        /// <summary>
+        /// Checks if type is a derived type in ProtoInclude hierarchy (has a parent).
+        /// </summary>
+        /// <param name="typeName">Type to check.</param>
+        /// <returns>True if type has parent via ProtoInclude, false otherwise. O(1) lookup.</returns>
         public bool IsDerivedType(string typeName)
         {
             return _parentOf.ContainsKey(typeName);
         }
 
+        /// <summary>
+        /// Checks if type is a base type in ProtoInclude hierarchy (has children).
+        /// </summary>
+        /// <param name="typeName">Type to check.</param>
+        /// <returns>True if type has [ProtoInclude] derived types, false otherwise. O(1) lookup.</returns>
         public bool IsBaseType(string typeName)
         {
             return _childrenOf.TryGetValue(typeName, out var children) && children.Count > 0;
         }
 
+        /// <summary>
+        /// Gets the ProtoInclude field ID for a derived type as declared in its parent's [ProtoInclude] attribute.
+        /// Returns null if type has no parent or parent doesn't declare ProtoInclude for this type.
+        /// </summary>
+        /// <param name="derivedTypeName">Derived type to get field ID for.</param>
+        /// <returns>ProtoInclude field ID, or null if not found. O(1) parent lookup + O(n) ProtoIncludes scan.</returns>
+        /// <remarks>
+        /// Used to generate length-delimited wrapper tags for derived type content in wire format.
+        /// Example: [ProtoInclude(10, typeof(Dog))] -> returns 10 for "Dog" type.
+        /// </remarks>
         public int? GetProtoIncludeFieldId(string derivedTypeName)
         {
             var parent = GetParent(derivedTypeName);
@@ -492,13 +639,40 @@ namespace GProtobuf.Generator.V2
     }
 
     /// <summary>
-    /// Information about a merged field from inheritance chain.
+    /// Represents a ProtoMember field resolved through flat inheritance chain.
+    /// Used by GetMergedFields() to handle field shadowing (derived overrides base).
     /// </summary>
+    /// <remarks>
+    /// <para><b>Field Shadowing Logic:</b></para>
+    /// If base and derived types both have [ProtoMember(1)], the DERIVED field wins.
+    /// The base field is marked IsShadowed=true and excluded from serialization.
+    ///
+    /// <para><b>Usage in Code Generation:</b></para>
+    /// Generated deserializers read fields in FieldId order, using the DeclaringType to determine
+    /// which property to assign (handles case where field is declared in base but accessed via derived).
+    /// </remarks>
     public class MergedFieldInfo
     {
+        /// <summary>
+        /// Field ID from [ProtoMember(fieldId)] attribute.
+        /// </summary>
         public int FieldId { get; set; }
+
+        /// <summary>
+        /// Full ProtoMember metadata (type, name, collection info, etc.).
+        /// </summary>
         public ProtoMemberAttribute Field { get; set; }
-        public string DeclaringType { get; set; }  // Type that declares this field
-        public bool IsShadowed { get; set; }  // True if hidden by derived type field
+
+        /// <summary>
+        /// Fully qualified name of the type that declares this field.
+        /// May differ from type being deserialized if field is inherited.
+        /// </summary>
+        public string DeclaringType { get; set; }
+
+        /// <summary>
+        /// True if field was overridden by derived type with same FieldId (field shadowing).
+        /// Shadowed fields are excluded from GetMergedFields() result.
+        /// </summary>
+        public bool IsShadowed { get; set; }
     }
 }

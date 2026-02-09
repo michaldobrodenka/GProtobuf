@@ -20,8 +20,6 @@ public sealed class SerializerGenerator : IIncrementalGenerator
 //        }
 //#endif
 
-        var configOptions = context.AnalyzerConfigOptionsProvider
-            .Select((provider, _) => provider.GlobalOptions.TryGetValue("build_property.GenerateRefactored", out var _));
 
         // Collect all enums from compilation
         var enumTypesProvider = context.CompilationProvider
@@ -126,29 +124,13 @@ public sealed class SerializerGenerator : IIncrementalGenerator
             });
 
         context.RegisterSourceOutput(
-            combinedPipeline.Combine(configOptions).Combine(enumTypesProvider).Combine(context.CompilationProvider),
+            combinedPipeline.Combine(enumTypesProvider).Combine(context.CompilationProvider),
             static (context, provider) =>
             {
-                var typeDefinitions = provider.Left.Left.Left; // Already combined pipeline
-                var shouldUsedRefactored = provider.Left.Left.Right;
+                var typeDefinitions = provider.Left.Left; // Already combined pipeline
                 var enumTypes = provider.Left.Right;
                 var compilation = provider.Right;
 
-                //if (shouldUsedRefactored)
-                //{
-                //    var refactoredObjectTree = new RefactoredObjectTree();
-                //    foreach (var (namespaceName, typeDefinition) in typeDefinitions)
-                //    {
-                //        refactoredObjectTree.AddType(namespaceName, typeDefinition);
-                //    }
-
-                //    var files = CodeGenerator.GenerateFiles(refactoredObjectTree);
-                //    foreach(var f in files)
-                //    {
-                //        context.AddSource(f.FileName, f.Code);
-                //    }
-                //    return;
-                //}
 
                 try
                 {
