@@ -111,7 +111,33 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                 return (namespaceName, typeDefinition);
             });
 
-        // Combine both pipelines and filter out nulls
+      // Pipeline 3: Types specified via [assembly: GenerateSerializer(typeof(...))]
+      // For standalone serialization of List<T>, T[], Dictionary<K,V>, primitives
+      // NOTE: ForAttributeWithMetadataName doesn't work for assembly-level attributes,
+      // so we extract them from the compilation directly
+      var standaloneTypesPipeline = context.CompilationProvider
+                .Select((compilation, ct) =>
+                {
+                    var result = new List<ITypeSymbol>();
+                    var generateSerializerAttr = compilation.GetTypeByMetadataName("GProtobuf.Core.GenerateSerializerAttribute");
+                    if (generateSerializerAttr == null)
+                        return result.ToImmutableArray();
+
+                    foreach (var attr in compilation.Assembly.GetAttributes())
+                    {
+                        if (SymbolEqualityComparer.Default.Equals(attr.AttributeClass, generateSerializerAttr))
+                        {
+                            if (attr.ConstructorArguments.Length > 0 &&
+                                attr.ConstructorArguments[0].Value is ITypeSymbol typeSymbol)
+                            {
+                                result.Add(typeSymbol);
+                            }
+                        }
+                    }
+                    return result.ToImmutableArray();
+                });
+
+        // Combine ProtoContract and ProtoInclude pipelines
         var combinedPipeline = protoContractPipeline
             .Collect()
             .Combine(protoIncludePipeline.Collect())
@@ -124,11 +150,15 @@ public sealed class SerializerGenerator : IIncrementalGenerator
             });
 
         context.RegisterSourceOutput(
-            combinedPipeline.Combine(enumTypesProvider).Combine(context.CompilationProvider),
+            combinedPipeline
+                .Combine(enumTypesProvider)
+                .Combine(standaloneTypesPipeline)
+                .Combine(context.CompilationProvider),
             static (context, provider) =>
             {
-                var typeDefinitions = provider.Left.Left; // Already combined pipeline
-                var enumTypes = provider.Left.Right;
+                var typeDefinitions = provider.Left.Left.Left; // ProtoContract + ProtoInclude types
+                var enumTypes = provider.Left.Left.Right;
+                var standaloneTypes = provider.Left.Right; // Types from [GenerateSerializer]
                 var compilation = provider.Right;
 
 
@@ -139,15 +169,16 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                         new DiagnosticDescriptor(
                             "GPROTO001",
                             "GProtobuf Generator Started",
-                            "GProtobuf generator started with {0} enum types and {1} type definitions",
+                            "GProtobuf generator started with {0} enum types, {1} type definitions, {2} standalone types",
                             "GProtobuf",
                             DiagnosticSeverity.Info,
                             true),
                         Location.None,
                         enumTypes.Count,
-                        typeDefinitions.Count()));
+                        typeDefinitions.Count(),
+                        standaloneTypes.Length));
 
-                    var objectTree = new ObjectTreeV2(enumTypes, compilation);
+                    var objectTree = new ObjectTreeV2(enumTypes, compilation, standaloneTypes);
                     foreach (var (namespaceName, typeDefinition) in typeDefinitions)
                     {
                         objectTree.AddType(namespaceName, typeDefinition);

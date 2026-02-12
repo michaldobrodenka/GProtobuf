@@ -1,8 +1,10 @@
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
 using GProtobuf.Generator.V2.CodeGeneration;
 using GProtobuf.Generator.V2.Handlers.VirtualTypes;
 using GProtobuf.Generator.V2.Helpers;
+using Microsoft.CodeAnalysis;
 
 namespace GProtobuf.Generator.V2
 {
@@ -44,6 +46,7 @@ namespace GProtobuf.Generator.V2
     {
         private readonly TypeRegistry _registry = new();
         private readonly Microsoft.CodeAnalysis.Compilation _compilation;
+        private readonly Dictionary<string, List<StandaloneTypeInfo>> _standaloneTypesByNamespace = new();
 
         #region Type Registration
 
@@ -56,7 +59,10 @@ namespace GProtobuf.Generator.V2
         /// Roslyn Compilation context (optional).
         /// Used for advanced type resolution in VirtualMapTypeRegistry (e.g., nested generic constraints).
         /// </param>
-        public ObjectTreeV2(HashSet<string> enumTypes, Microsoft.CodeAnalysis.Compilation compilation = null)
+        /// <param name="standaloneTypes">
+        /// Types specified via [assembly: GenerateSerializer(typeof(...))] for standalone serialization.
+        /// </param>
+        public ObjectTreeV2(HashSet<string> enumTypes, Microsoft.CodeAnalysis.Compilation compilation = null, ImmutableArray<ITypeSymbol> standaloneTypes = default)
         {
             _compilation = compilation;
 
@@ -66,6 +72,24 @@ namespace GProtobuf.Generator.V2
                 foreach (var enumType in enumTypes)
                 {
                     _registry.RegisterEnum(enumType);
+                }
+            }
+
+            // Analyze and register standalone types
+            if (!standaloneTypes.IsDefault)
+            {
+                foreach (var typeSymbol in standaloneTypes)
+                {
+                    var info = StandaloneTypeAnalyzer.Analyze(typeSymbol);
+                    if (info != null)
+                    {
+                        if (!_standaloneTypesByNamespace.TryGetValue(info.TargetNamespace, out var list))
+                        {
+                            list = new List<StandaloneTypeInfo>();
+                            _standaloneTypesByNamespace[info.TargetNamespace] = list;
+                        }
+                        list.Add(info);
+                    }
                 }
             }
         }
@@ -103,7 +127,14 @@ namespace GProtobuf.Generator.V2
         /// </remarks>
         public IEnumerable<(string FileName, string FileCode)> GenerateCode()
         {
-            foreach (var ns in _registry.GetAllNamespaces())
+            // Collect all namespaces (from registry + standalone types)
+            var allNamespaces = new HashSet<string>(_registry.GetAllNamespaces());
+            foreach (var ns in _standaloneTypesByNamespace.Keys)
+            {
+                allNamespaces.Add(ns);
+            }
+
+            foreach (var ns in allNamespaces)
             {
                 yield return GenerateCodeForNamespace(ns);
             }
@@ -143,10 +174,13 @@ namespace GProtobuf.Generator.V2
                     throw new System.Exception($"Error collecting tags from base types for namespace '{ns}'", ex);
                 }
 
+                // Get standalone types for this namespace
+                var standaloneTypes = _standaloneTypesByNamespace.TryGetValue(ns, out var list) ? list : new List<StandaloneTypeInfo>();
+
                 try
                 {
                     // Generate Deserializers class (entry point methods)
-                    GenerateDeserializers(sb, types);
+                    GenerateDeserializers(sb, types, standaloneTypes);
                 }
                 catch (System.Exception ex)
                 {
@@ -156,7 +190,7 @@ namespace GProtobuf.Generator.V2
                 try
                 {
                     // Generate Serializers class (entry point methods)
-                    GenerateSerializers(sb, types);
+                    GenerateSerializers(sb, types, standaloneTypes);
                 }
                 catch (System.Exception ex)
                 {
@@ -249,7 +283,7 @@ namespace GProtobuf.Generator.V2
 
         #region Deserializers Class
 
-        private void GenerateDeserializers(StringBuilderWithIndent sb, List<TypeDefinition> types)
+        private void GenerateDeserializers(StringBuilderWithIndent sb, List<TypeDefinition> types, List<StandaloneTypeInfo> standaloneTypes)
         {
             sb.AppendIndentedLine("public static class Deserializers");
             sb.StartNewBlock();
@@ -293,6 +327,13 @@ namespace GProtobuf.Generator.V2
                 }
             }
 
+            // Generate deserializers for standalone types (List<T>, T[], Dictionary<K,V>)
+            if (standaloneTypes.Count > 0)
+            {
+                var standaloneGenerator = new StandaloneTypeGenerator(sb, _registry);
+                standaloneGenerator.GenerateDeserializers(standaloneTypes);
+            }
+
             sb.EndBlock();
             sb.AppendNewLine();
         }
@@ -301,7 +342,7 @@ namespace GProtobuf.Generator.V2
 
         #region Serializers Class
 
-        private void GenerateSerializers(StringBuilderWithIndent sb, List<TypeDefinition> types)
+        private void GenerateSerializers(StringBuilderWithIndent sb, List<TypeDefinition> types, List<StandaloneTypeInfo> standaloneTypes)
         {
             sb.AppendIndentedLine("public static class Serializers");
             sb.StartNewBlock();
@@ -327,6 +368,13 @@ namespace GProtobuf.Generator.V2
                 sb.AppendIndentedLine("writer.Flush();");
                 sb.EndBlock();
                 sb.AppendNewLine();
+            }
+
+            // Generate serializers for standalone types (List<T>, T[], Dictionary<K,V>)
+            if (standaloneTypes.Count > 0)
+            {
+                var standaloneGenerator = new StandaloneTypeGenerator(sb, _registry);
+                standaloneGenerator.GenerateSerializers(standaloneTypes);
             }
 
             sb.EndBlock();
