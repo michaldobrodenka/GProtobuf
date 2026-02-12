@@ -584,6 +584,20 @@ namespace GProtobuf.Core
         }
 
         /// <summary>
+        /// Creates a sub-reader for reading a length-delimited nested message.
+        /// Extracts the specified number of bytes and returns a new SpanReader scoped to that slice.
+        /// Combines GetSlice + new SpanReader into a single convenient call.
+        /// </summary>
+        /// <param name="length">Number of bytes for the nested message.</param>
+        /// <returns>A new SpanReader positioned at the start of the nested content.</returns>
+        /// <exception cref="InvalidDataException">If length is negative.</exception>
+        /// <exception cref="InvalidOperationException">If insufficient bytes remain.</exception>
+        public SpanReader CreateSubReader(int length)
+        {
+            return new SpanReader(GetSlice(length));
+        }
+
+        /// <summary>
         /// Reads a single byte without validation (returns -1 at EOF).
         /// Used internally for low-level parsing where EOF is expected.
         /// </summary>

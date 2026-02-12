@@ -86,6 +86,25 @@ public static class StandaloneTypeAnalyzer
         var targetNamespace = GetTargetNamespace(elementType);
         var methodNameSuffix = "ArrayOf" + GetSafeTypeName(elementTypeName);
 
+        // Recursively analyze element type for nested generics
+        StandaloneTypeKind? elementKind = null;
+        StandaloneTypeInfo? nestedElementInfo = null;
+
+        if (!isPrimitive)
+        {
+            // Check if element is a generic type (List, Dictionary, etc.)
+            if (elementType is INamedTypeSymbol namedElement && namedElement.IsGenericType)
+            {
+                nestedElementInfo = AnalyzeGenericType(namedElement);
+                elementKind = nestedElementInfo?.Kind;
+            }
+            else if (elementType is IArrayTypeSymbol nestedArray)
+            {
+                nestedElementInfo = AnalyzeArray(nestedArray);
+                elementKind = StandaloneTypeKind.Array;
+            }
+        }
+
         return new StandaloneTypeInfo(
             Kind: StandaloneTypeKind.Array,
             FullTypeName: arrayType.ToDisplayString(),
@@ -95,7 +114,9 @@ public static class StandaloneTypeAnalyzer
             ElementIsPrimitive: isPrimitive,
             KeyType: null,
             ValueType: null,
-            TypeSymbol: arrayType);
+            TypeSymbol: arrayType,
+            ElementKind: elementKind,
+            NestedElementInfo: nestedElementInfo);
     }
 
     private static StandaloneTypeInfo? AnalyzeGenericType(INamedTypeSymbol namedType)
@@ -105,53 +126,170 @@ public static class StandaloneTypeAnalyzer
         // Check for List<T>, IList<T>, ICollection<T>
         if (IsListType(originalDef) && namedType.TypeArguments.Length == 1)
         {
-            var elementType = namedType.TypeArguments[0];
-            var elementTypeName = elementType.ToDisplayString();
-            var isPrimitive = IsPrimitiveType(elementTypeName);
-            var targetNamespace = GetTargetNamespace(elementType);
-            var methodNameSuffix = "ListOf" + GetSafeTypeName(elementTypeName);
-
-            return new StandaloneTypeInfo(
-                Kind: StandaloneTypeKind.List,
-                FullTypeName: namedType.ToDisplayString(),
-                TargetNamespace: targetNamespace,
-                MethodNameSuffix: methodNameSuffix,
-                ElementType: elementTypeName,
-                ElementIsPrimitive: isPrimitive,
-                KeyType: null,
-                ValueType: null,
-                TypeSymbol: namedType);
+            return AnalyzeListType(namedType);
         }
 
-        // Check for Dictionary<K,V>, IDictionary<K,V>
+        // Check for standard Dictionary<K,V>, IDictionary<K,V>
         if (IsDictionaryType(originalDef) && namedType.TypeArguments.Length == 2)
         {
-            var keyType = namedType.TypeArguments[0];
-            var valueType = namedType.TypeArguments[1];
-            var keyTypeName = keyType.ToDisplayString();
-            var valueTypeName = valueType.ToDisplayString();
-
-            // Target namespace from value type (more likely to be user type)
-            var targetNamespace = GetTargetNamespace(valueType);
-            if (targetNamespace == "System" || targetNamespace.StartsWith("System."))
-            {
-                targetNamespace = GetTargetNamespace(keyType);
-            }
-
-            var methodNameSuffix = "DictionaryOf" + GetSafeTypeName(keyTypeName) + "And" + GetSafeTypeName(valueTypeName);
-
-            return new StandaloneTypeInfo(
-                Kind: StandaloneTypeKind.Dictionary,
-                FullTypeName: namedType.ToDisplayString(),
-                TargetNamespace: targetNamespace,
-                MethodNameSuffix: methodNameSuffix,
-                ElementType: null,
-                ElementIsPrimitive: false,
-                KeyType: keyTypeName,
-                ValueType: valueTypeName,
-                TypeSymbol: namedType);
+            return AnalyzeDictionaryType(namedType, isCustomDictionary: false);
         }
 
+        // Check for custom dictionary types (implement IDictionary<K,V>)
+        var dictionaryInterface = FindDictionaryInterface(namedType);
+        if (dictionaryInterface != null)
+        {
+            return AnalyzeDictionaryType(namedType, isCustomDictionary: true, dictionaryInterface);
+        }
+
+        return null;
+    }
+
+    private static StandaloneTypeInfo AnalyzeListType(INamedTypeSymbol namedType)
+    {
+        var elementType = namedType.TypeArguments[0];
+        var elementTypeName = elementType.ToDisplayString();
+        var isPrimitive = IsPrimitiveType(elementTypeName);
+        var targetNamespace = GetTargetNamespace(elementType);
+        var methodNameSuffix = "ListOf" + GetSafeTypeName(elementTypeName);
+
+        // Recursively analyze element type for nested generics
+        StandaloneTypeKind? elementKind = null;
+        StandaloneTypeInfo? nestedElementInfo = null;
+
+        if (!isPrimitive)
+        {
+            if (elementType is INamedTypeSymbol namedElement && namedElement.IsGenericType)
+            {
+                nestedElementInfo = AnalyzeGenericType(namedElement);
+                elementKind = nestedElementInfo?.Kind;
+            }
+            else if (elementType is IArrayTypeSymbol arrayElement)
+            {
+                nestedElementInfo = AnalyzeArray(arrayElement);
+                elementKind = StandaloneTypeKind.Array;
+            }
+        }
+
+        return new StandaloneTypeInfo(
+            Kind: StandaloneTypeKind.List,
+            FullTypeName: namedType.ToDisplayString(),
+            TargetNamespace: targetNamespace,
+            MethodNameSuffix: methodNameSuffix,
+            ElementType: elementTypeName,
+            ElementIsPrimitive: isPrimitive,
+            KeyType: null,
+            ValueType: null,
+            TypeSymbol: namedType,
+            ElementKind: elementKind,
+            NestedElementInfo: nestedElementInfo);
+    }
+
+    private static StandaloneTypeInfo AnalyzeDictionaryType(INamedTypeSymbol namedType, bool isCustomDictionary, INamedTypeSymbol? dictionaryInterface = null)
+    {
+        // Get key/value types from the interface or directly from type arguments
+        ITypeSymbol keyType, valueType;
+        if (dictionaryInterface != null)
+        {
+            keyType = dictionaryInterface.TypeArguments[0];
+            valueType = dictionaryInterface.TypeArguments[1];
+        }
+        else
+        {
+            keyType = namedType.TypeArguments[0];
+            valueType = namedType.TypeArguments[1];
+        }
+
+        var keyTypeName = keyType.ToDisplayString();
+        var valueTypeName = valueType.ToDisplayString();
+        var keyIsPrimitive = IsPrimitiveType(keyTypeName);
+        var valueIsPrimitive = IsPrimitiveType(valueTypeName);
+
+        // Target namespace from value type (more likely to be user type)
+        var targetNamespace = GetTargetNamespace(valueType);
+        if (targetNamespace == "System" || targetNamespace.StartsWith("System."))
+        {
+            targetNamespace = GetTargetNamespace(keyType);
+        }
+        if (targetNamespace == "System" || targetNamespace.StartsWith("System."))
+        {
+            targetNamespace = "GProtobuf.Generated";
+        }
+
+        var methodNameSuffix = (isCustomDictionary ? GetSimpleName(namedType.ToDisplayString().Split('<')[0]) : "Dictionary")
+            + "Of" + GetSafeTypeName(keyTypeName) + "And" + GetSafeTypeName(valueTypeName);
+
+        // Recursively analyze value type for nested generics
+        StandaloneTypeKind? valueKind = null;
+        StandaloneTypeInfo? nestedValueInfo = null;
+        string? innerElementType = null;
+        bool innerElementIsPrimitive = false;
+
+        if (!valueIsPrimitive)
+        {
+            if (valueType is INamedTypeSymbol namedValue && namedValue.IsGenericType)
+            {
+                nestedValueInfo = AnalyzeGenericType(namedValue);
+                valueKind = nestedValueInfo?.Kind;
+
+                // Extract inner element type for List<T> or Dictionary<K,V> values
+                if (nestedValueInfo != null)
+                {
+                    innerElementType = nestedValueInfo.ElementType ?? nestedValueInfo.ValueType;
+                    innerElementIsPrimitive = nestedValueInfo.ElementIsPrimitive || nestedValueInfo.ValueIsPrimitive;
+                }
+            }
+            else if (valueType is IArrayTypeSymbol arrayValue)
+            {
+                nestedValueInfo = AnalyzeArray(arrayValue);
+                valueKind = StandaloneTypeKind.Array;
+                innerElementType = nestedValueInfo?.ElementType;
+                innerElementIsPrimitive = nestedValueInfo?.ElementIsPrimitive ?? false;
+            }
+        }
+
+        // Analyze key type kind (usually primitive or custom type)
+        StandaloneTypeKind? keyKind = keyIsPrimitive ? StandaloneTypeKind.Primitive : null;
+        if (!keyIsPrimitive && keyType is INamedTypeSymbol namedKey && namedKey.IsGenericType)
+        {
+            var keyInfo = AnalyzeGenericType(namedKey);
+            keyKind = keyInfo?.Kind;
+        }
+
+        return new StandaloneTypeInfo(
+            Kind: StandaloneTypeKind.Dictionary,
+            FullTypeName: namedType.ToDisplayString(),
+            TargetNamespace: targetNamespace,
+            MethodNameSuffix: methodNameSuffix,
+            ElementType: null,
+            ElementIsPrimitive: false,
+            KeyType: keyTypeName,
+            ValueType: valueTypeName,
+            TypeSymbol: namedType,
+            KeyIsPrimitive: keyIsPrimitive,
+            ValueIsPrimitive: valueIsPrimitive,
+            KeyKind: keyKind,
+            ValueKind: valueKind,
+            NestedValueInfo: nestedValueInfo,
+            IsCustomDictionaryType: isCustomDictionary,
+            CustomDictionaryTypeName: isCustomDictionary ? namedType.ToDisplayString().Split('<')[0] : null,
+            InnerElementType: innerElementType,
+            InnerElementIsPrimitive: innerElementIsPrimitive);
+    }
+
+    /// <summary>
+    /// Finds IDictionary&lt;K,V&gt; interface if the type implements it.
+    /// </summary>
+    private static INamedTypeSymbol? FindDictionaryInterface(INamedTypeSymbol namedType)
+    {
+        foreach (var iface in namedType.AllInterfaces)
+        {
+            var ifaceDef = iface.OriginalDefinition.ToDisplayString();
+            if (ifaceDef == "System.Collections.Generic.IDictionary<TKey, TValue>" && iface.TypeArguments.Length == 2)
+            {
+                return iface;
+            }
+        }
         return null;
     }
 
