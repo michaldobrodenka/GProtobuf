@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using GProtobuf.Generator.V2.CodeGeneration.Core;
 using GProtobuf.Generator.V2.Handlers;
+using GProtobuf.Generator.V2.Handlers.Core;
 using GProtobuf.Generator.V2.Handlers.VirtualTypes;
 using GProtobuf.Generator.V2.Helpers;
 
@@ -679,6 +680,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 _primitiveHandler.GenerateRead(_sb, $"result.{member.Name}", member.Type, member.DataFormat, readerVar, wireTypeVar);
             }
+            else if (member.IsProtoVarint)
+            {
+                // ProtoVarint type - read varint and construct using the constructor
+                ProtoVarintTypeSupport.GenerateRead(_sb, member, $"result.{member.Name}", readerVar);
+            }
             else if (TypeMapping.IsUnsupportedType(member.Type))
             {
                 // Unsupported type (e.g., System.Type) - skip field with warning comment
@@ -1140,6 +1146,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 // Enum type
                 _sb.AppendIndentedLine($"{targetVariable} = ({member.Type})reader.ReadVarInt32();");
             }
+            else if (member.IsProtoVarint)
+            {
+                // ProtoVarint type - read varint and construct using the constructor
+                ProtoVarintTypeSupport.GenerateRead(_sb, member, targetVariable);
+            }
             else
             {
                 // Complex type
@@ -1531,6 +1542,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 _primitiveHandler.GenerateRead(_sb, $"instance.{member.Name}", member.Type, member.DataFormat);
             }
+            else if (member.IsProtoVarint)
+            {
+                // ProtoVarint type - read varint and construct using the constructor
+                ProtoVarintTypeSupport.GenerateRead(_sb, member, $"instance.{member.Name}");
+            }
             else if (TypeMapping.IsUnsupportedType(member.Type))
             {
                 // Unsupported type (e.g., System.Type) - skip field with warning comment
@@ -1790,6 +1806,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 _primitiveHandler.GenerateRead(_sb, $"result.{member.Name}", member.Type, member.DataFormat);
             }
+            else if (member.IsProtoVarint)
+            {
+                // ProtoVarint type - read varint and construct using the constructor
+                ProtoVarintTypeSupport.GenerateRead(_sb, member, $"result.{member.Name}");
+            }
             else if (TypeMapping.IsUnsupportedType(member.Type))
             {
                 // Unsupported type (e.g., System.Type) - skip field with warning comment
@@ -1853,6 +1874,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             else if (_primitiveHandler.CanHandle(member.Type))
             {
                 _primitiveHandler.GenerateRead(_sb, $"result.{member.Name}", member.Type, member.DataFormat);
+            }
+            else if (member.IsProtoVarint)
+            {
+                // ProtoVarint type - read varint and construct using the constructor
+                ProtoVarintTypeSupport.GenerateRead(_sb, member, $"result.{member.Name}");
             }
             else if (TypeMapping.IsUnsupportedType(member.Type))
             {

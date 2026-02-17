@@ -95,111 +95,178 @@ namespace GProtobuf.Core
         public List<string> Interfaces { get; set; }
     }
 
-    #region Custom Buffer Serialization Attributes
+    #region Custom Buffer Serialization
 
     /// <summary>
-    /// Marks a method as the size calculator for a custom buffer field.
-    /// The method must return int and take no parameters.
+    /// Defines the type of operation for custom buffer serialization.
+    /// </summary>
+    public enum ProtoBufferOperation
+    {
+        /// <summary>
+        /// Method returns the size of the buffer (int, no parameters).
+        /// </summary>
+        GetSize,
+
+        /// <summary>
+        /// Method writes data to the buffer (void, Span&lt;byte&gt; parameter).
+        /// </summary>
+        Write,
+
+        /// <summary>
+        /// Method reads data from the buffer (void, ReadOnlySpan&lt;byte&gt; parameter).
+        /// </summary>
+        Read
+    }
+
+    /// <summary>
+    /// Marks a method as part of custom buffer serialization for a specific field.
     /// </summary>
     /// <remarks>
-    /// Used in conjunction with <see cref="ProtoMemberBufferFillAttribute"/> and optionally
-    /// <see cref="ProtoMemberBufferReadAttribute"/> to define custom serialization logic.
+    /// <para>Custom buffer serialization allows user-defined logic for specific fields.</para>
+    /// <para>Three methods are needed for full support:</para>
+    /// <list type="bullet">
+    ///   <item><description>GetSize - returns int, no parameters</description></item>
+    ///   <item><description>Write - returns void, takes Span&lt;byte&gt;</description></item>
+    ///   <item><description>Read - returns void, takes ReadOnlySpan&lt;byte&gt; (optional)</description></item>
+    /// </list>
     /// </remarks>
     /// <example>
     /// <code>
-    /// [ProtoMemberBufferSize(10)]
+    /// [ProtoBuffer(10, ProtoBufferOperation.GetSize)]
     /// public int GetCustomDataSize() => _customData?.Length ?? 0;
+    ///
+    /// [ProtoBuffer(10, ProtoBufferOperation.Write)]
+    /// public void WriteCustomData(Span&lt;byte&gt; buffer) => _customData.AsSpan().CopyTo(buffer);
+    ///
+    /// [ProtoBuffer(10, ProtoBufferOperation.Read)]
+    /// public void ReadCustomData(ReadOnlySpan&lt;byte&gt; data) => _customData = data.ToArray();
     /// </code>
     /// </example>
     [AttributeUsage(AttributeTargets.Method, AllowMultiple = false, Inherited = false)]
-    public sealed class ProtoMemberBufferSizeAttribute : Attribute
+    public sealed class ProtoBufferAttribute : Attribute
     {
         /// <summary>
-        /// Initializes a new instance with the specified field ID.
+        /// Initializes a new instance with the specified tag and operation.
         /// </summary>
-        /// <param name="fieldId">Unique field ID (tag) for this custom buffer field.</param>
-        public ProtoMemberBufferSizeAttribute(int fieldId)
+        /// <param name="tag">Unique field ID (tag) for this custom buffer field.</param>
+        /// <param name="operation">The type of operation this method performs.</param>
+        public ProtoBufferAttribute(int tag, ProtoBufferOperation operation)
         {
-            FieldId = fieldId;
+            Tag = tag;
+            Operation = operation;
         }
 
         /// <summary>
         /// Unique field ID (tag) for this custom buffer field.
+        /// All three operations (GetSize, Write, Read) must use the same tag.
         /// </summary>
-        public int FieldId { get; }
+        public int Tag { get; }
+
+        /// <summary>
+        /// The type of operation this method performs.
+        /// </summary>
+        public ProtoBufferOperation Operation { get; }
+    }
+
+    #endregion
+
+    #region ProtoVarint - Struct/Class as Varint
+
+    /// <summary>
+    /// Specifies the varint encoding type for ProtoVarint structs.
+    /// </summary>
+    public enum ProtoVarintType
+    {
+        /// <summary>
+        /// Unsigned 32-bit integer (varint encoding).
+        /// </summary>
+        UInt32,
+
+        /// <summary>
+        /// Signed 32-bit integer (varint encoding, inefficient for negative numbers).
+        /// </summary>
+        Int32,
+
+        /// <summary>
+        /// Signed 32-bit integer with ZigZag encoding (efficient for negative numbers).
+        /// </summary>
+        SInt32,
+
+        /// <summary>
+        /// Unsigned 64-bit integer (varint encoding).
+        /// </summary>
+        UInt64,
+
+        /// <summary>
+        /// Signed 64-bit integer (varint encoding, inefficient for negative numbers).
+        /// </summary>
+        Int64,
+
+        /// <summary>
+        /// Signed 64-bit integer with ZigZag encoding (efficient for negative numbers).
+        /// </summary>
+        SInt64
     }
 
     /// <summary>
-    /// Marks a method as the buffer filler for a custom buffer field.
-    /// The method must return void and take a Span&lt;byte&gt; parameter.
+    /// Marks a struct or class to be serialized as a varint instead of a nested message.
+    /// The type must have a constructor marked with [ProtoVarintConstructor] and
+    /// a method/property marked with [ProtoVarintValue].
     /// </summary>
     /// <remarks>
-    /// Used in conjunction with <see cref="ProtoMemberBufferSizeAttribute"/> and optionally
-    /// <see cref="ProtoMemberBufferReadAttribute"/> to define custom serialization logic.
+    /// <para>This allows strongly-typed wrappers around numeric values to be serialized
+    /// efficiently as varints without the overhead of a nested message.</para>
+    /// <para>Wire format is identical to the corresponding primitive type.</para>
     /// </remarks>
     /// <example>
     /// <code>
-    /// [ProtoMemberBufferFill(10)]
-    /// public void FillCustomData(Span&lt;byte&gt; buffer)
+    /// [ProtoVarint(ProtoVarintType.UInt32)]
+    /// public readonly struct KNXAddress
     /// {
-    ///     _customData.AsSpan().CopyTo(buffer);
+    ///     private readonly uint _value;
+    ///
+    ///     [ProtoVarintConstructor]
+    ///     public KNXAddress(uint value) => _value = value;
+    ///
+    ///     [ProtoVarintValue]
+    ///     public uint ToUInt32() => _value;
     /// }
     /// </code>
     /// </example>
-    [AttributeUsage(AttributeTargets.Method, AllowMultiple = false, Inherited = false)]
-    public sealed class ProtoMemberBufferFillAttribute : Attribute
+    [AttributeUsage(AttributeTargets.Struct | AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
+    public sealed class ProtoVarintAttribute : Attribute
     {
         /// <summary>
-        /// Initializes a new instance with the specified field ID.
+        /// Initializes a new instance with the specified varint type.
         /// </summary>
-        /// <param name="fieldId">Unique field ID (tag) for this custom buffer field.</param>
-        public ProtoMemberBufferFillAttribute(int fieldId)
+        /// <param name="type">The varint encoding type. Defaults to UInt32.</param>
+        public ProtoVarintAttribute(ProtoVarintType type = ProtoVarintType.UInt32)
         {
-            FieldId = fieldId;
+            Type = type;
         }
 
         /// <summary>
-        /// Unique field ID (tag) for this custom buffer field.
-        /// Must match the field ID used in corresponding ProtoMemberBufferSize attribute.
+        /// The varint encoding type for this struct.
         /// </summary>
-        public int FieldId { get; }
+        public ProtoVarintType Type { get; }
     }
 
     /// <summary>
-    /// Marks a method as the buffer reader for a custom buffer field.
-    /// The method must return void and take a ReadOnlySpan&lt;byte&gt; parameter.
+    /// Marks a constructor to be used for deserializing a ProtoVarint type.
+    /// The constructor must have exactly one parameter matching the ProtoVarintType.
     /// </summary>
-    /// <remarks>
-    /// Used in conjunction with <see cref="ProtoMemberBufferSizeAttribute"/> and
-    /// <see cref="ProtoMemberBufferFillAttribute"/> to define custom deserialization logic.
-    /// This attribute is optional - if not provided, the field can only be serialized, not deserialized.
-    /// </remarks>
-    /// <example>
-    /// <code>
-    /// [ProtoMemberBufferRead(10)]
-    /// public void ReadCustomData(ReadOnlySpan&lt;byte&gt; data)
-    /// {
-    ///     _customData = data.ToArray();
-    /// }
-    /// </code>
-    /// </example>
-    [AttributeUsage(AttributeTargets.Method, AllowMultiple = false, Inherited = false)]
-    public sealed class ProtoMemberBufferReadAttribute : Attribute
+    [AttributeUsage(AttributeTargets.Constructor, AllowMultiple = false, Inherited = false)]
+    public sealed class ProtoVarintConstructorAttribute : Attribute
     {
-        /// <summary>
-        /// Initializes a new instance with the specified field ID.
-        /// </summary>
-        /// <param name="fieldId">Unique field ID (tag) for this custom buffer field.</param>
-        public ProtoMemberBufferReadAttribute(int fieldId)
-        {
-            FieldId = fieldId;
-        }
+    }
 
-        /// <summary>
-        /// Unique field ID (tag) for this custom buffer field.
-        /// Must match the field ID used in corresponding ProtoMemberBufferSize and ProtoMemberBufferFill attributes.
-        /// </summary>
-        public int FieldId { get; }
+    /// <summary>
+    /// Marks a method or property that returns the underlying value for serialization.
+    /// The return type must match the ProtoVarintType specified on the struct.
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Method | AttributeTargets.Property, AllowMultiple = false, Inherited = false)]
+    public sealed class ProtoVarintValueAttribute : Attribute
+    {
     }
 
     #endregion

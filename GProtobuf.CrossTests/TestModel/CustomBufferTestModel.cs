@@ -1,11 +1,8 @@
 using System;
 using System.Text;
 using ProtoBuf;
-
-// Aliases for custom buffer attributes from GProtobuf.Core
-using ProtoMemberBufferSizeAttribute = GProtobuf.Core.ProtoMemberBufferSizeAttribute;
-using ProtoMemberBufferFillAttribute = GProtobuf.Core.ProtoMemberBufferFillAttribute;
-using ProtoMemberBufferReadAttribute = GProtobuf.Core.ProtoMemberBufferReadAttribute;
+using ProtoBufferAttribute = GProtobuf.Core.ProtoBufferAttribute;
+using ProtoBufferOperation = GProtobuf.Core.ProtoBufferOperation;
 
 namespace GProtobuf.CrossTests.TestModel
 {
@@ -34,10 +31,10 @@ namespace GProtobuf.CrossTests.TestModel
             set => _customData = value;
         }
 
-        [ProtoMemberBufferSize(10)]
+        [ProtoBuffer(10, ProtoBufferOperation.GetSize)]
         public int GetCustomDataSize() => _customData?.Length ?? 0;
 
-        [ProtoMemberBufferFill(10)]
+        [ProtoBuffer(10, ProtoBufferOperation.Write)]
         public void FillCustomData(Span<byte> buffer)
         {
             if (_customData != null)
@@ -46,7 +43,7 @@ namespace GProtobuf.CrossTests.TestModel
             }
         }
 
-        [ProtoMemberBufferRead(10)]
+        [ProtoBuffer(10, ProtoBufferOperation.Read)]
         public void ReadCustomData(ReadOnlySpan<byte> data)
         {
             _customData = data.ToArray();
@@ -70,17 +67,17 @@ namespace GProtobuf.CrossTests.TestModel
             set => _headerData = value;
         }
 
-        [ProtoMemberBufferSize(5)]
+        [ProtoBuffer(5, ProtoBufferOperation.GetSize)]
         public int GetHeaderSize() => _headerData?.Length ?? 0;
 
-        [ProtoMemberBufferFill(5)]
+        [ProtoBuffer(5, ProtoBufferOperation.Write)]
         public void FillHeader(Span<byte> buffer)
         {
             if (_headerData != null)
                 _headerData.AsSpan().CopyTo(buffer);
         }
 
-        [ProtoMemberBufferRead(5)]
+        [ProtoBuffer(5, ProtoBufferOperation.Read)]
         public void ReadHeader(ReadOnlySpan<byte> data)
         {
             _headerData = data.ToArray();
@@ -94,17 +91,17 @@ namespace GProtobuf.CrossTests.TestModel
             set => _payloadData = value;
         }
 
-        [ProtoMemberBufferSize(10)]
+        [ProtoBuffer(10, ProtoBufferOperation.GetSize)]
         public int GetPayloadSize() => _payloadData?.Length ?? 0;
 
-        [ProtoMemberBufferFill(10)]
+        [ProtoBuffer(10, ProtoBufferOperation.Write)]
         public void FillPayload(Span<byte> buffer)
         {
             if (_payloadData != null)
                 _payloadData.AsSpan().CopyTo(buffer);
         }
 
-        [ProtoMemberBufferRead(10)]
+        [ProtoBuffer(10, ProtoBufferOperation.Read)]
         public void ReadPayload(ReadOnlySpan<byte> data)
         {
             _payloadData = data.ToArray();
@@ -118,17 +115,17 @@ namespace GProtobuf.CrossTests.TestModel
             set => _footerData = value;
         }
 
-        [ProtoMemberBufferSize(15)]
+        [ProtoBuffer(15, ProtoBufferOperation.GetSize)]
         public int GetFooterSize() => _footerData?.Length ?? 0;
 
-        [ProtoMemberBufferFill(15)]
+        [ProtoBuffer(15, ProtoBufferOperation.Write)]
         public void FillFooter(Span<byte> buffer)
         {
             if (_footerData != null)
                 _footerData.AsSpan().CopyTo(buffer);
         }
 
-        [ProtoMemberBufferRead(15)]
+        [ProtoBuffer(15, ProtoBufferOperation.Read)]
         public void ReadFooter(ReadOnlySpan<byte> data)
         {
             _footerData = data.ToArray();
@@ -165,17 +162,17 @@ namespace GProtobuf.CrossTests.TestModel
 
         public byte[] CompressedPayload => _compressedPayload;
 
-        [ProtoMemberBufferSize(20)]
+        [ProtoBuffer(20, ProtoBufferOperation.GetSize)]
         public int GetCompressedPayloadSize() => _compressedPayload?.Length ?? 0;
 
-        [ProtoMemberBufferFill(20)]
+        [ProtoBuffer(20, ProtoBufferOperation.Write)]
         public void FillCompressedPayload(Span<byte> buffer)
         {
             if (_compressedPayload != null)
                 _compressedPayload.AsSpan().CopyTo(buffer);
         }
 
-        [ProtoMemberBufferRead(20)]
+        [ProtoBuffer(20, ProtoBufferOperation.Read)]
         public void ReadCompressedPayload(ReadOnlySpan<byte> data)
         {
             _compressedPayload = data.ToArray();
@@ -205,33 +202,33 @@ namespace GProtobuf.CrossTests.TestModel
             set => _data2 = value;
         }
 
-        [ProtoMemberBufferSize(1)]
+        [ProtoBuffer(1, ProtoBufferOperation.GetSize)]
         public int GetData1Size() => _data1?.Length ?? 0;
 
-        [ProtoMemberBufferFill(1)]
+        [ProtoBuffer(1, ProtoBufferOperation.Write)]
         public void FillData1(Span<byte> buffer)
         {
             if (_data1 != null)
                 _data1.AsSpan().CopyTo(buffer);
         }
 
-        [ProtoMemberBufferRead(1)]
+        [ProtoBuffer(1, ProtoBufferOperation.Read)]
         public void ReadData1(ReadOnlySpan<byte> data)
         {
             _data1 = data.ToArray();
         }
 
-        [ProtoMemberBufferSize(2)]
+        [ProtoBuffer(2, ProtoBufferOperation.GetSize)]
         public int GetData2Size() => _data2?.Length ?? 0;
 
-        [ProtoMemberBufferFill(2)]
+        [ProtoBuffer(2, ProtoBufferOperation.Write)]
         public void FillData2(Span<byte> buffer)
         {
             if (_data2 != null)
                 _data2.AsSpan().CopyTo(buffer);
         }
 
-        [ProtoMemberBufferRead(2)]
+        [ProtoBuffer(2, ProtoBufferOperation.Read)]
         public void ReadData2(ReadOnlySpan<byte> data)
         {
             _data2 = data.ToArray();
@@ -255,17 +252,17 @@ namespace GProtobuf.CrossTests.TestModel
             set => _optionalData = value;
         }
 
-        [ProtoMemberBufferSize(5)]
+        [ProtoBuffer(5, ProtoBufferOperation.GetSize)]
         public int GetOptionalDataSize() => _optionalData?.Length ?? 0;
 
-        [ProtoMemberBufferFill(5)]
+        [ProtoBuffer(5, ProtoBufferOperation.Write)]
         public void FillOptionalData(Span<byte> buffer)
         {
             if (_optionalData != null && _optionalData.Length > 0)
                 _optionalData.AsSpan().CopyTo(buffer);
         }
 
-        [ProtoMemberBufferRead(5)]
+        [ProtoBuffer(5, ProtoBufferOperation.Read)]
         public void ReadOptionalData(ReadOnlySpan<byte> data)
         {
             _optionalData = data.Length > 0 ? data.ToArray() : null;
@@ -289,17 +286,17 @@ namespace GProtobuf.CrossTests.TestModel
             set => _largeData = value;
         }
 
-        [ProtoMemberBufferSize(100)]
+        [ProtoBuffer(100, ProtoBufferOperation.GetSize)]
         public int GetLargeDataSize() => _largeData?.Length ?? 0;
 
-        [ProtoMemberBufferFill(100)]
+        [ProtoBuffer(100, ProtoBufferOperation.Write)]
         public void FillLargeData(Span<byte> buffer)
         {
             if (_largeData != null)
                 _largeData.AsSpan().CopyTo(buffer);
         }
 
-        [ProtoMemberBufferRead(100)]
+        [ProtoBuffer(100, ProtoBufferOperation.Read)]
         public void ReadLargeData(ReadOnlySpan<byte> data)
         {
             _largeData = data.ToArray();
@@ -323,10 +320,10 @@ namespace GProtobuf.CrossTests.TestModel
             set => _plainData = value;
         }
 
-        [ProtoMemberBufferSize(10)]
+        [ProtoBuffer(10, ProtoBufferOperation.GetSize)]
         public int GetTransformedDataSize() => _plainData?.Length ?? 0;
 
-        [ProtoMemberBufferFill(10)]
+        [ProtoBuffer(10, ProtoBufferOperation.Write)]
         public void FillTransformedData(Span<byte> buffer)
         {
             if (_plainData == null) return;
@@ -339,7 +336,7 @@ namespace GProtobuf.CrossTests.TestModel
             }
         }
 
-        [ProtoMemberBufferRead(10)]
+        [ProtoBuffer(10, ProtoBufferOperation.Read)]
         public void ReadTransformedData(ReadOnlySpan<byte> data)
         {
             if (data.Length == 0)
@@ -375,17 +372,17 @@ namespace GProtobuf.CrossTests.TestModel
             set => _customBuffer2 = value;
         }
 
-        [ProtoMemberBufferSize(2)]
+        [ProtoBuffer(2, ProtoBufferOperation.GetSize)]
         public int GetCustomBuffer2Size() => _customBuffer2?.Length ?? 0;
 
-        [ProtoMemberBufferFill(2)]
+        [ProtoBuffer(2, ProtoBufferOperation.Write)]
         public void FillCustomBuffer2(Span<byte> buffer)
         {
             if (_customBuffer2 != null)
                 _customBuffer2.AsSpan().CopyTo(buffer);
         }
 
-        [ProtoMemberBufferRead(2)]
+        [ProtoBuffer(2, ProtoBufferOperation.Read)]
         public void ReadCustomBuffer2(ReadOnlySpan<byte> data)
         {
             _customBuffer2 = data.ToArray();
@@ -402,17 +399,17 @@ namespace GProtobuf.CrossTests.TestModel
             set => _customBuffer4 = value;
         }
 
-        [ProtoMemberBufferSize(4)]
+        [ProtoBuffer(4, ProtoBufferOperation.GetSize)]
         public int GetCustomBuffer4Size() => _customBuffer4?.Length ?? 0;
 
-        [ProtoMemberBufferFill(4)]
+        [ProtoBuffer(4, ProtoBufferOperation.Write)]
         public void FillCustomBuffer4(Span<byte> buffer)
         {
             if (_customBuffer4 != null)
                 _customBuffer4.AsSpan().CopyTo(buffer);
         }
 
-        [ProtoMemberBufferRead(4)]
+        [ProtoBuffer(4, ProtoBufferOperation.Read)]
         public void ReadCustomBuffer4(ReadOnlySpan<byte> data)
         {
             _customBuffer4 = data.ToArray();

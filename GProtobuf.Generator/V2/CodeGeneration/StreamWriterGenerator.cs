@@ -1056,6 +1056,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     member.IsNullable,
                     member.IsRequired);
             }
+            else if (member.IsProtoVarint)
+            {
+                // ProtoVarint type - serialize as varint using the value accessor
+                ProtoVarintTypeSupport.GenerateWrite(_sb, member, sourceVar);
+            }
             else if (TypeMapping.IsUnsupportedType(member.Type))
             {
                 // Unsupported type (e.g., System.Type) - skip with warning comment

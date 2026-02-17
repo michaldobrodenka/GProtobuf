@@ -279,6 +279,15 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                         enumUnderlyingType = TypeMapping.NormalizeTypeName(rawUnderlyingType);
                     }
 
+                    // Check if type is marked with [ProtoVarint]
+                    var protoVarintInfo = GetProtoVarintInfo(checkType);
+
+                    // Check for ProtoVarint validation errors
+                    if (protoVarintInfo != null && !protoVarintInfo.IsValid)
+                    {
+                        throw new System.Exception($"ProtoVarint validation error for property '{propertyName}' in type '{typeSymbol.Name}': {protoVarintInfo.ValidationError}");
+                    }
+
                     // Vytvoríme inštanciu s FieldId
                     var protoMember = new ProtoMemberAttribute(fieldId)
                     {
@@ -299,6 +308,11 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                         MapValueEnumUnderlyingType = valueEnumType,
                         IsEnum = isEnum,
                         EnumUnderlyingType = enumUnderlyingType,
+                        // ProtoVarint properties (only set if valid)
+                        IsProtoVarint = protoVarintInfo?.IsValid ?? false,
+                        ProtoVarintType = protoVarintInfo?.VarintType ?? ProtoVarintType.UInt32,
+                        ProtoVarintValueMember = protoVarintInfo?.ValueMemberName,
+                        ProtoVarintValueIsProperty = protoVarintInfo?.IsValueProperty ?? false,
                     };
 
                     // Spracujeme voliteľné NamedArguments
@@ -378,6 +392,15 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                         enumUnderlyingType = TypeMapping.NormalizeTypeName(rawUnderlyingType);
                     }
 
+                    // Check if type is marked with [ProtoVarint]
+                    var protoVarintInfo = GetProtoVarintInfo(checkType);
+
+                    // Check for ProtoVarint validation errors
+                    if (protoVarintInfo != null && !protoVarintInfo.IsValid)
+                    {
+                        throw new System.Exception($"ProtoVarint validation error for field '{fieldName}' in type '{typeSymbol.Name}': {protoVarintInfo.ValidationError}");
+                    }
+
                     // Create ProtoMemberAttribute instance
                     var protoMember = new ProtoMemberAttribute(fieldId)
                     {
@@ -398,6 +421,11 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                         MapValueEnumUnderlyingType = valueEnumType,
                         IsEnum = isEnum,
                         EnumUnderlyingType = enumUnderlyingType,
+                        // ProtoVarint properties (only set if valid)
+                        IsProtoVarint = protoVarintInfo?.IsValid ?? false,
+                        ProtoVarintType = protoVarintInfo?.VarintType ?? ProtoVarintType.UInt32,
+                        ProtoVarintValueMember = protoVarintInfo?.ValueMemberName,
+                        ProtoVarintValueIsProperty = protoVarintInfo?.IsValueProperty ?? false,
                     };
 
                     // Process optional NamedArguments
@@ -432,6 +460,203 @@ public sealed class SerializerGenerator : IIncrementalGenerator
     }
 
     /// <summary>
+    /// Analyzes a type to check if it's marked with [ProtoVarint] and extracts the relevant information.
+    /// </summary>
+    /// <returns>ProtoVarintInfo if the type is a ProtoVarint, null otherwise.</returns>
+    private static ProtoVarintInfo GetProtoVarintInfo(ITypeSymbol typeSymbol)
+    {
+        if (typeSymbol is not INamedTypeSymbol namedType)
+            return null;
+
+        // Check for [ProtoVarint] attribute
+        var protoVarintAttr = namedType.GetAttributes().FirstOrDefault(a =>
+            a.AttributeClass?.Name == "ProtoVarintAttribute");
+
+        if (protoVarintAttr == null)
+            return null;
+
+        var typeName = namedType.ToDisplayString();
+
+        // Get the varint type from the attribute (default is UInt32 = 0)
+        var varintType = ProtoVarintType.UInt32;
+        if (protoVarintAttr.ConstructorArguments.Length > 0 &&
+            protoVarintAttr.ConstructorArguments[0].Value is int typeValue)
+        {
+            varintType = (ProtoVarintType)typeValue;
+        }
+
+        // Find ALL [ProtoVarintValue] methods or properties
+        var valueMembers = new List<(string Name, bool IsProperty, string ReturnType)>();
+        foreach (var member in namedType.GetMembers())
+        {
+            var hasValueAttr = member.GetAttributes().Any(a =>
+                a.AttributeClass?.Name == "ProtoVarintValueAttribute");
+
+            if (hasValueAttr)
+            {
+                if (member is IPropertySymbol prop)
+                {
+                    valueMembers.Add((prop.Name, true, prop.Type.ToDisplayString()));
+                }
+                else if (member is IMethodSymbol method && method.Parameters.Length == 0)
+                {
+                    valueMembers.Add((method.Name, false, method.ReturnType.ToDisplayString()));
+                }
+                else if (member is IMethodSymbol methodWithParams)
+                {
+                    // Method with parameters - invalid
+                    return new ProtoVarintInfo
+                    {
+                        TypeName = typeName,
+                        VarintType = varintType,
+                        ValidationError = $"[ProtoVarint] type '{typeName}': [ProtoVarintValue] method '{methodWithParams.Name}' must have no parameters"
+                    };
+                }
+            }
+        }
+
+        // Validate: exactly one [ProtoVarintValue] member
+        if (valueMembers.Count == 0)
+        {
+            return new ProtoVarintInfo
+            {
+                TypeName = typeName,
+                VarintType = varintType,
+                ValidationError = $"[ProtoVarint] type '{typeName}': missing [ProtoVarintValue] method or property"
+            };
+        }
+        if (valueMembers.Count > 1)
+        {
+            return new ProtoVarintInfo
+            {
+                TypeName = typeName,
+                VarintType = varintType,
+                ValidationError = $"[ProtoVarint] type '{typeName}': found {valueMembers.Count} [ProtoVarintValue] members, expected exactly 1"
+            };
+        }
+
+        var valueMember = valueMembers[0];
+
+        // Find ALL constructors with [ProtoVarintConstructor]
+        var markedConstructors = new List<(int ParamCount, string ParamType)>();
+        foreach (var ctor in namedType.Constructors)
+        {
+            var hasCtor = ctor.GetAttributes().Any(a =>
+                a.AttributeClass?.Name == "ProtoVarintConstructorAttribute");
+
+            if (hasCtor)
+            {
+                var paramType = ctor.Parameters.Length == 1
+                    ? ctor.Parameters[0].Type.ToDisplayString()
+                    : null;
+                markedConstructors.Add((ctor.Parameters.Length, paramType));
+            }
+        }
+
+        // Validate: exactly one [ProtoVarintConstructor]
+        if (markedConstructors.Count == 0)
+        {
+            return new ProtoVarintInfo
+            {
+                TypeName = typeName,
+                VarintType = varintType,
+                ValidationError = $"[ProtoVarint] type '{typeName}': missing [ProtoVarintConstructor] on a constructor"
+            };
+        }
+        if (markedConstructors.Count > 1)
+        {
+            return new ProtoVarintInfo
+            {
+                TypeName = typeName,
+                VarintType = varintType,
+                ValidationError = $"[ProtoVarint] type '{typeName}': found {markedConstructors.Count} [ProtoVarintConstructor] constructors, expected exactly 1"
+            };
+        }
+
+        var ctorInfo = markedConstructors[0];
+
+        // Validate: constructor must have exactly 1 parameter
+        if (ctorInfo.ParamCount != 1)
+        {
+            return new ProtoVarintInfo
+            {
+                TypeName = typeName,
+                VarintType = varintType,
+                ValidationError = $"[ProtoVarint] type '{typeName}': [ProtoVarintConstructor] must have exactly 1 parameter, found {ctorInfo.ParamCount}"
+            };
+        }
+
+        // Validate: value return type matches constructor parameter type
+        var normalizedValueType = NormalizeVarintTypeName(valueMember.ReturnType);
+        var normalizedCtorType = NormalizeVarintTypeName(ctorInfo.ParamType);
+        if (normalizedValueType != normalizedCtorType)
+        {
+            return new ProtoVarintInfo
+            {
+                TypeName = typeName,
+                VarintType = varintType,
+                ValidationError = $"[ProtoVarint] type '{typeName}': [ProtoVarintValue] return type '{valueMember.ReturnType}' doesn't match [ProtoVarintConstructor] parameter type '{ctorInfo.ParamType}'"
+            };
+        }
+
+        // Validate: value type matches declared ProtoVarintType
+        var expectedType = GetExpectedTypeForVarintType(varintType);
+        if (normalizedValueType != expectedType)
+        {
+            return new ProtoVarintInfo
+            {
+                TypeName = typeName,
+                VarintType = varintType,
+                ValidationError = $"[ProtoVarint] type '{typeName}': [ProtoVarintValue] return type '{valueMember.ReturnType}' doesn't match declared ProtoVarintType.{varintType} (expected '{expectedType}')"
+            };
+        }
+
+        return new ProtoVarintInfo
+        {
+            TypeName = typeName,
+            VarintType = varintType,
+            ValueMemberName = valueMember.Name,
+            IsValueProperty = valueMember.IsProperty,
+            ConstructorParameterCount = 1,
+            ValueReturnType = normalizedValueType,
+            ConstructorParameterType = normalizedCtorType,
+            ValidationError = null
+        };
+    }
+
+    /// <summary>
+    /// Normalizes type names for comparison (e.g., "System.UInt32" -> "uint").
+    /// </summary>
+    private static string NormalizeVarintTypeName(string typeName)
+    {
+        return typeName switch
+        {
+            "System.UInt32" or "uint" => "uint",
+            "System.Int32" or "int" => "int",
+            "System.UInt64" or "ulong" => "ulong",
+            "System.Int64" or "long" => "long",
+            _ => typeName
+        };
+    }
+
+    /// <summary>
+    /// Gets the expected C# type for a ProtoVarintType.
+    /// </summary>
+    private static string GetExpectedTypeForVarintType(ProtoVarintType varintType)
+    {
+        return varintType switch
+        {
+            ProtoVarintType.UInt32 => "uint",
+            ProtoVarintType.Int32 => "int",
+            ProtoVarintType.SInt32 => "int",  // ZigZag uses signed int
+            ProtoVarintType.UInt64 => "ulong",
+            ProtoVarintType.Int64 => "long",
+            ProtoVarintType.SInt64 => "long",  // ZigZag uses signed long
+            _ => "uint"
+        };
+    }
+
+    /// <summary>
     /// Analyzes methods in the type for custom buffer serialization attributes.
     /// Collects [ProtoMemberBufferSize], [ProtoMemberBufferFill], and [ProtoMemberBufferRead] methods
     /// and groups them by field ID.
@@ -453,47 +678,42 @@ public sealed class SerializerGenerator : IIncrementalGenerator
             {
                 var attrName = attribute.AttributeClass?.ToDisplayString();
 
-                if (attrName?.Contains("ProtoMemberBufferSizeAttribute") == true ||
-                    attrName?.Contains("GProtobuf.Generator.ProtoMemberBufferSizeAttribute") == true)
+                // Check for new ProtoBufferAttribute
+                if (attrName?.Contains("ProtoBufferAttribute") == true)
                 {
-                    if (attribute.ConstructorArguments.Length > 0 &&
-                        attribute.ConstructorArguments[0].Value is int fieldId)
+                    if (attribute.ConstructorArguments.Length >= 2 &&
+                        attribute.ConstructorArguments[0].Value is int fieldId &&
+                        attribute.ConstructorArguments[1].Value is int operationValue)
                     {
-                        // Validate method signature: must return int and take no parameters
-                        if (method.ReturnType.SpecialType == SpecialType.System_Int32 &&
-                            method.Parameters.Length == 0)
+                        // ProtoBufferOperation enum: GetSize=0, Write=1, Read=2
+                        switch (operationValue)
                         {
-                            bufferSizeMethods[fieldId] = method.Name;
-                        }
-                    }
-                }
-                else if (attrName?.Contains("ProtoMemberBufferFillAttribute") == true ||
-                         attrName?.Contains("GProtobuf.Generator.ProtoMemberBufferFillAttribute") == true)
-                {
-                    if (attribute.ConstructorArguments.Length > 0 &&
-                        attribute.ConstructorArguments[0].Value is int fieldId)
-                    {
-                        // Validate method signature: must return void and take Span<byte>
-                        if (method.ReturnsVoid &&
-                            method.Parameters.Length == 1 &&
-                            method.Parameters[0].Type.ToDisplayString().Contains("Span<byte>"))
-                        {
-                            bufferFillMethods[fieldId] = method.Name;
-                        }
-                    }
-                }
-                else if (attrName?.Contains("ProtoMemberBufferReadAttribute") == true ||
-                         attrName?.Contains("GProtobuf.Generator.ProtoMemberBufferReadAttribute") == true)
-                {
-                    if (attribute.ConstructorArguments.Length > 0 &&
-                        attribute.ConstructorArguments[0].Value is int fieldId)
-                    {
-                        // Validate method signature: must return void and take ReadOnlySpan<byte>
-                        if (method.ReturnsVoid &&
-                            method.Parameters.Length == 1 &&
-                            method.Parameters[0].Type.ToDisplayString().Contains("ReadOnlySpan<byte>"))
-                        {
-                            bufferReadMethods[fieldId] = method.Name;
+                            case 0: // GetSize
+                                // Validate method signature: must return int and take no parameters
+                                if (method.ReturnType.SpecialType == SpecialType.System_Int32 &&
+                                    method.Parameters.Length == 0)
+                                {
+                                    bufferSizeMethods[fieldId] = method.Name;
+                                }
+                                break;
+                            case 1: // Write
+                                // Validate method signature: must return void and take Span<byte>
+                                if (method.ReturnsVoid &&
+                                    method.Parameters.Length == 1 &&
+                                    method.Parameters[0].Type.ToDisplayString().Contains("Span<byte>"))
+                                {
+                                    bufferFillMethods[fieldId] = method.Name;
+                                }
+                                break;
+                            case 2: // Read
+                                // Validate method signature: must return void and take ReadOnlySpan<byte>
+                                if (method.ReturnsVoid &&
+                                    method.Parameters.Length == 1 &&
+                                    method.Parameters[0].Type.ToDisplayString().Contains("ReadOnlySpan<byte>"))
+                                {
+                                    bufferReadMethods[fieldId] = method.Name;
+                                }
+                                break;
                         }
                     }
                 }
