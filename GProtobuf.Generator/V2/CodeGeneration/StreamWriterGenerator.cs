@@ -268,6 +268,15 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                         GenerateFieldWrite(member, "instance");
                     }
                 }
+
+                // Write custom buffer fields
+                if (type.CustomBufferMembers != null)
+                {
+                    foreach (var customMember in type.CustomBufferMembers)
+                    {
+                        GenerateCustomBufferFieldWrite(customMember, "instance");
+                    }
+                }
             }
 
             _sb.EndBlock();
@@ -295,6 +304,15 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 foreach (var member in type.ProtoMembers)
                 {
                     GenerateFieldWrite(member, "instance");
+                }
+            }
+
+            // Write custom buffer fields defined in this base class
+            if (type.CustomBufferMembers != null && type.CustomBufferMembers.Count > 0)
+            {
+                foreach (var customMember in type.CustomBufferMembers)
+                {
+                    GenerateCustomBufferFieldWrite(customMember, "instance");
                 }
             }
 
@@ -776,6 +794,15 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     GenerateFieldWrite(member, "instance");
                 }
             }
+
+            // Write custom buffer fields
+            if (type.CustomBufferMembers != null)
+            {
+                foreach (var customMember in type.CustomBufferMembers)
+                {
+                    GenerateCustomBufferFieldWrite(customMember, "instance");
+                }
+            }
         }
 
         private void GenerateWriteMethodWithInheritance(TypeDefinition type, string className)
@@ -961,6 +988,33 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             _sb.EndBlock();
             _sb.AppendNewLine();
+        }
+
+        #endregion
+
+        #region Custom Buffer Field Generation
+
+        /// <summary>
+        /// Generates code to write a custom buffer field.
+        /// Custom buffer fields use user-defined methods for size calculation and buffer filling.
+        /// </summary>
+        private void GenerateCustomBufferFieldWrite(CustomBufferMember member, string objectName)
+        {
+            _sb.AppendIndentedLine($"// Custom buffer field {member.FieldId}");
+
+            // Write tag (field ID + WireType.Len)
+            TagCodeHelper.WriteTag(_sb, member.FieldId, WireType.Len);
+
+            // Call user's size method to get the size
+            _sb.AppendIndentedLine($"var customSize_{member.FieldId} = {objectName}.{member.SizeMethodName}();");
+
+            // Write length prefix
+            _sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)customSize_{member.FieldId});");
+
+            // Get buffer and call user's fill method
+            _sb.AppendIndentedLine($"var customBuffer_{member.FieldId} = writer.GetSpan(customSize_{member.FieldId});");
+            _sb.AppendIndentedLine($"{objectName}.{member.FillMethodName}(customBuffer_{member.FieldId});");
+            _sb.AppendIndentedLine($"writer.Advance(customSize_{member.FieldId});");
         }
 
         #endregion

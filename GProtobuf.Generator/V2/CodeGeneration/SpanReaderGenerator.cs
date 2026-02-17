@@ -927,6 +927,35 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     GenerateFieldReadCase(member);
                 }
 
+                // Custom buffer fields
+                if (type.CustomBufferMembers != null)
+                {
+                    foreach (var customMember in type.CustomBufferMembers)
+                    {
+                        GenerateCustomBufferFieldReadCase(customMember, "result");
+                    }
+                }
+
+                // Default - skip unknown fields
+                _sb.AppendIndentedLine("default:");
+                _sb.IncreaseIndent();
+                _sb.AppendIndentedLine("reader.SkipField(wireType);");
+                _sb.AppendIndentedLine("break;");
+                _sb.DecreaseIndent();
+
+                _sb.EndBlock();
+            }
+            else if (type.CustomBufferMembers != null && type.CustomBufferMembers.Count > 0)
+            {
+                // Only custom buffer fields, no ProtoMembers
+                _sb.AppendIndentedLine("switch (fieldId)");
+                _sb.StartNewBlock();
+
+                foreach (var customMember in type.CustomBufferMembers)
+                {
+                    GenerateCustomBufferFieldReadCase(customMember, "result");
+                }
+
                 // Default - skip unknown fields
                 _sb.AppendIndentedLine("default:");
                 _sb.IncreaseIndent();
@@ -1235,6 +1264,15 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 }
             }
 
+            // Custom buffer fields (for all inheritance cases)
+            if (type.CustomBufferMembers != null)
+            {
+                foreach (var customMember in type.CustomBufferMembers)
+                {
+                    GenerateCustomBufferFieldReadCase(customMember, "result");
+                }
+            }
+
             // Default - skip unknown fields
             _sb.AppendIndentedLine("default:");
             _sb.IncreaseIndent();
@@ -1380,14 +1418,29 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendNewLine();
 
             // Generate switch for fields
-            if (type.ProtoMembers != null && type.ProtoMembers.Count > 0)
+            bool hasProtoMembers = type.ProtoMembers != null && type.ProtoMembers.Count > 0;
+            bool hasCustomBufferMembers = type.CustomBufferMembers != null && type.CustomBufferMembers.Count > 0;
+
+            if (hasProtoMembers || hasCustomBufferMembers)
             {
                 _sb.AppendIndentedLine("switch (fieldId)");
                 _sb.StartNewBlock();
 
-                foreach (var member in type.ProtoMembers)
+                if (hasProtoMembers)
                 {
-                    GenerateFieldPopulateCase(member);
+                    foreach (var member in type.ProtoMembers)
+                    {
+                        GenerateFieldPopulateCase(member);
+                    }
+                }
+
+                // Custom buffer fields
+                if (hasCustomBufferMembers)
+                {
+                    foreach (var customMember in type.CustomBufferMembers)
+                    {
+                        GenerateCustomBufferFieldPopulateCase(customMember);
+                    }
                 }
 
                 // Default - skip unknown fields
@@ -1576,6 +1629,74 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     member.CollectionKind,
                     member.Type);
             }
+        }
+
+        #endregion
+
+        #region Custom Buffer Field Generation
+
+        /// <summary>
+        /// Generates switch case for reading a custom buffer field.
+        /// Custom buffer fields use user-defined methods for reading.
+        /// </summary>
+        private void GenerateCustomBufferFieldReadCase(CustomBufferMember member, string objectName)
+        {
+            _sb.AppendIndentedLine($"case {member.FieldId}:");
+            _sb.IncreaseIndent();
+            _sb.AppendIndentedLine("{");
+            _sb.IncreaseIndent();
+
+            _sb.AppendIndentedLine($"// Custom buffer field {member.FieldId}");
+
+            if (!string.IsNullOrEmpty(member.ReadMethodName))
+            {
+                // Read length-delimited data and call user's read method
+                _sb.AppendIndentedLine("var customData = reader.ReadByteArraySpan();");
+                _sb.AppendIndentedLine($"{objectName}.{member.ReadMethodName}(customData);");
+            }
+            else
+            {
+                // No read method - skip the field
+                _sb.AppendIndentedLine("// WARNING: No ReadMethod defined, skipping field");
+                _sb.AppendIndentedLine("reader.SkipField(wireType);");
+            }
+
+            _sb.AppendIndentedLine("break;");
+            _sb.DecreaseIndent();
+            _sb.AppendIndentedLine("}");
+            _sb.DecreaseIndent();
+        }
+
+        /// <summary>
+        /// Generates switch case for populating a custom buffer field.
+        /// Uses 'instance' instead of 'result'.
+        /// </summary>
+        private void GenerateCustomBufferFieldPopulateCase(CustomBufferMember member)
+        {
+            _sb.AppendIndentedLine($"case {member.FieldId}:");
+            _sb.IncreaseIndent();
+            _sb.AppendIndentedLine("{");
+            _sb.IncreaseIndent();
+
+            _sb.AppendIndentedLine($"// Custom buffer field {member.FieldId}");
+
+            if (!string.IsNullOrEmpty(member.ReadMethodName))
+            {
+                // Read length-delimited data and call user's read method
+                _sb.AppendIndentedLine("var customData = reader.ReadByteArraySpan();");
+                _sb.AppendIndentedLine($"instance.{member.ReadMethodName}(customData);");
+            }
+            else
+            {
+                // No read method - skip the field
+                _sb.AppendIndentedLine("// WARNING: No ReadMethod defined, skipping field");
+                _sb.AppendIndentedLine("reader.SkipField(wireType);");
+            }
+
+            _sb.AppendIndentedLine("break;");
+            _sb.DecreaseIndent();
+            _sb.AppendIndentedLine("}");
+            _sb.DecreaseIndent();
         }
 
         #endregion

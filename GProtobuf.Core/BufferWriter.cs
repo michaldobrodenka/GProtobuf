@@ -560,5 +560,67 @@ namespace GProtobuf.Core
             tagBytes.CopyTo(currentSpan.Slice(currentPosition));
             currentPosition += tagBytes.Length;
         }
+
+        #region Custom Buffer Support
+
+        private byte[] _largeBuffer;
+
+        /// <summary>
+        /// Gets a span of the specified size for direct writing.
+        /// Used by custom buffer serialization to allow user code to fill the buffer directly.
+        /// </summary>
+        /// <param name="size">Number of bytes needed.</param>
+        /// <returns>A span of the requested size for writing.</returns>
+        /// <remarks>
+        /// The caller MUST call <see cref="Advance(int)"/> after writing to the span.
+        /// For sizes larger than the internal buffer, allocates a temporary buffer.
+        /// For optimal performance with large data, consider chunked writing.
+        /// </remarks>
+        public Span<byte> GetSpan(int size)
+        {
+            // If size fits after ensuring space, use the current span (zero allocation)
+            if (currentPosition + size <= currentSpan.Length)
+            {
+                return currentSpan.Slice(currentPosition, size);
+            }
+
+            // Commit current buffer first
+            writer.Advance(currentPosition - lastAdvancePosition);
+
+            // Try to get a new span that fits
+            currentSpan = writer.GetSpan(size);
+            lastAdvancePosition = 0;
+            currentPosition = 0;
+
+            // If the new span is large enough, use it
+            if (size <= currentSpan.Length)
+            {
+                return currentSpan.Slice(0, size);
+            }
+
+            // For very large sizes, allocate a temporary buffer
+            _largeBuffer = new byte[size];
+            return _largeBuffer.AsSpan();
+        }
+
+        /// <summary>
+        /// Advances the buffer position by the specified number of bytes.
+        /// Used after writing to a span obtained from <see cref="GetSpan(int)"/>.
+        /// </summary>
+        /// <param name="count">Number of bytes written.</param>
+        public void Advance(int count)
+        {
+            // If we used a large buffer, write it to the underlying writer
+            if (_largeBuffer != null)
+            {
+                WriteBytes(_largeBuffer.AsSpan(0, count));
+                _largeBuffer = null;
+                return;
+            }
+
+            currentPosition += count;
+        }
+
+        #endregion
     }
 }

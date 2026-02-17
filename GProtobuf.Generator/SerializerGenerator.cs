@@ -59,6 +59,7 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                 var namespaceName = syntaxContext.TargetSymbol.ContainingNamespace.ToDisplayString();
                 var protoIncludes = GetProtoIncludeAttributes(typeWithAttribute);
                 var protoMembers = GetProtoMemberAttributes(typeWithAttribute);
+                var customBufferMembers = GetCustomBufferMembers(typeWithAttribute);
                 var hasParameterlessConstructor = HasParameterlessConstructor(typeWithAttribute);
                 var baseClass = GetBaseClass(typeWithAttribute);
 
@@ -71,7 +72,8 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                     protoMembers,
                     hasParameterlessConstructor,
                     TypeSymbol: typeWithAttribute,
-                    BaseClass: baseClass);
+                    BaseClass: baseClass,
+                    CustomBufferMembers: customBufferMembers);
 
                 return (namespaceName, typeDefinition);
             });
@@ -94,6 +96,7 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                 var namespaceName = syntaxContext.TargetSymbol.ContainingNamespace.ToDisplayString();
                 var protoIncludes = GetProtoIncludeAttributes(typeWithAttribute);
                 var protoMembers = GetProtoMemberAttributes(typeWithAttribute);
+                var customBufferMembers = GetCustomBufferMembers(typeWithAttribute);
                 var hasParameterlessConstructor = HasParameterlessConstructor(typeWithAttribute);
                 var baseClass = GetBaseClass(typeWithAttribute);
 
@@ -106,7 +109,8 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                     protoMembers,
                     hasParameterlessConstructor,
                     TypeSymbol: typeWithAttribute,
-                    BaseClass: baseClass);
+                    BaseClass: baseClass,
+                    CustomBufferMembers: customBufferMembers);
 
                 return (namespaceName, typeDefinition);
             });
@@ -421,6 +425,105 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                     result.Add(protoMember);
                     break; // only one ProtoMember attribute allowed
                 }
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Analyzes methods in the type for custom buffer serialization attributes.
+    /// Collects [ProtoMemberBufferSize], [ProtoMemberBufferFill], and [ProtoMemberBufferRead] methods
+    /// and groups them by field ID.
+    /// </summary>
+    private static List<CustomBufferMember> GetCustomBufferMembers(INamedTypeSymbol typeSymbol)
+    {
+        var bufferSizeMethods = new Dictionary<int, string>();
+        var bufferFillMethods = new Dictionary<int, string>();
+        var bufferReadMethods = new Dictionary<int, string>();
+
+        // Iterate through all methods in the type
+        foreach (var method in typeSymbol.GetMembers().OfType<IMethodSymbol>())
+        {
+            // Skip static methods, constructors, property accessors
+            if (method.IsStatic || method.MethodKind != MethodKind.Ordinary)
+                continue;
+
+            foreach (var attribute in method.GetAttributes())
+            {
+                var attrName = attribute.AttributeClass?.ToDisplayString();
+
+                if (attrName?.Contains("ProtoMemberBufferSizeAttribute") == true ||
+                    attrName?.Contains("GProtobuf.Generator.ProtoMemberBufferSizeAttribute") == true)
+                {
+                    if (attribute.ConstructorArguments.Length > 0 &&
+                        attribute.ConstructorArguments[0].Value is int fieldId)
+                    {
+                        // Validate method signature: must return int and take no parameters
+                        if (method.ReturnType.SpecialType == SpecialType.System_Int32 &&
+                            method.Parameters.Length == 0)
+                        {
+                            bufferSizeMethods[fieldId] = method.Name;
+                        }
+                    }
+                }
+                else if (attrName?.Contains("ProtoMemberBufferFillAttribute") == true ||
+                         attrName?.Contains("GProtobuf.Generator.ProtoMemberBufferFillAttribute") == true)
+                {
+                    if (attribute.ConstructorArguments.Length > 0 &&
+                        attribute.ConstructorArguments[0].Value is int fieldId)
+                    {
+                        // Validate method signature: must return void and take Span<byte>
+                        if (method.ReturnsVoid &&
+                            method.Parameters.Length == 1 &&
+                            method.Parameters[0].Type.ToDisplayString().Contains("Span<byte>"))
+                        {
+                            bufferFillMethods[fieldId] = method.Name;
+                        }
+                    }
+                }
+                else if (attrName?.Contains("ProtoMemberBufferReadAttribute") == true ||
+                         attrName?.Contains("GProtobuf.Generator.ProtoMemberBufferReadAttribute") == true)
+                {
+                    if (attribute.ConstructorArguments.Length > 0 &&
+                        attribute.ConstructorArguments[0].Value is int fieldId)
+                    {
+                        // Validate method signature: must return void and take ReadOnlySpan<byte>
+                        if (method.ReturnsVoid &&
+                            method.Parameters.Length == 1 &&
+                            method.Parameters[0].Type.ToDisplayString().Contains("ReadOnlySpan<byte>"))
+                        {
+                            bufferReadMethods[fieldId] = method.Name;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Combine all field IDs from all three dictionaries
+        var allFieldIds = bufferSizeMethods.Keys
+            .Union(bufferFillMethods.Keys)
+            .Union(bufferReadMethods.Keys)
+            .Distinct()
+            .OrderBy(id => id);
+
+        var result = new List<CustomBufferMember>();
+
+        foreach (var fieldId in allFieldIds)
+        {
+            // Only create CustomBufferMember if we have at least Size and Fill methods
+            if (bufferSizeMethods.TryGetValue(fieldId, out var sizeMethod) &&
+                bufferFillMethods.TryGetValue(fieldId, out var fillMethod))
+            {
+                bufferReadMethods.TryGetValue(fieldId, out var readMethod);
+
+                result.Add(new CustomBufferMember
+                {
+                    FieldId = fieldId,
+                    SizeMethodName = sizeMethod,
+                    FillMethodName = fillMethod,
+                    ReadMethodName = readMethod
+                });
             }
         }
 

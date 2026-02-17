@@ -345,4 +345,154 @@ namespace GProtobuf.Generator
         /// </summary>
         public string MapValueEnumUnderlyingType { get; set; }
     }
+
+    /// <summary>
+    /// Marks a method that returns the serialized size of a custom buffer field.
+    /// Used together with <see cref="ProtoMemberBufferFillAttribute"/> and optionally <see cref="ProtoMemberBufferReadAttribute"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Method Signature:</b></para>
+    /// The method must return int and take no parameters:
+    /// <code>
+    /// [ProtoMemberBufferSize(7)]
+    /// public int GetCustomFieldSize() => _data?.Length ?? 0;
+    /// </code>
+    ///
+    /// <para><b>Usage:</b></para>
+    /// - Field ID must be unique within the type (same rules as ProtoMember)
+    /// - Must have corresponding ProtoMemberBufferFill method with same field ID
+    /// - Optionally have ProtoMemberBufferRead method for deserialization
+    /// </remarks>
+    [AttributeUsage(AttributeTargets.Method, AllowMultiple = false, Inherited = false)]
+    public sealed class ProtoMemberBufferSizeAttribute : Attribute
+    {
+        /// <summary>
+        /// Initializes a new ProtoMemberBufferSizeAttribute with the specified field ID.
+        /// </summary>
+        /// <param name="fieldId">Unique field ID (tag) for this custom buffer field.</param>
+        public ProtoMemberBufferSizeAttribute(int fieldId)
+        {
+            FieldId = fieldId;
+        }
+
+        /// <summary>
+        /// Unique field ID (tag) for this custom buffer field.
+        /// Must match the field ID used in corresponding ProtoMemberBufferFill and ProtoMemberBufferRead attributes.
+        /// </summary>
+        public int FieldId { get; }
+    }
+
+    /// <summary>
+    /// Marks a method that fills a buffer with serialized data for a custom buffer field.
+    /// Used together with <see cref="ProtoMemberBufferSizeAttribute"/> and optionally <see cref="ProtoMemberBufferReadAttribute"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Method Signature:</b></para>
+    /// The method must return void and accept Span&lt;byte&gt;:
+    /// <code>
+    /// [ProtoMemberBufferFill(7)]
+    /// public void FillCustomField(Span&lt;byte&gt; buffer)
+    /// {
+    ///     _data.CopyTo(buffer);
+    /// }
+    /// </code>
+    ///
+    /// <para><b>Usage:</b></para>
+    /// - Field ID must match the corresponding ProtoMemberBufferSize method
+    /// - The buffer size will be exactly what GetSize method returned
+    /// - Must write exactly that many bytes to the buffer
+    /// </remarks>
+    [AttributeUsage(AttributeTargets.Method, AllowMultiple = false, Inherited = false)]
+    public sealed class ProtoMemberBufferFillAttribute : Attribute
+    {
+        /// <summary>
+        /// Initializes a new ProtoMemberBufferFillAttribute with the specified field ID.
+        /// </summary>
+        /// <param name="fieldId">Unique field ID (tag) for this custom buffer field.</param>
+        public ProtoMemberBufferFillAttribute(int fieldId)
+        {
+            FieldId = fieldId;
+        }
+
+        /// <summary>
+        /// Unique field ID (tag) for this custom buffer field.
+        /// Must match the field ID used in corresponding ProtoMemberBufferSize and ProtoMemberBufferRead attributes.
+        /// </summary>
+        public int FieldId { get; }
+    }
+
+    /// <summary>
+    /// Marks a method that reads serialized data from a buffer for a custom buffer field.
+    /// Used together with <see cref="ProtoMemberBufferSizeAttribute"/> and <see cref="ProtoMemberBufferFillAttribute"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Method Signature:</b></para>
+    /// The method must return void and accept ReadOnlySpan&lt;byte&gt;:
+    /// <code>
+    /// [ProtoMemberBufferRead(7)]
+    /// public void ReadCustomField(ReadOnlySpan&lt;byte&gt; data)
+    /// {
+    ///     _data = data.ToArray();
+    /// }
+    /// </code>
+    ///
+    /// <para><b>Usage:</b></para>
+    /// - Field ID must match the corresponding ProtoMemberBufferSize and ProtoMemberBufferFill methods
+    /// - The data span contains exactly the bytes that were written by FillCustomField
+    /// - If not provided, the field will be write-only (serialization only)
+    /// </remarks>
+    [AttributeUsage(AttributeTargets.Method, AllowMultiple = false, Inherited = false)]
+    public sealed class ProtoMemberBufferReadAttribute : Attribute
+    {
+        /// <summary>
+        /// Initializes a new ProtoMemberBufferReadAttribute with the specified field ID.
+        /// </summary>
+        /// <param name="fieldId">Unique field ID (tag) for this custom buffer field.</param>
+        public ProtoMemberBufferReadAttribute(int fieldId)
+        {
+            FieldId = fieldId;
+        }
+
+        /// <summary>
+        /// Unique field ID (tag) for this custom buffer field.
+        /// Must match the field ID used in corresponding ProtoMemberBufferSize and ProtoMemberBufferFill attributes.
+        /// </summary>
+        public int FieldId { get; }
+    }
+
+    /// <summary>
+    /// Represents a custom buffer member with associated size, fill, and read methods.
+    /// Created during source generation by analyzing methods with ProtoMemberBuffer* attributes.
+    /// </summary>
+    public sealed class CustomBufferMember
+    {
+        /// <summary>
+        /// Unique field ID (tag) for this custom buffer field.
+        /// </summary>
+        public int FieldId { get; set; }
+
+        /// <summary>
+        /// Name of the method marked with [ProtoMemberBufferSize].
+        /// Returns int, takes no parameters.
+        /// </summary>
+        public string SizeMethodName { get; set; }
+
+        /// <summary>
+        /// Name of the method marked with [ProtoMemberBufferFill].
+        /// Returns void, takes Span&lt;byte&gt;.
+        /// </summary>
+        public string FillMethodName { get; set; }
+
+        /// <summary>
+        /// Name of the method marked with [ProtoMemberBufferRead].
+        /// Returns void, takes ReadOnlySpan&lt;byte&gt;.
+        /// May be null if only serialization is supported.
+        /// </summary>
+        public string ReadMethodName { get; set; }
+
+        /// <summary>
+        /// Indicates whether deserialization is supported (ReadMethodName is not null).
+        /// </summary>
+        public bool SupportsDeserialization => !string.IsNullOrEmpty(ReadMethodName);
+    }
 }

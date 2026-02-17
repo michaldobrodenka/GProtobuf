@@ -282,6 +282,23 @@ namespace GProtobuf.Core
         }
 
         /// <summary>
+        /// Reads a byte array span (WireType.Len) without allocation.
+        /// Format: varint length prefix + N bytes of raw data.
+        /// Zero-copy - returns span into original data.
+        /// </summary>
+        /// <param name="reader">SpanReader instance.</param>
+        /// <returns>ReadOnlySpan pointing to the byte data (no allocation).</returns>
+        /// <remarks>
+        /// Used by custom buffer serialization for efficient data passing to user code.
+        /// The returned span is valid only while the original data buffer is in scope.
+        /// </remarks>
+        public static ReadOnlySpan<byte> ReadByteArraySpan(this ref SpanReader reader)
+        {
+            int length = reader.ReadVarInt32();
+            return reader.GetSlice(length);
+        }
+
+        /// <summary>
         /// Reads Guid in protobuf-net BCL format (nested message with lo/hi fixed64 fields).
         /// Wire format: [length=18][tag 0x09][8 bytes lo][tag 0x11][8 bytes hi]
         /// Supports field order independence (hi/lo can appear in any order).

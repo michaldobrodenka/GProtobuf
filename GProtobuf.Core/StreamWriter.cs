@@ -479,5 +479,56 @@ namespace GProtobuf.Core
                 bufferPosition = 0;
             }
         }
+
+        #region Custom Buffer Support
+
+        private byte[] _largeBuffer;
+
+        /// <summary>
+        /// Gets a span of the specified size for direct writing.
+        /// Used by custom buffer serialization to allow user code to fill the buffer directly.
+        /// </summary>
+        /// <param name="size">Number of bytes needed.</param>
+        /// <returns>A span of the requested size for writing.</returns>
+        /// <remarks>
+        /// The caller MUST call <see cref="Advance(int)"/> after writing to the span.
+        /// For sizes larger than the internal buffer, allocates a temporary buffer.
+        /// For optimal performance with large data, consider chunked writing or direct Stream access.
+        /// </remarks>
+        public Span<byte> GetSpan(int size)
+        {
+            // If size fits in the current buffer after flushing, use it (zero allocation)
+            if (size <= buffer.Length)
+            {
+                EnsureBufferSpace(size);
+                return buffer.Slice(bufferPosition, size);
+            }
+
+            // For large sizes, allocate a temporary buffer and write directly to stream
+            // This is an explicit allocation - for very large data consider alternative approaches
+            Flush();
+            _largeBuffer = new byte[size];
+            return _largeBuffer.AsSpan();
+        }
+
+        /// <summary>
+        /// Advances the buffer position by the specified number of bytes.
+        /// Used after writing to a span obtained from <see cref="GetSpan(int)"/>.
+        /// </summary>
+        /// <param name="count">Number of bytes written.</param>
+        public void Advance(int count)
+        {
+            // If we used a large buffer, write it directly to stream
+            if (_largeBuffer != null)
+            {
+                Stream.Write(_largeBuffer, 0, count);
+                _largeBuffer = null; // Let GC collect it
+                return;
+            }
+
+            bufferPosition += count;
+        }
+
+        #endregion
     }
 }

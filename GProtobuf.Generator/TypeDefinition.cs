@@ -49,6 +49,11 @@ namespace GProtobuf.Generator;
 /// Null if type inherits from System.Object, System.ValueType, or has no base class.
 /// Used to detect non-ProtoInclude inheritance (flat serialization without polymorphism).
 /// </param>
+/// <param name="CustomBufferMembers">
+/// List of custom buffer members defined via [ProtoMemberBufferSize], [ProtoMemberBufferFill], [ProtoMemberBufferRead].
+/// Allows user-defined serialization logic for fields not marked with [ProtoMember].
+/// Empty list if type has no custom buffer members.
+/// </param>
 public sealed record TypeDefinition(
     bool IsStruct,
     bool IsAbstract,
@@ -58,4 +63,5 @@ public sealed record TypeDefinition(
     List<ProtoMemberAttribute> ProtoMembers,
     bool HasParameterlessConstructor,
     Microsoft.CodeAnalysis.INamedTypeSymbol? TypeSymbol = null,
-    string? BaseClass = null);
+    string? BaseClass = null,
+    List<CustomBufferMember>? CustomBufferMembers = null);

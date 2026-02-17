@@ -208,6 +208,15 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     GenerateFieldSize(member, "obj");
                 }
             }
+
+            // Calculate custom buffer fields
+            if (type.CustomBufferMembers != null)
+            {
+                foreach (var customMember in type.CustomBufferMembers)
+                {
+                    GenerateCustomBufferFieldSize(customMember, "obj");
+                }
+            }
         }
 
         private void GenerateCalculateSizeWithInheritance(TypeDefinition type, string className)
@@ -218,6 +227,15 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 foreach (var member in type.ProtoMembers)
                 {
                     GenerateFieldSize(member, "obj");
+                }
+            }
+
+            // Calculate custom buffer fields
+            if (type.CustomBufferMembers != null)
+            {
+                foreach (var customMember in type.CustomBufferMembers)
+                {
+                    GenerateCustomBufferFieldSize(customMember, "obj");
                 }
             }
 
@@ -342,6 +360,15 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                         GenerateFieldSize(member, "obj");
                     }
                 }
+
+                // Calculate custom buffer fields
+                if (type.CustomBufferMembers != null)
+                {
+                    foreach (var customMember in type.CustomBufferMembers)
+                    {
+                        GenerateCustomBufferFieldSize(customMember, "obj");
+                    }
+                }
             }
 
             _sb.EndBlock();
@@ -369,6 +396,15 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 foreach (var member in type.ProtoMembers)
                 {
                     GenerateFieldSize(member, "obj");
+                }
+            }
+
+            // Calculate custom buffer fields defined in this base class
+            if (type.CustomBufferMembers != null && type.CustomBufferMembers.Count > 0)
+            {
+                foreach (var customMember in type.CustomBufferMembers)
+                {
+                    GenerateCustomBufferFieldSize(customMember, "obj");
                 }
             }
 
@@ -589,6 +625,31 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     GenerateFieldSize(member, "obj");
                 }
             }
+        }
+
+        #endregion
+
+        #region Custom Buffer Field Generation
+
+        /// <summary>
+        /// Generates code to calculate size of a custom buffer field.
+        /// Custom buffer fields use user-defined methods for size calculation.
+        /// </summary>
+        private void GenerateCustomBufferFieldSize(CustomBufferMember member, string objectName)
+        {
+            _sb.AppendIndentedLine($"// Custom buffer field {member.FieldId}");
+
+            // Add tag size (field ID + WireType.Len)
+            TagCodeHelper.AddTagSize(_sb, member.FieldId, WireType.Len);
+
+            // Call user's size method
+            _sb.AppendIndentedLine($"var customSize_{member.FieldId} = {objectName}.{member.SizeMethodName}();");
+
+            // Add length prefix size (VarInt encoding of the size)
+            _sb.AppendIndentedLine($"calculator.WriteVarUInt32((uint)customSize_{member.FieldId});");
+
+            // Add the actual content size
+            _sb.AppendIndentedLine($"calculator.AddByteLength(customSize_{member.FieldId});");
         }
 
         #endregion
