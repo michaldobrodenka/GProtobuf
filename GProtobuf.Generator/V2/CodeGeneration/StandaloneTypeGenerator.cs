@@ -63,11 +63,28 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         {
             var elementType = info.ElementType!;
             var returnType = $"global::System.Collections.Generic.List<{GetGlobalTypeName(elementType)}>";
+            GenerateCollectionDeserializerCore(info, methodName, returnType, "return list;");
+        }
+
+        private void GenerateArrayDeserializer(StandaloneTypeInfo info, string methodName)
+        {
+            var elementType = info.ElementType!;
+            var returnType = $"{GetGlobalTypeName(elementType)}[]";
+            GenerateCollectionDeserializerCore(info, methodName, returnType, "return list.ToArray();");
+        }
+
+        /// <summary>
+        /// Shared implementation for List and Array deserializers.
+        /// </summary>
+        private void GenerateCollectionDeserializerCore(StandaloneTypeInfo info, string methodName, string returnType, string returnStatement)
+        {
+            var elementType = info.ElementType!;
+            var listType = $"global::System.Collections.Generic.List<{GetGlobalTypeName(elementType)}>";
 
             // ReadOnlySpan<byte> overload
             _sb.AppendIndentedLine($"public static {returnType} {methodName}(ReadOnlySpan<byte> data)");
             _sb.StartNewBlock();
-            _sb.AppendIndentedLine($"var list = new {returnType}();");
+            _sb.AppendIndentedLine($"var list = new {listType}();");
             _sb.AppendIndentedLine("var reader = new SpanReader(data);");
             _sb.AppendIndentedLine("while (!reader.IsEnd)");
             _sb.StartNewBlock();
@@ -75,8 +92,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             if (info.ElementIsPrimitive)
             {
                 // Primitive types: protobuf-net uses unpacked format [tag=0x08][value] for each element
-                // tag 0x08 = field 1, wire type 0 (varint) for int/long/bool
-                // or wire type 1 (fixed64) for double/long, wire type 5 (fixed32) for float
                 _sb.AppendIndentedLine("var tag = reader.ReadVarUInt32();");
                 var expectedWireType = GetWireType(elementType);
                 _sb.AppendIndentedLine($"if ((tag & 0x07) != {expectedWireType}) throw new InvalidDataException($\"Expected wire type {expectedWireType}, got {{tag & 0x07}}\");");
@@ -86,57 +101,13 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             else
             {
                 // Complex types: protobuf-net uses [tag=0x0A][length][message] for each item
-                // tag 0x0A = field 1, wire type 2 (length-delimited)
                 _sb.AppendIndentedLine("var tag = reader.ReadVarUInt32();");
                 _sb.AppendIndentedLine("if ((tag & 0x07) != 2) throw new InvalidDataException($\"Expected wire type 2, got {tag & 0x07}\");");
                 GenerateComplexElementRead(elementType, "list.Add");
             }
 
             _sb.EndBlock();
-            _sb.AppendIndentedLine("return list;");
-            _sb.EndBlock();
-            _sb.AppendNewLine();
-
-            // byte[] overload
-            _sb.AppendIndentedLine($"public static {returnType} {methodName}(byte[] data)");
-            _sb.StartNewBlock();
-            _sb.AppendIndentedLine($"return {methodName}(new ReadOnlySpan<byte>(data));");
-            _sb.EndBlock();
-            _sb.AppendNewLine();
-        }
-
-        private void GenerateArrayDeserializer(StandaloneTypeInfo info, string methodName)
-        {
-            var elementType = info.ElementType!;
-            var returnType = $"{GetGlobalTypeName(elementType)}[]";
-
-            // ReadOnlySpan<byte> overload
-            _sb.AppendIndentedLine($"public static {returnType} {methodName}(ReadOnlySpan<byte> data)");
-            _sb.StartNewBlock();
-            _sb.AppendIndentedLine($"var list = new global::System.Collections.Generic.List<{GetGlobalTypeName(elementType)}>();");
-            _sb.AppendIndentedLine("var reader = new SpanReader(data);");
-            _sb.AppendIndentedLine("while (!reader.IsEnd)");
-            _sb.StartNewBlock();
-
-            if (info.ElementIsPrimitive)
-            {
-                // Primitive types: [tag][value] for each element
-                _sb.AppendIndentedLine("var tag = reader.ReadVarUInt32();");
-                var expectedWireType = GetWireType(elementType);
-                _sb.AppendIndentedLine($"if ((tag & 0x07) != {expectedWireType}) throw new InvalidDataException($\"Expected wire type {expectedWireType}, got {{tag & 0x07}}\");");
-                var readExpr = GetPrimitiveReadExpression(elementType);
-                _sb.AppendIndentedLine($"list.Add({readExpr});");
-            }
-            else
-            {
-                // Complex types: [tag=0x0A][length][message] for each item
-                _sb.AppendIndentedLine("var tag = reader.ReadVarUInt32();");
-                _sb.AppendIndentedLine("if ((tag & 0x07) != 2) throw new InvalidDataException($\"Expected wire type 2, got {tag & 0x07}\");");
-                GenerateComplexElementRead(elementType, "list.Add");
-            }
-
-            _sb.EndBlock();
-            _sb.AppendIndentedLine("return list.ToArray();");
+            _sb.AppendIndentedLine(returnStatement);
             _sb.EndBlock();
             _sb.AppendNewLine();
 
@@ -516,42 +487,28 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         {
             var elementType = info.ElementType!;
             var paramType = $"global::System.Collections.Generic.List<{GetGlobalTypeName(elementType)}>";
-
-            // Stream serializer
-            _sb.AppendIndentedLine($"public static void {methodName}(Stream stream, {paramType} list)");
-            _sb.StartNewBlock();
-            _sb.AppendIndentedLine("var writer = new global::GProtobuf.Core.StreamWriter(stream, stackalloc byte[256]);");
-            _sb.AppendIndentedLine("foreach (var item in list)");
-            _sb.StartNewBlock();
-            GenerateElementWrite(elementType, info.ElementIsPrimitive, "item", "writer", false);
-            _sb.EndBlock();
-            _sb.AppendIndentedLine("writer.Flush();");
-            _sb.EndBlock();
-            _sb.AppendNewLine();
-
-            // IBufferWriter serializer
-            _sb.AppendIndentedLine($"public static void {methodName}(IBufferWriter<byte> buffer, {paramType} list)");
-            _sb.StartNewBlock();
-            _sb.AppendIndentedLine("var writer = new global::GProtobuf.Core.BufferWriter(buffer);");
-            _sb.AppendIndentedLine("foreach (var item in list)");
-            _sb.StartNewBlock();
-            GenerateElementWrite(elementType, info.ElementIsPrimitive, "item", "writer", true);
-            _sb.EndBlock();
-            _sb.AppendIndentedLine("writer.Flush();");
-            _sb.EndBlock();
-            _sb.AppendNewLine();
+            GenerateCollectionSerializerCore(info, methodName, paramType, "list");
         }
 
         private void GenerateArraySerializer(StandaloneTypeInfo info, string methodName)
         {
             var elementType = info.ElementType!;
             var paramType = $"{GetGlobalTypeName(elementType)}[]";
+            GenerateCollectionSerializerCore(info, methodName, paramType, "array");
+        }
+
+        /// <summary>
+        /// Shared implementation for List and Array serializers.
+        /// </summary>
+        private void GenerateCollectionSerializerCore(StandaloneTypeInfo info, string methodName, string paramType, string varName)
+        {
+            var elementType = info.ElementType!;
 
             // Stream serializer
-            _sb.AppendIndentedLine($"public static void {methodName}(Stream stream, {paramType} array)");
+            _sb.AppendIndentedLine($"public static void {methodName}(Stream stream, {paramType} {varName})");
             _sb.StartNewBlock();
             _sb.AppendIndentedLine("var writer = new global::GProtobuf.Core.StreamWriter(stream, stackalloc byte[256]);");
-            _sb.AppendIndentedLine("foreach (var item in array)");
+            _sb.AppendIndentedLine($"foreach (var item in {varName})");
             _sb.StartNewBlock();
             GenerateElementWrite(elementType, info.ElementIsPrimitive, "item", "writer", false);
             _sb.EndBlock();
@@ -560,10 +517,10 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendNewLine();
 
             // IBufferWriter serializer
-            _sb.AppendIndentedLine($"public static void {methodName}(IBufferWriter<byte> buffer, {paramType} array)");
+            _sb.AppendIndentedLine($"public static void {methodName}(IBufferWriter<byte> buffer, {paramType} {varName})");
             _sb.StartNewBlock();
             _sb.AppendIndentedLine("var writer = new global::GProtobuf.Core.BufferWriter(buffer);");
-            _sb.AppendIndentedLine("foreach (var item in array)");
+            _sb.AppendIndentedLine($"foreach (var item in {varName})");
             _sb.StartNewBlock();
             GenerateElementWrite(elementType, info.ElementIsPrimitive, "item", "writer", true);
             _sb.EndBlock();

@@ -12,37 +12,21 @@ namespace GProtobuf.Generator.V2.CodeGeneration
     /// Generates SizeCalculators class with Calculate{ClassName}Size and Calculate{ClassName}ContentSize methods.
     /// Handles size calculation for serialization.
     /// </summary>
-    internal class SizeCalculatorGenerator
+    internal class SizeCalculatorGenerator : GeneratorBase
     {
-        private readonly StringBuilderWithIndent _sb;
-        private readonly TypeRegistry _registry;
-        private readonly PrimitiveHandler _primitiveHandler;
-        private readonly CollectionHandler _collectionHandler;
-        private readonly TupleHandler _tupleHandler;
-        private readonly VirtualMapTypeRegistry _virtualMapRegistry;
-        private readonly VirtualTupleTypeRegistry _virtualTupleRegistry;
-        private string _currentNamespace;
-        private int _nestedCalcCounter;
-
         public SizeCalculatorGenerator(StringBuilderWithIndent sb, TypeRegistry registry)
-            : this(sb, registry, null, null)
+            : base(sb, registry)
         {
         }
 
         public SizeCalculatorGenerator(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry)
-            : this(sb, registry, virtualMapRegistry, null)
+            : base(sb, registry, virtualMapRegistry)
         {
         }
 
         public SizeCalculatorGenerator(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry, VirtualTupleTypeRegistry virtualTupleRegistry)
+            : base(sb, registry, virtualMapRegistry, virtualTupleRegistry, passRegistryToPrimitiveHandler: false)
         {
-            _sb = sb;
-            _registry = registry;
-            _primitiveHandler = new PrimitiveHandler();
-            _collectionHandler = new CollectionHandler(sb, registry);
-            _virtualTupleRegistry = virtualTupleRegistry ?? new VirtualTupleTypeRegistry();
-            _virtualMapRegistry = virtualMapRegistry ?? new VirtualMapTypeRegistry(_virtualTupleRegistry, _registry);
-            _tupleHandler = new TupleHandler(sb, _virtualTupleRegistry);
         }
 
         /// <summary>
@@ -80,22 +64,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // Generate ContentSize and OwnFieldsSize methods for ProtoInclude derived types
             // that are not in the main types list (types without [ProtoContract])
             var processedTypes = new HashSet<string>(types.Select(t => t.FullName));
-            var protoIncludeTypes = new HashSet<string>();
-
-            // Collect all ProtoInclude types from all registered types
-            foreach (var registeredType in _registry.GetAllTypes())
-            {
-                if (registeredType.ProtoIncludes != null)
-                {
-                    foreach (var include in registeredType.ProtoIncludes)
-                    {
-                        if (!processedTypes.Contains(include.Type))
-                        {
-                            protoIncludeTypes.Add(include.Type);
-                        }
-                    }
-                }
-            }
+            var protoIncludeTypes = CollectUnprocessedProtoIncludeTypes(processedTypes);
 
             // Generate ContentSize and OwnFieldsSize methods for ProtoInclude types
             foreach (var protoIncludeTypeName in protoIncludeTypes)
@@ -200,23 +169,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateSimpleCalculateSize(TypeDefinition type, string className)
         {
-            // Calculate each field
-            if (type.ProtoMembers != null)
-            {
-                foreach (var member in type.ProtoMembers)
-                {
-                    GenerateFieldSize(member, "obj");
-                }
-            }
-
-            // Calculate custom buffer fields
-            if (type.CustomBufferMembers != null)
-            {
-                foreach (var customMember in type.CustomBufferMembers)
-                {
-                    GenerateCustomBufferFieldSize(customMember, "obj");
-                }
-            }
+            ForEachTypeMember(
+                type,
+                "obj",
+                (member, src) => GenerateFieldSize(member, src),
+                (customMember, src) => GenerateCustomBufferFieldSize(customMember, src));
         }
 
         private void GenerateCalculateSizeWithInheritance(TypeDefinition type, string className)
@@ -285,7 +242,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
 
             // Reset nested calculator counter for this method
-            _nestedCalcCounter = 0;
+            ResetNestedCalcCounter();
 
             // Get root (base) type
             var rootTypeName = inheritanceChain[0];
@@ -391,22 +348,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.StartNewBlock();
 
             // Calculate ONLY the fields defined in this base class, no switch/dispatch
-            if (type.ProtoMembers != null && type.ProtoMembers.Count > 0)
-            {
-                foreach (var member in type.ProtoMembers)
-                {
-                    GenerateFieldSize(member, "obj");
-                }
-            }
-
-            // Calculate custom buffer fields defined in this base class
-            if (type.CustomBufferMembers != null && type.CustomBufferMembers.Count > 0)
-            {
-                foreach (var customMember in type.CustomBufferMembers)
-                {
-                    GenerateCustomBufferFieldSize(customMember, "obj");
-                }
-            }
+            ForEachProtoMember(type.ProtoMembers, "obj", (member, src) => GenerateFieldSize(member, src));
+            ForEachCustomBufferMember(type.CustomBufferMembers, "obj", (member, src) => GenerateCustomBufferFieldSize(member, src));
 
             _sb.EndBlock();
             _sb.AppendNewLine();
@@ -421,13 +364,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             if (sortedDerived == null)
             {
                 // No derived types - just calculate own fields
-                if (type.ProtoMembers != null)
-                {
-                    foreach (var member in type.ProtoMembers)
-                    {
-                        GenerateFieldSize(member, "obj");
-                    }
-                }
+                ForEachProtoMember(type.ProtoMembers, "obj", (member, src) => GenerateFieldSize(member, src));
                 return;
             }
 
@@ -447,13 +384,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.EndBlock();
 
             // Default case - base type fields
-            if (type.ProtoMembers != null)
-            {
-                foreach (var member in type.ProtoMembers)
-                {
-                    GenerateFieldSize(member, "obj");
-                }
-            }
+            ForEachProtoMember(type.ProtoMembers, "obj", (member, src) => GenerateFieldSize(member, src));
         }
 
         /// <summary>
@@ -525,7 +456,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     TagCodeHelper.AddTagSize(_sb, protoInclude.FieldId, WireType.Len, calcVar);
 
                     // Calculate nested content size - use unique counter instead of levelIndex
-                    var nestedCalcVar = $"nestedCalc{_nestedCalcCounter++}";
+                    var nestedCalcVar = GetNextNestedCalcVar();
                     _sb.AppendIndentedLine($"var {nestedCalcVar} = new global::GProtobuf.Core.WriteSizeCalculator();");
 
                     // Recursive call for nested level
@@ -584,21 +515,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // Calculate root type fields (base class fields)
             var rootTypeName = _registry.GetRootType(type.FullName);
             var rootType = _registry.GetByFullName(rootTypeName);
-            if (rootType?.ProtoMembers != null)
-            {
-                foreach (var member in rootType.ProtoMembers)
-                {
-                    GenerateFieldSize(member, "obj");
-                }
-            }
+            ForEachProtoMember(rootType?.ProtoMembers, "obj", (member, src) => GenerateFieldSize(member, src));
 
             // Calculate own fields (if not root)
-            if (type.FullName != rootTypeName && type.ProtoMembers != null)
+            if (type.FullName != rootTypeName)
             {
-                foreach (var member in type.ProtoMembers)
-                {
-                    GenerateFieldSize(member, "obj");
-                }
+                ForEachProtoMember(type.ProtoMembers, "obj", (member, src) => GenerateFieldSize(member, src));
             }
         }
 
@@ -678,30 +600,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateEnumFieldSize(ProtoMemberAttribute member, string sourceVar)
         {
-            if (member.IsNullable)
-            {
-                // Nullable enum: always use HasValue check (IsRequired ignored)
-                _sb.AppendIndentedLine($"if ({sourceVar}.HasValue)");
-                _sb.StartNewBlock();
-                TagCodeHelper.AddTagSize(_sb, member.FieldId, WireType.VarInt);
-                _sb.AppendIndentedLine($"calculator.WriteVarInt32((int){sourceVar}.Value);");
-                _sb.EndBlock();
-            }
-            else if (member.IsRequired)
-            {
-                // Non-nullable enum + IsRequired: ALWAYS serialize (no condition)
-                TagCodeHelper.AddTagSize(_sb, member.FieldId, WireType.VarInt);
-                _sb.AppendIndentedLine($"calculator.WriteVarInt32((int){sourceVar});");
-            }
-            else
-            {
-                // Non-nullable enum + NOT required: proto2 default value check
-                _sb.AppendIndentedLine($"if ((int){sourceVar} != 0)");
-                _sb.StartNewBlock();
-                TagCodeHelper.AddTagSize(_sb, member.FieldId, WireType.VarInt);
-                _sb.AppendIndentedLine($"calculator.WriteVarInt32((int){sourceVar});");
-                _sb.EndBlock();
-            }
+            EnumFieldHelper.GenerateEnumField(
+                _sb,
+                member,
+                sourceVar,
+                writeTag: () => TagCodeHelper.AddTagSize(_sb, member.FieldId, WireType.VarInt),
+                writeValue: (valueExpr, _) => _sb.AppendIndentedLine($"calculator.WriteVarInt32((int){valueExpr});"));
         }
 
         private void GenerateMapFieldSize(ProtoMemberAttribute member, string sourceVar)

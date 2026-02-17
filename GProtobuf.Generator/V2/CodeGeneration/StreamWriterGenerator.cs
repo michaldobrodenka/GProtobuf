@@ -12,20 +12,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
     /// Generates StreamWriters class with Write{ClassName} methods.
     /// Handles serialization from objects to StreamWriter.
     /// </summary>
-    internal class StreamWriterGenerator
+    internal class StreamWriterGenerator : GeneratorBase
     {
-        private readonly StringBuilderWithIndent _sb;
-        private readonly TypeRegistry _registry;
-        private readonly PrimitiveHandler _primitiveHandler;
-        private readonly CollectionHandler _collectionHandler;
-        private readonly TupleHandler _tupleHandler;
-        private readonly VirtualMapTypeRegistry _virtualMapRegistry;
-        private readonly VirtualTupleTypeRegistry _virtualTupleRegistry;
         private readonly string _writerType;
         private readonly string _className;
         private readonly string _writerKind;
-        private string _currentNamespace;
-        private int _nestedCalcCounter;
 
         public StreamWriterGenerator(StringBuilderWithIndent sb, TypeRegistry registry)
             : this(sb, registry, null, null, "Stream")
@@ -43,28 +34,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         }
 
         protected StreamWriterGenerator(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry, VirtualTupleTypeRegistry virtualTupleRegistry, string writerKind)
+            : base(sb, registry, virtualMapRegistry, virtualTupleRegistry, passRegistryToPrimitiveHandler: false)
         {
-            _sb = sb;
-            _registry = registry;
-            _primitiveHandler = new PrimitiveHandler();
-            _collectionHandler = new CollectionHandler(sb, registry);
-            _virtualTupleRegistry = virtualTupleRegistry ?? new VirtualTupleTypeRegistry();
-            _virtualMapRegistry = virtualMapRegistry ?? new VirtualMapTypeRegistry(_virtualTupleRegistry, _registry);
-            _tupleHandler = new TupleHandler(sb, _virtualTupleRegistry);
             _writerKind = writerKind;
             _writerType = $"global::GProtobuf.Core.{writerKind}Writer";
             _className = $"{writerKind}Writers";
         }
-
-        /// <summary>
-        /// Gets the virtual map type registry used by this generator.
-        /// </summary>
-        public VirtualMapTypeRegistry VirtualMapRegistry => _virtualMapRegistry;
-
-        /// <summary>
-        /// Gets the virtual tuple type registry used by this generator.
-        /// </summary>
-        public VirtualTupleTypeRegistry VirtualTupleRegistry => _virtualTupleRegistry;
 
         /// <summary>
         /// Generates complete Writers class for all types.
@@ -92,22 +67,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // Generate WriteContent and OwnFieldsWrite methods for ProtoInclude derived types
             // that are not in the main types list (types without [ProtoContract])
             var processedTypes = new HashSet<string>(types.Select(t => t.FullName));
-            var protoIncludeTypes = new HashSet<string>();
-
-            // Collect all ProtoInclude types from all registered types
-            foreach (var registeredType in _registry.GetAllTypes())
-            {
-                if (registeredType.ProtoIncludes != null)
-                {
-                    foreach (var include in registeredType.ProtoIncludes)
-                    {
-                        if (!processedTypes.Contains(include.Type))
-                        {
-                            protoIncludeTypes.Add(include.Type);
-                        }
-                    }
-                }
-            }
+            var protoIncludeTypes = CollectUnprocessedProtoIncludeTypes(processedTypes);
 
             // Generate WriteContent and OwnFieldsWrite methods for ProtoInclude types
             foreach (var protoIncludeTypeName in protoIncludeTypes)
@@ -299,22 +259,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.StartNewBlock();
 
             // Write ONLY the fields defined in this base class, no switch/dispatch
-            if (type.ProtoMembers != null && type.ProtoMembers.Count > 0)
-            {
-                foreach (var member in type.ProtoMembers)
-                {
-                    GenerateFieldWrite(member, "instance");
-                }
-            }
-
-            // Write custom buffer fields defined in this base class
-            if (type.CustomBufferMembers != null && type.CustomBufferMembers.Count > 0)
-            {
-                foreach (var customMember in type.CustomBufferMembers)
-                {
-                    GenerateCustomBufferFieldWrite(customMember, "instance");
-                }
-            }
+            ForEachProtoMember(type.ProtoMembers, "instance", (member, src) => GenerateFieldWrite(member, src));
+            ForEachCustomBufferMember(type.CustomBufferMembers, "instance", (member, src) => GenerateCustomBufferFieldWrite(member, src));
 
             _sb.EndBlock();
             _sb.AppendNewLine();
@@ -329,13 +275,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             if (sortedDerived == null)
             {
                 // No derived types - just write own fields
-                if (type.ProtoMembers != null)
-                {
-                    foreach (var member in type.ProtoMembers)
-                    {
-                        GenerateFieldWrite(member, "instance");
-                    }
-                }
+                ForEachProtoMember(type.ProtoMembers, "instance", (member, src) => GenerateFieldWrite(member, src));
                 return;
             }
 
@@ -355,13 +295,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.EndBlock();
 
             // Default case - base type fields
-            if (type.ProtoMembers != null)
-            {
-                foreach (var member in type.ProtoMembers)
-                {
-                    GenerateFieldWrite(member, "instance");
-                }
-            }
+            ForEachProtoMember(type.ProtoMembers, "instance", (member, src) => GenerateFieldWrite(member, src));
         }
 
         /// <summary>
@@ -434,7 +368,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     TagCodeHelper.AddTagSize(_sb, protoInclude.FieldId, WireType.Len, calcVar);
 
                     // Calculate nested content size - use unique counter instead of levelIndex
-                    var nestedCalcVar = $"nestedCalc{_nestedCalcCounter++}";
+                    var nestedCalcVar = GetNextNestedCalcVar();
                     _sb.AppendIndentedLine($"var {nestedCalcVar} = new global::GProtobuf.Core.WriteSizeCalculator();");
 
                     // Recursive call for nested level
@@ -536,21 +470,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // Write root type fields (base class fields)
             var rootTypeName = _registry.GetRootType(type.FullName);
             var rootType = _registry.GetByFullName(rootTypeName);
-            if (rootType?.ProtoMembers != null)
-            {
-                foreach (var member in rootType.ProtoMembers)
-                {
-                    GenerateFieldWrite(member, "instance");
-                }
-            }
+            ForEachProtoMember(rootType?.ProtoMembers, "instance", (member, src) => GenerateFieldWrite(member, src));
 
             // Write own fields (if not root)
-            if (type.FullName != rootTypeName && type.ProtoMembers != null)
+            if (type.FullName != rootTypeName)
             {
-                foreach (var member in type.ProtoMembers)
-                {
-                    GenerateFieldWrite(member, "instance");
-                }
+                ForEachProtoMember(type.ProtoMembers, "instance", (member, src) => GenerateFieldWrite(member, src));
             }
         }
 
@@ -761,23 +686,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateSimpleWriteMethod(TypeDefinition type, string className)
         {
-            // Write each field
-            if (type.ProtoMembers != null)
-            {
-                foreach (var member in type.ProtoMembers)
-                {
-                    GenerateFieldWrite(member, "instance");
-                }
-            }
-
-            // Write custom buffer fields
-            if (type.CustomBufferMembers != null)
-            {
-                foreach (var customMember in type.CustomBufferMembers)
-                {
-                    GenerateCustomBufferFieldWrite(customMember, "instance");
-                }
-            }
+            ForEachTypeMember(
+                type,
+                "instance",
+                (member, src) => GenerateFieldWrite(member, src),
+                (customMember, src) => GenerateCustomBufferFieldWrite(customMember, src));
         }
 
         private void GenerateWriteMethodWithInheritance(TypeDefinition type, string className)
@@ -915,7 +828,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
 
             // Reset nested calculator counter for this method
-            _nestedCalcCounter = 0;
+            ResetNestedCalcCounter();
 
             // Get root (base) type
             var rootTypeName = inheritanceChain[0];
@@ -1043,31 +956,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateEnumFieldWrite(ProtoMemberAttribute member, string sourceVar)
         {
-            // protobuf-net 2.3.7 Level200: IsRequired on nullable → ignored, on non-nullable → always serialize
-            if (member.IsNullable)
-            {
-                // Nullable enum: always use HasValue check (IsRequired ignored)
-                _sb.AppendIndentedLine($"if ({sourceVar}.HasValue)");
-                _sb.StartNewBlock();
-                TagCodeHelper.WriteTag(_sb, member.FieldId, WireType.VarInt);
-                _sb.AppendIndentedLine($"writer.WriteVarInt32((int){sourceVar}.Value);");
-                _sb.EndBlock();
-            }
-            else if (member.IsRequired)
-            {
-                // Non-nullable enum + IsRequired: ALWAYS serialize (no condition)
-                TagCodeHelper.WriteTag(_sb, member.FieldId, WireType.VarInt);
-                _sb.AppendIndentedLine($"writer.WriteVarInt32((int){sourceVar});");
-            }
-            else
-            {
-                // Non-nullable enum + NOT required: proto2 default value check
-                _sb.AppendIndentedLine($"if ((int){sourceVar} != 0)");
-                _sb.StartNewBlock();
-                TagCodeHelper.WriteTag(_sb, member.FieldId, WireType.VarInt);
-                _sb.AppendIndentedLine($"writer.WriteVarInt32((int){sourceVar});");
-                _sb.EndBlock();
-            }
+            EnumFieldHelper.GenerateEnumField(
+                _sb,
+                member,
+                sourceVar,
+                writeTag: () => TagCodeHelper.WriteTag(_sb, member.FieldId, WireType.VarInt),
+                writeValue: (valueExpr, _) => _sb.AppendIndentedLine($"writer.WriteVarInt32((int){valueExpr});"));
         }
 
         private void GenerateMapFieldWrite(ProtoMemberAttribute member, string sourceVar)
@@ -1437,31 +1331,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateEnumFieldSizeCalculation(ProtoMemberAttribute member, string sourceVar, string calculatorVar)
         {
-            // protobuf-net 2.3.7 Level200: IsRequired on nullable → ignored, on non-nullable → always serialize
-            if (member.IsNullable)
-            {
-                // Nullable enum: always use HasValue check (IsRequired ignored)
-                _sb.AppendIndentedLine($"if ({sourceVar}.HasValue)");
-                _sb.StartNewBlock();
-                TagCodeHelper.AddTagSize(_sb, member.FieldId, WireType.VarInt, calculatorVar);
-                _sb.AppendIndentedLine($"{calculatorVar}.WriteVarInt32((int){sourceVar}.Value);");
-                _sb.EndBlock();
-            }
-            else if (member.IsRequired)
-            {
-                // Non-nullable enum + IsRequired: ALWAYS calculate size (no condition)
-                TagCodeHelper.AddTagSize(_sb, member.FieldId, WireType.VarInt, calculatorVar);
-                _sb.AppendIndentedLine($"{calculatorVar}.WriteVarInt32((int){sourceVar});");
-            }
-            else
-            {
-                // Non-nullable enum + NOT required: proto2 default value check
-                _sb.AppendIndentedLine($"if ((int){sourceVar} != 0)");
-                _sb.StartNewBlock();
-                TagCodeHelper.AddTagSize(_sb, member.FieldId, WireType.VarInt, calculatorVar);
-                _sb.AppendIndentedLine($"{calculatorVar}.WriteVarInt32((int){sourceVar});");
-                _sb.EndBlock();
-            }
+            EnumFieldHelper.GenerateEnumField(
+                _sb,
+                member,
+                sourceVar,
+                writeTag: () => TagCodeHelper.AddTagSize(_sb, member.FieldId, WireType.VarInt, calculatorVar),
+                writeValue: (valueExpr, _) => _sb.AppendIndentedLine($"{calculatorVar}.WriteVarInt32((int){valueExpr});"));
         }
 
         private void GenerateMapFieldSizeCalculation(ProtoMemberAttribute member, string sourceVar, string calculatorVar)

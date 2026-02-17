@@ -12,47 +12,22 @@ namespace GProtobuf.Generator.V2.CodeGeneration
     /// Generates SpanReaders class with Read{ClassName} and Read{ClassName}Content methods.
     /// Handles deserialization from SpanReader to object instances.
     /// </summary>
-    internal class SpanReaderGenerator
+    internal class SpanReaderGenerator : GeneratorBase
     {
-        private readonly StringBuilderWithIndent _sb;
-        private readonly TypeRegistry _registry;
-        private readonly PrimitiveHandler _primitiveHandler;
-        private readonly CollectionHandler _collectionHandler;
-        private readonly TupleHandler _tupleHandler;
-        private readonly VirtualMapTypeRegistry _virtualMapRegistry;
-        private readonly VirtualTupleTypeRegistry _virtualTupleRegistry;
-        private string _currentNamespace;
-
         public SpanReaderGenerator(StringBuilderWithIndent sb, TypeRegistry registry)
-            : this(sb, registry, null, null)
+            : base(sb, registry)
         {
         }
 
         public SpanReaderGenerator(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry)
-            : this(sb, registry, virtualMapRegistry, null)
+            : base(sb, registry, virtualMapRegistry)
         {
         }
 
         public SpanReaderGenerator(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry, VirtualTupleTypeRegistry virtualTupleRegistry)
+            : base(sb, registry, virtualMapRegistry, virtualTupleRegistry, passRegistryToPrimitiveHandler: true)
         {
-            _sb = sb;
-            _registry = registry;
-            _primitiveHandler = new PrimitiveHandler(registry);
-            _collectionHandler = new CollectionHandler(sb, registry);
-            _virtualTupleRegistry = virtualTupleRegistry ?? new VirtualTupleTypeRegistry();
-            _virtualMapRegistry = virtualMapRegistry ?? new VirtualMapTypeRegistry(_virtualTupleRegistry, _registry);
-            _tupleHandler = new TupleHandler(sb, _virtualTupleRegistry);
         }
-
-        /// <summary>
-        /// Gets the virtual map type registry used by this generator.
-        /// </summary>
-        public VirtualMapTypeRegistry VirtualMapRegistry => _virtualMapRegistry;
-
-        /// <summary>
-        /// Gets the virtual tuple type registry used by this generator.
-        /// </summary>
-        public VirtualTupleTypeRegistry VirtualTupleRegistry => _virtualTupleRegistry;
 
         /// <summary>
         /// Analyzes type and determines deserialization strategy (parameterless constructor, constructor with params, or FormatterServices).
@@ -190,23 +165,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             // Generate ReadContent methods for ProtoInclude derived types
             // that are not in the main types list (types without [ProtoContract])
-            var processedTypes = new System.Collections.Generic.HashSet<string>(types.Select(t => t.FullName));
-            var protoIncludeTypes = new System.Collections.Generic.HashSet<string>();
-
-            // Collect all ProtoInclude types from all registered types
-            foreach (var registeredType in _registry.GetAllTypes())
-            {
-                if (registeredType.ProtoIncludes != null)
-                {
-                    foreach (var include in registeredType.ProtoIncludes)
-                    {
-                        if (!processedTypes.Contains(include.Type))
-                        {
-                            protoIncludeTypes.Add(include.Type);
-                        }
-                    }
-                }
-            }
+            var processedTypes = new HashSet<string>(types.Select(t => t.FullName));
+            var protoIncludeTypes = CollectUnprocessedProtoIncludeTypes(processedTypes);
 
             // Generate ReadContent methods for ProtoInclude types
             foreach (var protoIncludeTypeName in protoIncludeTypes)
