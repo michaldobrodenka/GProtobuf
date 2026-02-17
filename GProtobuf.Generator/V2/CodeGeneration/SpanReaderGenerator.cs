@@ -795,14 +795,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             bool isDerivedType = !string.IsNullOrEmpty(parentType);
             string methodSuffix = isDerivedType ? "" : "Content";
 
-            if (!string.IsNullOrEmpty(typeNamespace) && typeNamespace != _currentNamespace)
-            {
-                _sb.AppendIndentedLine($"result.{member.Name} = global::{typeNamespace}.Serialization.SpanReaders.Read{typeName}{methodSuffix}(ref nestedReader);");
-            }
-            else
-            {
-                _sb.AppendIndentedLine($"result.{member.Name} = Read{typeName}{methodSuffix}(ref nestedReader);");
-            }
+            var nsPrefix = GeneratorHelpers.GetNamespacePrefix(typeNamespace, _currentNamespace);
+            _sb.AppendIndentedLine($"result.{member.Name} = {nsPrefix}SpanReaders.Read{typeName}{methodSuffix}(ref nestedReader);");
         }
 
         #endregion
@@ -1563,14 +1557,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
                 // Check if type is from different namespace and qualify the call
                 var typeNamespace = _registry.GetNamespaceForType(member.Type);
-                if (!string.IsNullOrEmpty(typeNamespace) && typeNamespace != _currentNamespace)
-                {
-                    _sb.AppendIndentedLine($"instance.{member.Name} = global::{typeNamespace}.Serialization.SpanReaders.Read{typeName}Content(ref nestedReader);");
-                }
-                else
-                {
-                    _sb.AppendIndentedLine($"instance.{member.Name} = Read{typeName}Content(ref nestedReader);");
-                }
+                var nsPrefix = GeneratorHelpers.GetNamespacePrefix(typeNamespace, _currentNamespace);
+                _sb.AppendIndentedLine($"instance.{member.Name} = {nsPrefix}SpanReaders.Read{typeName}Content(ref nestedReader);");
             }
 
             _sb.AppendIndentedLine("break;");
@@ -1835,10 +1823,14 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         private void GenerateFieldReadCase(ProtoMemberAttribute member)
         {
             _sb.AppendIndentedLine($"case {member.FieldId}:");
+            var category = GeneratorHelpers.GetFieldCategory(member, _primitiveHandler);
 
             // Determine if we need braces for variable scoping
-            bool needsBraces = member.IsMap || member.IsCollection ||
-                              (!member.IsEnum && !_primitiveHandler.CanHandle(member.Type));
+            bool needsBraces = category == FieldCategory.Map ||
+                              category == FieldCategory.Collection ||
+                              category == FieldCategory.ComplexType ||
+                              category == FieldCategory.Tuple ||
+                              category == FieldCategory.ProtoVarint;
 
             if (needsBraces)
             {
@@ -1854,43 +1846,35 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // Phase 1: Wire type validation (Level200 requirement)
             GenerateWireTypeValidation(member);
 
-            // Route to appropriate handler based on field type
-            if (member.IsMap)
+            // Route to appropriate handler based on field category
+            switch (category)
             {
-                GenerateMapFieldReadBody(member);
-            }
-            else if (member.IsCollection)
-            {
-                GenerateCollectionFieldReadBody(member);
-            }
-            else if (member.IsEnum)
-            {
-                GenerateEnumFieldReadBody(member);
-            }
-            else if (TupleHandler.IsTupleType(member.Type))
-            {
-                _tupleHandler.GenerateTupleRead($"result.{member.Name}", member.Type);
-            }
-            else if (_primitiveHandler.CanHandle(member.Type))
-            {
-                _primitiveHandler.GenerateRead(_sb, $"result.{member.Name}", member.Type, member.DataFormat);
-            }
-            else if (member.IsProtoVarint)
-            {
-                // ProtoVarint type - read varint and construct using the constructor
-                ProtoVarintTypeSupport.GenerateRead(_sb, member, $"result.{member.Name}");
-            }
-            else if (TypeMapping.IsUnsupportedType(member.Type))
-            {
-                // Unsupported type (e.g., System.Type) - skip field with warning comment
-                _sb.AppendIndentedLine($"// ⚠️ WARNING: Field '{member.Name}' with type '{member.Type}' is unsupported and will be skipped");
-                _sb.AppendIndentedLine($"// Unsupported types: System.Type (reflection metadata cannot be deserialized)");
-                _sb.AppendIndentedLine("reader.SkipField(wireType);");
-            }
-            else
-            {
-                // Complex type - nested message
-                GenerateComplexTypeReadBody(member);
+                case FieldCategory.Map:
+                    GenerateMapFieldReadBody(member);
+                    break;
+                case FieldCategory.Collection:
+                    GenerateCollectionFieldReadBody(member);
+                    break;
+                case FieldCategory.Enum:
+                    GenerateEnumFieldReadBody(member);
+                    break;
+                case FieldCategory.Tuple:
+                    _tupleHandler.GenerateTupleRead($"result.{member.Name}", member.Type);
+                    break;
+                case FieldCategory.Primitive:
+                    _primitiveHandler.GenerateRead(_sb, $"result.{member.Name}", member.Type, member.DataFormat);
+                    break;
+                case FieldCategory.ProtoVarint:
+                    ProtoVarintTypeSupport.GenerateRead(_sb, member, $"result.{member.Name}");
+                    break;
+                case FieldCategory.Unsupported:
+                    _sb.AppendIndentedLine($"// ⚠️ WARNING: Field '{member.Name}' with type '{member.Type}' is unsupported and will be skipped");
+                    _sb.AppendIndentedLine($"// Unsupported types: System.Type (reflection metadata cannot be deserialized)");
+                    _sb.AppendIndentedLine("reader.SkipField(wireType);");
+                    break;
+                case FieldCategory.ComplexType:
+                    GenerateComplexTypeReadBody(member);
+                    break;
             }
 
             _sb.AppendIndentedLine("break;");
@@ -2054,20 +2038,19 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         {
             var typeNamespace = _registry.GetNamespaceForType(member.Type);
 
-            // Get parent type and expected wrapper tag
-            var parentTypeFullName = _registry.GetParent(member.Type);
-            var parentType = _registry.GetByFullName(parentTypeFullName);
-            var protoInclude = parentType?.ProtoIncludes?.FirstOrDefault(p => p.Type == member.Type);
-
-            if (protoInclude == null)
+            // Get nested derived type info (parent type, ProtoInclude, wrapper tag)
+            var derivedInfo = GeneratorHelpers.TryGetNestedDerivedTypeInfo(member.Type, _registry);
+            if (derivedInfo == null)
             {
-                _sb.AppendIndentedLine($"// WARNING: No ProtoInclude found for {member.Type} in {parentTypeFullName}");
+                _sb.AppendIndentedLine($"// WARNING: No ProtoInclude found for {member.Type}");
                 GenerateStandardComplexTypeReadBody(member, typeName);
                 return;
             }
 
-            var wrapperTag = (protoInclude.FieldId << 3) | (int)WireType.Len;
-            var parentTypeName = TypeNameHelper.GetClassName(parentTypeFullName);
+            var wrapperTag = derivedInfo.WrapperTag;
+            var parentTypeName = derivedInfo.ParentTypeName;
+            var protoInclude = derivedInfo.ProtoInclude;
+            var parentType = derivedInfo.ParentType;
 
             _sb.AppendIndentedLine($"// ProtoInclude wrapper detection for nested derived type {typeName}");
             _sb.AppendIndentedLine("var length = reader.ReadVarInt32();");
@@ -2093,9 +2076,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // 2. Reading base fields from nestedReader (after wrapper)
             // We need to read ONLY the wrapper content here, then let ReadContent handle base fields
 
-            string derivedReaderPrefix = !string.IsNullOrEmpty(typeNamespace) && typeNamespace != _currentNamespace
-                ? $"global::{typeNamespace}.Serialization.SpanReaders."
-                : "";
+            string derivedReaderPrefix = GeneratorHelpers.GetNamespacePrefix(typeNamespace, _currentNamespace) + "SpanReaders.";
 
             _sb.AppendIndentedLine($"// Read derived object from wrapper (derived fields only)");
             _sb.AppendIndentedLine($"result.{member.Name} = new global::{member.Type}();");
@@ -2106,20 +2087,16 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine($"// Read base fields (AFTER wrapper) - read as parent type and copy fields");
 
             // Get parent type reader prefix
-            var parentNamespace = _registry.GetNamespaceForType(parentTypeFullName);
-            string parentReaderPrefix = !string.IsNullOrEmpty(parentNamespace) && parentNamespace != _currentNamespace
-                ? $"global::{parentNamespace}.Serialization.SpanReaders."
-                : "";
+            string parentReaderPrefix = GeneratorHelpers.GetNamespacePrefix(derivedInfo.ParentNamespace, _currentNamespace) + "SpanReaders.";
 
             // Read parent instance
             _sb.AppendIndentedLine($"var baseInstance = {parentReaderPrefix}Read{parentTypeName}Content(ref nestedReader);");
 
             // Copy base fields from parent instance to derived instance
-            var parentTypeDef = parentType;
-            if (parentTypeDef?.ProtoMembers != null && parentTypeDef.ProtoMembers.Any())
+            if (parentType?.ProtoMembers != null && parentType.ProtoMembers.Any())
             {
                 _sb.AppendIndentedLine($"// Copy base fields from parent instance to derived instance");
-                foreach (var baseMember in parentTypeDef.ProtoMembers)
+                foreach (var baseMember in parentType.ProtoMembers)
                 {
                     _sb.AppendIndentedLine($"result.{member.Name}.{baseMember.Name} = baseInstance.{baseMember.Name};");
                 }
@@ -2146,14 +2123,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             // Check if type is from different namespace and qualify the call
             var typeNamespace = _registry.GetNamespaceForType(member.Type);
-            if (!string.IsNullOrEmpty(typeNamespace) && typeNamespace != _currentNamespace)
-            {
-                _sb.AppendIndentedLine($"result.{member.Name} = global::{typeNamespace}.Serialization.SpanReaders.Read{typeName}Content(ref nestedReader);");
-            }
-            else
-            {
-                _sb.AppendIndentedLine($"result.{member.Name} = Read{typeName}Content(ref nestedReader);");
-            }
+            var nsPrefix = GeneratorHelpers.GetNamespacePrefix(typeNamespace, _currentNamespace);
+            _sb.AppendIndentedLine($"result.{member.Name} = {nsPrefix}SpanReaders.Read{typeName}Content(ref nestedReader);");
         }
 
         /// <summary>

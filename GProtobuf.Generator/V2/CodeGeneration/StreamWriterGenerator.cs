@@ -325,8 +325,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// </summary>
         private void GenerateWriteContentWithTypeDispatch(TypeDefinition type, string className)
         {
-            var allDerivedTypes = _registry.GetAllDerivedTypes(type.FullName);
-            if (allDerivedTypes.Count == 0)
+            var sortedDerived = GeneratorHelpers.GetSortedDerivedTypes(type.FullName, _registry);
+            if (sortedDerived == null)
             {
                 // No derived types - just write own fields
                 if (type.ProtoMembers != null)
@@ -338,15 +338,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 }
                 return;
             }
-
-            // Generate switch with type dispatch (most derived first)
-            var sortedDerived = allDerivedTypes
-                .OrderByDescending(d =>
-                {
-                    var chain = _registry.GetInheritanceChain(d);
-                    return chain?.Count ?? 0;
-                })
-                .ToList();
 
             _sb.AppendIndentedLine("switch (instance)");
             _sb.StartNewBlock();
@@ -384,7 +375,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var baseTypeName = chain[0];
             var firstDerivedTypeName = chain[1];
             var baseType = _registry.GetByFullName(baseTypeName);
-            var protoInclude = FindProtoInclude(baseType, firstDerivedTypeName);
+            var protoInclude = GeneratorHelpers.FindProtoInclude(baseType, firstDerivedTypeName);
 
             if (protoInclude == null)
             {
@@ -433,7 +424,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 var nextTypeName = chain[levelIndex + 1];
                 var nextClassName = TypeNameHelper.GetClassName(nextTypeName);
-                var protoInclude = FindProtoInclude(currentType, nextTypeName);
+                var protoInclude = GeneratorHelpers.FindProtoInclude(currentType, nextTypeName);
 
                 if (protoInclude != null)
                 {
@@ -476,7 +467,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 var nextTypeName = chain[levelIndex + 1];
                 var nextClassName = TypeNameHelper.GetClassName(nextTypeName);
-                var protoInclude = FindProtoInclude(currentType, nextTypeName);
+                var protoInclude = GeneratorHelpers.FindProtoInclude(currentType, nextTypeName);
 
                 if (protoInclude != null)
                 {
@@ -497,22 +488,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     WriteWrapperContentRecursive(chain, levelIndex + 1);
                 }
             }
-        }
-
-        /// <summary>
-        /// Finds ProtoInclude attribute for a specific derived type in a base type.
-        /// </summary>
-        private ProtoIncludeAttribute FindProtoInclude(TypeDefinition baseType, string derivedTypeName)
-        {
-            if (baseType?.ProtoIncludes == null) return null;
-
-            foreach (var include in baseType.ProtoIncludes)
-            {
-                if (include.Type == derivedTypeName)
-                    return include;
-            }
-
-            return null;
         }
 
         /// <summary>
@@ -1027,50 +1002,42 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         private void GenerateFieldWrite(ProtoMemberAttribute member, string objectName)
         {
             string sourceVar = $"{objectName}.{member.Name}";
+            var category = GeneratorHelpers.GetFieldCategory(member, _primitiveHandler);
 
-            // Route to appropriate handler based on field type
-            if (member.IsMap)
+            switch (category)
             {
-                GenerateMapFieldWrite(member, sourceVar);
-            }
-            else if (member.IsCollection)
-            {
-                GenerateCollectionFieldWrite(member, sourceVar);
-            }
-            else if (member.IsEnum)
-            {
-                GenerateEnumFieldWrite(member, sourceVar);
-            }
-            else if (TupleHandler.IsTupleType(member.Type))
-            {
-                _tupleHandler.GenerateTupleWrite(member.FieldId, sourceVar, member.Type, _className);
-            }
-            else if (_primitiveHandler.CanHandle(member.Type))
-            {
-                _primitiveHandler.GenerateWrite(
-                    _sb,
-                    sourceVar,
-                    member.Type,
-                    member.DataFormat,
-                    member.FieldId,
-                    member.IsNullable,
-                    member.IsRequired);
-            }
-            else if (member.IsProtoVarint)
-            {
-                // ProtoVarint type - serialize as varint using the value accessor
-                ProtoVarintTypeSupport.GenerateWrite(_sb, member, sourceVar);
-            }
-            else if (TypeMapping.IsUnsupportedType(member.Type))
-            {
-                // Unsupported type (e.g., System.Type) - skip with warning comment
-                _sb.AppendIndentedLine($"// ⚠️ WARNING: Field '{member.Name}' with type '{member.Type}' is unsupported and will be skipped");
-                _sb.AppendIndentedLine($"// Unsupported types: System.Type (reflection metadata cannot be serialized)");
-            }
-            else
-            {
-                // Complex type - nested message
-                GenerateComplexTypeWrite(member, sourceVar);
+                case FieldCategory.Map:
+                    GenerateMapFieldWrite(member, sourceVar);
+                    break;
+                case FieldCategory.Collection:
+                    GenerateCollectionFieldWrite(member, sourceVar);
+                    break;
+                case FieldCategory.Enum:
+                    GenerateEnumFieldWrite(member, sourceVar);
+                    break;
+                case FieldCategory.Tuple:
+                    _tupleHandler.GenerateTupleWrite(member.FieldId, sourceVar, member.Type, _className);
+                    break;
+                case FieldCategory.Primitive:
+                    _primitiveHandler.GenerateWrite(
+                        _sb,
+                        sourceVar,
+                        member.Type,
+                        member.DataFormat,
+                        member.FieldId,
+                        member.IsNullable,
+                        member.IsRequired);
+                    break;
+                case FieldCategory.ProtoVarint:
+                    ProtoVarintTypeSupport.GenerateWrite(_sb, member, sourceVar);
+                    break;
+                case FieldCategory.Unsupported:
+                    _sb.AppendIndentedLine($"// ⚠️ WARNING: Field '{member.Name}' with type '{member.Type}' is unsupported and will be skipped");
+                    _sb.AppendIndentedLine($"// Unsupported types: System.Type (reflection metadata cannot be serialized)");
+                    break;
+                case FieldCategory.ComplexType:
+                    GenerateComplexTypeWrite(member, sourceVar);
+                    break;
             }
         }
 
@@ -1212,24 +1179,22 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         private void GenerateNestedDerivedTypeWrite(ProtoMemberAttribute member, string sourceVar, string typeName, TypeDefinition typeDef)
         {
             bool isNonNullableStruct = typeDef != null && typeDef.IsStruct && !member.IsNullable;
-            string valueArg = GetNullableValueAccess(sourceVar, member, typeDef);
+            string valueArg = GeneratorHelpers.GetNullableValueAccess(sourceVar, member, typeDef, _registry);
             var typeNamespace = _registry.GetNamespaceForType(member.Type);
             var calcVar = isNonNullableStruct ? $"calculator_{member.FieldId}" : "calculator";
 
-            // Get parent type and ProtoInclude field ID
-            var parentTypeFullName = _registry.GetParent(member.Type);
-            var parentType = _registry.GetByFullName(parentTypeFullName);
-            var protoInclude = parentType?.ProtoIncludes?.FirstOrDefault(p => p.Type == member.Type);
-
-            if (protoInclude == null)
+            // Get nested derived type info (parent type, ProtoInclude, wrapper tag)
+            var derivedInfo = GeneratorHelpers.TryGetNestedDerivedTypeInfo(member.Type, _registry);
+            if (derivedInfo == null)
             {
-                _sb.AppendIndentedLine($"// WARNING: No ProtoInclude found for {member.Type} in {parentTypeFullName}");
+                _sb.AppendIndentedLine($"// WARNING: No ProtoInclude found for {member.Type}");
                 GenerateStandardComplexTypeWrite(member, sourceVar, typeName, typeDef);
                 return;
             }
 
-            var parentTypeName = TypeNameHelper.GetClassName(parentTypeFullName);
-            var wrapperTag = (protoInclude.FieldId << 3) | (int)WireType.Len;
+            var parentTypeName = derivedInfo.ParentTypeName;
+            var wrapperTag = derivedInfo.WrapperTag;
+            var protoInclude = derivedInfo.ProtoInclude;
 
             _sb.AppendIndentedLine($"// ProtoInclude wrapper for nested derived type {typeName}");
 
@@ -1245,9 +1210,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var wrapperContentCalcVar = isNonNullableStruct ? $"wrapperContent_{member.FieldId}" : "wrapperContentCalc";
             _sb.AppendIndentedLine($"var {wrapperContentCalcVar} = new global::GProtobuf.Core.WriteSizeCalculator();");
 
-            string sizeCalcNamespace = !string.IsNullOrEmpty(typeNamespace) && typeNamespace != _currentNamespace
-                ? $"global::{typeNamespace}.Serialization."
-                : "";
+            string sizeCalcNamespace = GeneratorHelpers.GetNamespacePrefix(typeNamespace, _currentNamespace);
 
             _sb.AppendIndentedLine($"{sizeCalcNamespace}SizeCalculators.Calculate{typeName}OwnFieldsSize(ref {wrapperContentCalcVar}, {valueArg});");
             _sb.AppendIndentedLine($"{calcVar}.WriteVarUInt32((uint){wrapperContentCalcVar}.Length);");
@@ -1257,10 +1220,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // Calculate base fields size (AFTER wrapper)
             // IMPORTANT: Use BaseFieldsOnlySize to avoid runtime dispatch that would count derived fields twice
             _sb.AppendIndentedLine($"// Base fields ({parentTypeName})");
-            string parentNamespace = _registry.GetNamespaceForType(parentTypeFullName);
-            string parentSizeCalcPrefix = !string.IsNullOrEmpty(parentNamespace) && parentNamespace != _currentNamespace
-                ? $"global::{parentNamespace}.Serialization."
-                : "";
+            string parentSizeCalcPrefix = GeneratorHelpers.GetNamespacePrefix(derivedInfo.ParentNamespace, _currentNamespace);
             _sb.AppendIndentedLine($"{parentSizeCalcPrefix}SizeCalculators.Calculate{parentTypeName}BaseFieldsOnlySize(ref {calcVar}, {valueArg});");
             _sb.AppendNewLine();
 
@@ -1275,17 +1235,13 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendNewLine();
 
             // Step 4: Write derived-specific fields (inside wrapper)
-            string writerNamespace = !string.IsNullOrEmpty(typeNamespace) && typeNamespace != _currentNamespace
-                ? $"global::{typeNamespace}.Serialization."
-                : "";
+            string writerNamespace = GeneratorHelpers.GetNamespacePrefix(typeNamespace, _currentNamespace);
             _sb.AppendIndentedLine($"{writerNamespace}{_writerKind}Writers.Write{typeName}OwnFields(ref writer, {valueArg});");
             _sb.AppendNewLine();
 
             // Step 5: Write base fields (AFTER wrapper)
             // IMPORTANT: Use BaseFieldsOnly to avoid runtime dispatch that would duplicate derived fields
-            string parentWriterPrefix = !string.IsNullOrEmpty(parentNamespace) && parentNamespace != _currentNamespace
-                ? $"global::{parentNamespace}.Serialization."
-                : "";
+            string parentWriterPrefix = GeneratorHelpers.GetNamespacePrefix(derivedInfo.ParentNamespace, _currentNamespace);
             _sb.AppendIndentedLine($"{parentWriterPrefix}{_writerKind}Writers.Write{parentTypeName}BaseFieldsOnly(ref writer, {valueArg});");
         }
 
@@ -1297,7 +1253,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             bool isNonNullableStruct = typeDef != null && typeDef.IsStruct && !member.IsNullable;
             var calcVar = isNonNullableStruct ? $"calculator_{member.FieldId}" : "calculator";
             var typeNamespace = _registry.GetNamespaceForType(member.Type);
-            string valueArg = GetNullableValueAccess(sourceVar, member, typeDef);
+            string valueArg = GeneratorHelpers.GetNullableValueAccess(sourceVar, member, typeDef, _registry);
 
             TagCodeHelper.WriteTag(_sb, member.FieldId, WireType.Len);
 
@@ -1306,27 +1262,13 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             // NOTE: For top-level serialization (Write{Type}), ProtoInclude wrapper is included in ContentSize.
             // For nested fields of non-derived types, no wrapper is needed.
-
-            if (!string.IsNullOrEmpty(typeNamespace) && typeNamespace != _currentNamespace)
-            {
-                _sb.AppendIndentedLine($"global::{typeNamespace}.Serialization.SizeCalculators.Calculate{typeName}ContentSize(ref {calcVar}, {valueArg});");
-            }
-            else
-            {
-                _sb.AppendIndentedLine($"SizeCalculators.Calculate{typeName}ContentSize(ref {calcVar}, {valueArg});");
-            }
+            var nsPrefix = GeneratorHelpers.GetNamespacePrefix(typeNamespace, _currentNamespace);
+            _sb.AppendIndentedLine($"{nsPrefix}SizeCalculators.Calculate{typeName}ContentSize(ref {calcVar}, {valueArg});");
 
             _sb.AppendIndentedLine($"writer.WriteVarUInt32((uint){calcVar}.Length);");
 
             // Write content
-            if (!string.IsNullOrEmpty(typeNamespace) && typeNamespace != _currentNamespace)
-            {
-                _sb.AppendIndentedLine($"global::{typeNamespace}.Serialization.{_writerKind}Writers.Write{typeName}Content(ref writer, {valueArg});");
-            }
-            else
-            {
-                _sb.AppendIndentedLine($"Write{typeName}Content(ref writer, {valueArg});");
-            }
+            _sb.AppendIndentedLine($"{nsPrefix}{_writerKind}Writers.Write{typeName}Content(ref writer, {valueArg});");
         }
 
         /// <summary>
@@ -1336,8 +1278,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// </summary>
         private void GeneratePolymorphicFieldWrite(ProtoMemberAttribute member, string sourceVar, string typeName, TypeDefinition typeDef)
         {
-            var allDerivedTypes = _registry.GetAllDerivedTypes(member.Type);
-            if (allDerivedTypes == null || allDerivedTypes.Count == 0)
+            var sortedDerived = GeneratorHelpers.GetSortedDerivedTypes(member.Type, _registry);
+            if (sortedDerived == null)
             {
                 // No derived types - fallback to standard write
                 GenerateStandardComplexTypeWrite(member, sourceVar, typeName, typeDef);
@@ -1346,37 +1288,25 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             _sb.AppendIndentedLine($"// Polymorphic field: runtime type dispatch for ProtoInclude wrapper");
 
-            // Generate switch with type dispatch (most derived first)
-            var sortedDerived = allDerivedTypes
-                .OrderByDescending(d =>
-                {
-                    var chain = _registry.GetInheritanceChain(d);
-                    return chain?.Count ?? 0;
-                })
-                .ToList();
-
             _sb.AppendIndentedLine($"switch ({sourceVar})");
             _sb.StartNewBlock();
 
             foreach (var derivedType in sortedDerived)
             {
                 var derivedClassName = TypeNameHelper.GetClassName(derivedType);
-                var derivedTypeDef = _registry.GetByFullName(derivedType);
                 var derivedNamespace = _registry.GetNamespaceForType(derivedType);
 
-                // Get ProtoInclude information
-                var parentTypeFullName = _registry.GetParent(derivedType);
-                var parentType = _registry.GetByFullName(parentTypeFullName);
-                var protoInclude = parentType?.ProtoIncludes?.FirstOrDefault(p => p.Type == derivedType);
-
-                if (protoInclude == null)
+                // Get ProtoInclude information using helper
+                var derivedInfo = GeneratorHelpers.TryGetNestedDerivedTypeInfo(derivedType, _registry);
+                if (derivedInfo == null)
                 {
                     _sb.AppendIndentedLine($"// WARNING: No ProtoInclude found for {derivedType}");
                     continue;
                 }
 
-                var wrapperTag = (protoInclude.FieldId << 3) | (int)WireType.Len;
-                var parentTypeName = TypeNameHelper.GetClassName(parentTypeFullName);
+                var wrapperTag = derivedInfo.WrapperTag;
+                var parentTypeName = derivedInfo.ParentTypeName;
+                var protoInclude = derivedInfo.ProtoInclude;
 
                 _sb.AppendIndentedLine($"case global::{derivedType} derived{derivedClassName}:");
                 _sb.IncreaseIndent();
@@ -1393,9 +1323,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 // Wrapper content size (derived fields only)
                 _sb.AppendIndentedLine($"var wrapperCalc{derivedClassName} = new global::GProtobuf.Core.WriteSizeCalculator();");
 
-                string derivedSizeCalcPrefix = !string.IsNullOrEmpty(derivedNamespace) && derivedNamespace != _currentNamespace
-                    ? $"global::{derivedNamespace}.Serialization."
-                    : "";
+                string derivedSizeCalcPrefix = GeneratorHelpers.GetNamespacePrefix(derivedNamespace, _currentNamespace);
 
                 _sb.AppendIndentedLine($"{derivedSizeCalcPrefix}SizeCalculators.Calculate{derivedClassName}OwnFieldsSize(ref wrapperCalc{derivedClassName}, derived{derivedClassName});");
                 _sb.AppendIndentedLine($"totalCalc{derivedClassName}.WriteVarUInt32((uint)wrapperCalc{derivedClassName}.Length);");
@@ -1404,10 +1332,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
                 // Base fields size (AFTER wrapper)
                 _sb.AppendIndentedLine($"// Base fields ({parentTypeName})");
-                string parentNamespace = _registry.GetNamespaceForType(parentTypeFullName);
-                string parentSizeCalcPrefix = !string.IsNullOrEmpty(parentNamespace) && parentNamespace != _currentNamespace
-                    ? $"global::{parentNamespace}.Serialization."
-                    : "";
+                string parentSizeCalcPrefix = GeneratorHelpers.GetNamespacePrefix(derivedInfo.ParentNamespace, _currentNamespace);
                 _sb.AppendIndentedLine($"{parentSizeCalcPrefix}SizeCalculators.Calculate{parentTypeName}BaseFieldsOnlySize(ref totalCalc{derivedClassName}, derived{derivedClassName});");
                 _sb.AppendNewLine();
 
@@ -1422,16 +1347,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 _sb.AppendNewLine();
 
                 // Step 4: Write derived fields (inside wrapper)
-                string derivedWriterPrefix = !string.IsNullOrEmpty(derivedNamespace) && derivedNamespace != _currentNamespace
-                    ? $"global::{derivedNamespace}.Serialization."
-                    : "";
+                string derivedWriterPrefix = GeneratorHelpers.GetNamespacePrefix(derivedNamespace, _currentNamespace);
                 _sb.AppendIndentedLine($"{derivedWriterPrefix}{_writerKind}Writers.Write{derivedClassName}OwnFields(ref writer, derived{derivedClassName});");
                 _sb.AppendNewLine();
 
                 // Step 5: Write base fields (AFTER wrapper)
-                string parentWriterPrefix = !string.IsNullOrEmpty(parentNamespace) && parentNamespace != _currentNamespace
-                    ? $"global::{parentNamespace}.Serialization."
-                    : "";
+                string parentWriterPrefix = GeneratorHelpers.GetNamespacePrefix(derivedInfo.ParentNamespace, _currentNamespace);
                 _sb.AppendIndentedLine($"{parentWriterPrefix}{_writerKind}Writers.Write{parentTypeName}BaseFieldsOnly(ref writer, derived{derivedClassName});");
 
                 _sb.EndBlock();
@@ -1622,7 +1543,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var contentLengthVar = isNonNullableStruct ? $"contentLength_{member.FieldId}" : "contentLength";
 
             // For nullable enums or structs, use .Value to get the underlying value
-            string valueArg = GetNullableValueAccess(sourceVar, member, typeDef);
+            string valueArg = GeneratorHelpers.GetNullableValueAccess(sourceVar, member, typeDef, _registry);
 
             _sb.AppendIndentedLine($"var {lengthVar} = {calculatorVar}.Length;");
             _sb.AppendIndentedLine($"SizeCalculators.Calculate{typeName}ContentSize(ref {calculatorVar}, {valueArg});");
@@ -1633,39 +1554,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 _sb.EndBlock();
             }
-        }
-
-        /// <summary>
-        /// Gets the correct value access for nullable types.
-        /// For nullable enums or structs, returns sourceVar.Value, otherwise returns sourceVar as-is.
-        /// </summary>
-        private string GetNullableValueAccess(string sourceVar, ProtoMemberAttribute member, TypeDefinition typeDef)
-        {
-            // If member.IsNullable = true in context of GenerateComplexTypeWrite,
-            // it means it's a nullable value type (struct or enum), not a reference type.
-            // Reference types don't have nullable modifier in protobuf context.
-            if (member.IsNullable)
-            {
-                // Check if we can confirm it's a value type
-                bool isEnum = _registry != null && _registry.IsEnum(member.Type);
-                bool isStruct = typeDef != null && typeDef.IsStruct;
-
-                // If we know it's enum or struct, use .Value
-                if (isEnum || isStruct)
-                {
-                    return $"{sourceVar}.Value";
-                }
-
-                // Fallback: if typeDef is null but member.IsNullable = true in complex type context,
-                // assume it's a nullable struct and use .Value
-                // This handles cases where typeDef is null for registered structs like DataType
-                if (typeDef == null && !isEnum)
-                {
-                    return $"{sourceVar}.Value";
-                }
-            }
-
-            return sourceVar;
         }
 
         /// <summary>
