@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using GProtobuf.Generator.V2.CodeGeneration;
+using GProtobuf.Generator.V2.CodeGeneration.Core;
 using GProtobuf.Generator.V2.Handlers.VirtualTypes;
 using GProtobuf.Generator.V2.Helpers;
 using Microsoft.CodeAnalysis;
@@ -210,6 +211,16 @@ namespace GProtobuf.Generator.V2
 
                 try
                 {
+                    // Generate StreamReaders class (uses shared virtual registries)
+                    new StreamReaderGenerator(sb, _registry, virtualMapRegistry, virtualTupleRegistry).GenerateAll(types, ns);
+                }
+                catch (System.Exception ex)
+                {
+                    throw new System.Exception($"Error in StreamReaderGenerator for namespace '{ns}'", ex);
+                }
+
+                try
+                {
                     // Generate StreamWriters class (uses shared virtual registries)
                     new StreamWriterGenerator(sb, _registry, virtualMapRegistry, virtualTupleRegistry).GenerateAll(types, ns);
                 }
@@ -307,6 +318,22 @@ namespace GProtobuf.Generator.V2
                 sb.EndBlock();
                 sb.AppendNewLine();
 
+                // Deserialize method - Stream overload (allocates default buffer)
+                sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(Stream stream)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine("Span<byte> buffer = stackalloc byte[global::GProtobuf.Core.StreamReader.DefaultBufferSize];");
+                sb.AppendIndentedLine($"return Deserialize{className}(stream, buffer);");
+                sb.EndBlock();
+                sb.AppendNewLine();
+
+                // Deserialize method - Stream overload with buffer
+                sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(Stream stream, Span<byte> buffer)");
+                sb.StartNewBlock();
+                sb.AppendIndentedLine("var reader = new global::GProtobuf.Core.StreamReader(stream, buffer);");
+                sb.AppendIndentedLine($"return StreamReaders.Read{className}(ref reader);");
+                sb.EndBlock();
+                sb.AppendNewLine();
+
                 // Populate method - fills existing instance (zero object allocation)
                 // Generate even for readonly structs (but Populate will be no-op for them)
                 if (!type.IsAbstract)
@@ -322,6 +349,22 @@ namespace GProtobuf.Generator.V2
                     sb.AppendIndentedLine($"public static void Populate{className}(byte[] data, global::{type.FullName} instance)");
                     sb.StartNewBlock();
                     sb.AppendIndentedLine($"Populate{className}(new ReadOnlySpan<byte>(data), instance);");
+                    sb.EndBlock();
+                    sb.AppendNewLine();
+
+                    // Populate method - Stream overload (allocates default buffer)
+                    sb.AppendIndentedLine($"public static void Populate{className}(Stream stream, global::{type.FullName} instance)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine("Span<byte> buffer = stackalloc byte[global::GProtobuf.Core.StreamReader.DefaultBufferSize];");
+                    sb.AppendIndentedLine($"Populate{className}(stream, buffer, instance);");
+                    sb.EndBlock();
+                    sb.AppendNewLine();
+
+                    // Populate method - Stream overload with custom buffer
+                    sb.AppendIndentedLine($"public static void Populate{className}(Stream stream, Span<byte> buffer, global::{type.FullName} instance)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine("var reader = new global::GProtobuf.Core.StreamReader(stream, buffer);");
+                    sb.AppendIndentedLine($"StreamReaders.Populate{className}(ref reader, instance);");
                     sb.EndBlock();
                     sb.AppendNewLine();
                 }
