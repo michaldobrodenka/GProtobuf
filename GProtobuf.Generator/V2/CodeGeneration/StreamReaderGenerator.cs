@@ -41,6 +41,80 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         {
         }
 
+        #region Constructor Analysis
+
+        /// <summary>
+        /// Analyzes the best constructor strategy for a type.
+        /// For readonly structs with readonly fields, finds matching constructor.
+        /// </summary>
+        private ConstructorMatcher.ConstructorMatchResult AnalyzeConstructorStrategy(TypeDefinition type)
+        {
+            // If TypeSymbol not available, fallback to old behavior
+            if (type.TypeSymbol == null)
+            {
+                if (type.HasParameterlessConstructor)
+                {
+                    return new ConstructorMatcher.ConstructorMatchResult
+                    {
+                        UseParameterlessConstructor = true,
+                        ParameterMappings = new List<ConstructorMatcher.ParameterMapping>()
+                    };
+                }
+                else if (!type.IsStruct)
+                {
+                    return new ConstructorMatcher.ConstructorMatchResult
+                    {
+                        UseFormatterServices = true,
+                        ParameterMappings = new List<ConstructorMatcher.ParameterMapping>()
+                    };
+                }
+                else
+                {
+                    return new ConstructorMatcher.ConstructorMatchResult
+                    {
+                        ErrorMessage = $"Struct '{type.FullName}' requires TypeSymbol for constructor analysis"
+                    };
+                }
+            }
+
+            // Collect ProtoMember field information
+            var protoFields = new List<ConstructorMatcher.FieldInfo>();
+            if (type.ProtoMembers != null)
+            {
+                foreach (var protoMember in type.ProtoMembers)
+                {
+                    // Find corresponding field or property in TypeSymbol
+                    var member = type.TypeSymbol.GetMembers(protoMember.Name).FirstOrDefault();
+
+                    if (member is Microsoft.CodeAnalysis.IFieldSymbol field)
+                    {
+                        protoFields.Add(new ConstructorMatcher.FieldInfo
+                        {
+                            FieldId = protoMember.FieldId,
+                            Name = protoMember.Name,
+                            Type = field.Type,
+                            IsReadonly = field.IsReadOnly
+                        });
+                    }
+                    else if (member is Microsoft.CodeAnalysis.IPropertySymbol property)
+                    {
+                        protoFields.Add(new ConstructorMatcher.FieldInfo
+                        {
+                            FieldId = protoMember.FieldId,
+                            Name = protoMember.Name,
+                            Type = property.Type,
+                            IsReadonly = property.SetMethod == null || property.SetMethod.DeclaredAccessibility != Microsoft.CodeAnalysis.Accessibility.Public
+                        });
+                    }
+                }
+            }
+
+            // Use ConstructorMatcher to find best constructor
+            return ConstructorMatcher.FindBestConstructor(type.TypeSymbol, protoFields);
+        }
+
+        #endregion
+
         /// <summary>
         /// Generates complete StreamReaders class for all types.
         /// </summary>
@@ -118,10 +192,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             if (isProtoIncludeDerived || hasProtoInclude)
             {
-                // Complex inheritance - need to peek at first field to determine actual type
-                // Delegate to SpanReaders which handles this correctly
+                // Complex inheritance - read remaining data and delegate to SpanReaders
+                // SpanReaders handles ProtoInclude fields and base class fields correctly
                 _sb.AppendIndentedLine("// Inheritance requires reading all content to determine actual type");
-                _sb.AppendIndentedLine($"return Read{className}Content(ref reader);");
+                _sb.AppendIndentedLine("var remainingData = reader.ReadRemainingBytes();");
+                _sb.AppendIndentedLine($"var spanReader = new {SpanReaderType}(remainingData);");
+                _sb.AppendIndentedLine($"return {nsPrefix}SpanReaders.Read{className}(ref spanReader);");
             }
             else
             {
@@ -176,6 +252,31 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateSimpleReadContent(TypeDefinition type, string className, string nsPrefix)
         {
+            // Analyze constructor strategy for readonly struct support
+            var constructorStrategy = AnalyzeConstructorStrategy(type);
+
+            if (!constructorStrategy.IsSuccess)
+            {
+                // Constructor matching failed - generate error comment and skip
+                _sb.AppendIndentedLine($"// ERROR: {constructorStrategy.ErrorMessage}");
+                _sb.AppendIndentedLine("reader.SkipField(global::GProtobuf.Core.WireType.VarInt); // Skip all fields due to constructor error");
+                _sb.AppendIndentedLine($"return default(global::{type.FullName});");
+                return;
+            }
+
+            bool useConstructor = constructorStrategy.Constructor != null &&
+                                 constructorStrategy.ParameterMappings != null &&
+                                 constructorStrategy.ParameterMappings.Count > 0;
+
+            if (useConstructor)
+            {
+                // Generate deserialization with constructor call (for readonly structs)
+                _sb.AppendIndentedLine($"// Using constructor with {constructorStrategy.ParameterMappings.Count} parameters");
+                GenerateReadContentWithConstructor(type, className, constructorStrategy);
+                return;
+            }
+
+            // Standard path: create instance first, then populate
             GenerateObjectCreation(type, "result");
             _sb.AppendNewLine();
 
@@ -253,6 +354,208 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine("return result;");
         }
 
+        /// <summary>
+        /// Generates read content for types that use constructor with parameters (readonly struct support).
+        /// Creates local variables for constructor parameters and calls constructor at the end.
+        /// </summary>
+        private void GenerateReadContentWithConstructor(
+            TypeDefinition type,
+            string className,
+            ConstructorMatcher.ConstructorMatchResult constructorStrategy)
+        {
+            var fullTypeName = $"global::{type.FullName}";
+            var mappings = constructorStrategy.ParameterMappings!;
+
+            // Declare local variables for constructor parameters
+            _sb.AppendIndentedLine("// Local variables for constructor parameters");
+            foreach (var mapping in mappings.OrderBy(m => m.ParameterOrdinal))
+            {
+                // Use fully qualified type name
+                var paramTypeName = mapping.FieldType.ToDisplayString(Microsoft.CodeAnalysis.SymbolDisplayFormat.FullyQualifiedFormat);
+                _sb.AppendIndentedLine($"{paramTypeName} param_{mapping.ParameterName} = default;");
+            }
+            _sb.AppendNewLine();
+
+            // Read loop
+            _sb.AppendIndentedLine("while (!reader.IsEnd)");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine("reader.ReadWireTypeAndFieldId(out var wireType, out var fieldId);");
+            _sb.AppendNewLine();
+
+            // Generate switch for fields
+            if (type.ProtoMembers != null && type.ProtoMembers.Count > 0)
+            {
+                _sb.AppendIndentedLine("switch (fieldId)");
+                _sb.StartNewBlock();
+
+                foreach (var member in type.ProtoMembers)
+                {
+                    // Find mapping for this field
+                    var mapping = mappings.FirstOrDefault(m => m.FieldName == member.Name);
+
+                    if (mapping != null)
+                    {
+                        // This field corresponds to a constructor parameter
+                        GenerateFieldReadCaseForParameter(member, $"param_{mapping.ParameterName}");
+                    }
+                }
+
+                // Default - skip unknown fields
+                _sb.AppendIndentedLine("default:");
+                _sb.IncreaseIndent();
+                _sb.AppendIndentedLine("reader.SkipField(wireType);");
+                _sb.AppendIndentedLine("break;");
+                _sb.DecreaseIndent();
+
+                _sb.EndBlock();
+            }
+            else
+            {
+                // No fields - just skip
+                _sb.AppendIndentedLine("reader.SkipField(wireType);");
+            }
+
+            _sb.EndBlock();
+
+            // Call constructor with parameters
+            _sb.AppendNewLine();
+            _sb.AppendIndentedLine($"// Create instance using constructor");
+            var constructorParams = mappings
+                .OrderBy(m => m.ParameterOrdinal)
+                .Select(m => $"param_{m.ParameterName}")
+                .ToList();
+
+            if (constructorParams.Count == 0)
+            {
+                _sb.AppendIndentedLine($"{fullTypeName} result = new {fullTypeName}();");
+            }
+            else if (constructorParams.Count <= 3)
+            {
+                // Inline for short parameter lists
+                _sb.AppendIndentedLine($"{fullTypeName} result = new {fullTypeName}({string.Join(", ", constructorParams)});");
+            }
+            else
+            {
+                // Multi-line for long parameter lists
+                _sb.AppendIndentedLine($"{fullTypeName} result = new {fullTypeName}(");
+                _sb.IncreaseIndent();
+                for (int i = 0; i < constructorParams.Count; i++)
+                {
+                    var comma = i < constructorParams.Count - 1 ? "," : ");";
+                    _sb.AppendIndentedLine($"{constructorParams[i]}{comma}");
+                }
+                _sb.DecreaseIndent();
+            }
+
+            _sb.AppendNewLine();
+            _sb.AppendIndentedLine("return result;");
+        }
+
+        /// <summary>
+        /// Generates field read case that assigns to a local variable instead of object field.
+        /// Used for constructor-based deserialization.
+        /// </summary>
+        private void GenerateFieldReadCaseForParameter(ProtoMemberAttribute member, string targetVariable)
+        {
+            _sb.AppendIndentedLine($"case {member.FieldId}:");
+            _sb.IncreaseIndent();
+
+            var normalizedType = TypeMapping.NormalizeTypeName(member.Type);
+            var isZigZag = member.DataFormat == DataFormat.ZigZag;
+
+            // Generate read statement based on type
+            switch (normalizedType)
+            {
+                case "System.Int32":
+                    if (member.DataFormat == DataFormat.FixedSize)
+                        _sb.AppendIndentedLine($"{targetVariable} = reader.ReadFixedInt32();");
+                    else
+                        _sb.AppendIndentedLine($"{targetVariable} = global::GProtobuf.Core.StreamReaders.ReadInt32(ref reader, wireType, {isZigZag.ToString().ToLower()});");
+                    break;
+
+                case "System.UInt32":
+                    if (member.DataFormat == DataFormat.FixedSize)
+                        _sb.AppendIndentedLine($"{targetVariable} = reader.ReadFixedUInt32();");
+                    else
+                        _sb.AppendIndentedLine($"{targetVariable} = global::GProtobuf.Core.StreamReaders.ReadUInt32(ref reader, wireType);");
+                    break;
+
+                case "System.Int64":
+                    if (member.DataFormat == DataFormat.FixedSize)
+                        _sb.AppendIndentedLine($"{targetVariable} = reader.ReadFixedInt64();");
+                    else
+                        _sb.AppendIndentedLine($"{targetVariable} = global::GProtobuf.Core.StreamReaders.ReadInt64(ref reader, wireType, {isZigZag.ToString().ToLower()});");
+                    break;
+
+                case "System.UInt64":
+                    if (member.DataFormat == DataFormat.FixedSize)
+                        _sb.AppendIndentedLine($"{targetVariable} = reader.ReadFixedUInt64();");
+                    else
+                        _sb.AppendIndentedLine($"{targetVariable} = global::GProtobuf.Core.StreamReaders.ReadUInt64(ref reader, wireType);");
+                    break;
+
+                case "System.Boolean":
+                    _sb.AppendIndentedLine($"{targetVariable} = global::GProtobuf.Core.StreamReaders.ReadBool(ref reader, wireType);");
+                    break;
+
+                case "System.Single":
+                    _sb.AppendIndentedLine($"{targetVariable} = global::GProtobuf.Core.StreamReaders.ReadFloat(ref reader, wireType);");
+                    break;
+
+                case "System.Double":
+                    _sb.AppendIndentedLine($"{targetVariable} = global::GProtobuf.Core.StreamReaders.ReadDouble(ref reader, wireType);");
+                    break;
+
+                case "System.String":
+                    _sb.AppendIndentedLine($"{targetVariable} = global::GProtobuf.Core.StreamReaders.ReadString(ref reader, wireType);");
+                    break;
+
+                case "System.Byte[]":
+                    _sb.AppendIndentedLine($"{targetVariable} = global::GProtobuf.Core.StreamReaders.ReadByteArray(ref reader);");
+                    break;
+
+                case "System.Guid":
+                    _sb.AppendIndentedLine($"{targetVariable} = global::GProtobuf.Core.StreamReaders.ReadGuid(ref reader, wireType);");
+                    break;
+
+                case "System.TimeSpan":
+                    _sb.AppendIndentedLine($"{targetVariable} = global::GProtobuf.Core.StreamReaders.ReadTimeSpan(ref reader, wireType);");
+                    break;
+
+                case "System.DateTime":
+                    _sb.AppendIndentedLine($"{targetVariable} = global::GProtobuf.Core.StreamReaders.ReadDateTime(ref reader, wireType);");
+                    break;
+
+                default:
+                    // Check if it's an enum
+                    if (_registry != null && (_registry.IsEnum(member.Type) || _registry.IsEnum(normalizedType)))
+                    {
+                        _sb.AppendIndentedLine($"{targetVariable} = (global::{member.Type})reader.ReadVarInt32();");
+                    }
+                    else if (member.IsProtoVarint)
+                    {
+                        // ProtoVarint type
+                        ProtoVarintTypeSupport.GenerateRead(_sb, member, targetVariable, "reader");
+                    }
+                    else
+                    {
+                        // Complex type - read via SpanReader
+                        _sb.AppendIndentedLine("var nestedLength = reader.ReadVarInt32();");
+                        _sb.AppendIndentedLine("var nestedReader = reader.CreateSubReader(nestedLength);");
+
+                        var simpleName = Helpers.TypeNameHelper.GetClassName(member.Type);
+                        var typeNs = _registry?.GetNamespaceForType(member.Type) ?? string.Empty;
+                        var typeNsPrefix = GeneratorHelpers.GetNamespacePrefix(typeNs, _currentNamespace);
+
+                        _sb.AppendIndentedLine($"{targetVariable} = {typeNsPrefix}SpanReaders.Read{simpleName}Content(ref nestedReader);");
+                    }
+                    break;
+            }
+
+            _sb.AppendIndentedLine("break;");
+            _sb.DecreaseIndent();
+        }
+
         private void GenerateReadContentWithInheritance(TypeDefinition type, string className, string nsPrefix)
         {
             if (type.IsAbstract)
@@ -264,6 +567,27 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 GenerateObjectCreation(type, "result");
             }
             _sb.AppendNewLine();
+
+            // Track array fields that need temp list
+            var fieldsNeedingTempList = type.ProtoMembers?
+                .Where(m => m.IsCollection && (
+                    m.CollectionKind == CollectionKind.Array ||
+                    (m.CollectionKind == CollectionKind.InterfaceCollection && m.Type != null &&
+                     TypeMapping.NormalizeTypeName(m.Type).StartsWith("System.Collections.Generic.IEnumerable<") &&
+                     !m.Type.Contains("ICollection") &&
+                     !m.Type.Contains("IList"))
+                ))
+                .ToList();
+
+            if (fieldsNeedingTempList != null && fieldsNeedingTempList.Count > 0)
+            {
+                foreach (var member in fieldsNeedingTempList)
+                {
+                    var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType);
+                    _sb.AppendIndentedLine($"global::System.Collections.Generic.List<{elementType}> _tempList_{member.Name} = null;");
+                }
+                _sb.AppendNewLine();
+            }
 
             _sb.AppendIndentedLine("while (!reader.IsEnd)");
             _sb.StartNewBlock();
@@ -297,6 +621,26 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             _sb.EndBlock();
             _sb.EndBlock();
+
+            // Convert temp lists to arrays if needed
+            if (fieldsNeedingTempList != null && fieldsNeedingTempList.Count > 0)
+            {
+                _sb.AppendNewLine();
+                foreach (var member in fieldsNeedingTempList)
+                {
+                    _sb.AppendIndentedLine($"if (_tempList_{member.Name} != null)");
+                    _sb.StartNewBlock();
+                    if (member.CollectionKind == CollectionKind.Array)
+                    {
+                        _sb.AppendIndentedLine($"result.{member.Name} = _tempList_{member.Name}.ToArray();");
+                    }
+                    else
+                    {
+                        _sb.AppendIndentedLine($"result.{member.Name} = _tempList_{member.Name};");
+                    }
+                    _sb.EndBlock();
+                }
+            }
 
             _sb.AppendIndentedLine("return result;");
         }
@@ -595,8 +939,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 return;
             }
 
-            // Check for List/Collection types
-            if (TypeHelper.IsListType(typeName) || TypeHelper.IsHashSetType(typeName))
+            // Check for List/Collection types (including custom collections like ValueLogTypeHashSet)
+            if (TypeHelper.IsListType(typeName) || TypeHelper.IsHashSetType(typeName) ||
+                TypeHelper.IsCustomHashSetType(typeName) || TypeHelper.IsCustomListType(typeName))
             {
                 GenerateMapCollectionValueRead(varName, typeName, readerVar);
                 return;
@@ -723,17 +1068,39 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateMapCollectionValueRead(string varName, string typeName, string readerVar)
         {
+            // Check for custom collections without generic parameter (e.g., ValueLogTypeHashSet)
+            // These implement ICollection<T> but don't have <T> in type name
+            bool isCustomNonGenericCollection = (TypeHelper.IsCustomHashSetType(typeName) || TypeHelper.IsCustomListType(typeName)) &&
+                                                 !typeName.Contains("<");
+            if (isCustomNonGenericCollection)
+            {
+                // Custom non-generic collections cannot be parsed from type name alone
+                // They need metadata from ICollection<T> interface which is not available here
+                // Generate a skip with warning
+                _sb.AppendIndentedLine("{");
+                _sb.IncreaseIndent();
+                _sb.AppendIndentedLine($"// WARNING: Custom collection type '{typeName}' without generic parameter cannot be deserialized as Map key/value");
+                _sb.AppendIndentedLine($"// Consider using standard HashSet<T> or adding ProtoContract to '{typeName}'");
+                _sb.AppendIndentedLine($"var {varName}Len = {readerVar}.ReadVarInt32();");
+                _sb.AppendIndentedLine($"_ = {readerVar}.GetSlice({varName}Len); // Skip bytes");
+                _sb.AppendIndentedLine($"{varName} = new global::{typeName}();");
+                _sb.DecreaseIndent();
+                _sb.AppendIndentedLine("}");
+                return;
+            }
+
             var elementType = TypeHelper.GetCollectionElementType(typeName);
             var normalizedElementType = TypeMapping.NormalizeTypeName(elementType);
             var shortElementType = TypeMapping.GetShortTypeName(elementType);
             bool isHashSet = TypeHelper.IsHashSetType(typeName);
+            bool isCustomCollection = TypeHelper.IsCustomHashSetType(typeName) || TypeHelper.IsCustomListType(typeName);
 
             _sb.AppendIndentedLine("{");
             _sb.IncreaseIndent();
 
             // Try to use optimized packed array read, then convert to collection
             var packedReadExpr = TypeMapping.GetPackedArrayReadExpression(elementType, DataFormat.Default, readerVar);
-            if (packedReadExpr != null)
+            if (packedReadExpr != null && !isCustomCollection)
             {
                 if (isHashSet)
                 {
@@ -750,14 +1117,21 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 _sb.AppendIndentedLine($"var {varName}Len = {readerVar}.ReadVarInt32();");
                 _sb.AppendIndentedLine($"var {varName}End = {readerVar}.Position + {varName}Len;");
 
-                if (isHashSet)
+                // Determine collection creation type
+                string collectionCreationType;
+                if (isCustomCollection)
                 {
-                    _sb.AppendIndentedLine($"var {varName}Collection = new global::System.Collections.Generic.HashSet<{shortElementType}>();");
+                    collectionCreationType = $"global::{typeName}";
+                }
+                else if (isHashSet)
+                {
+                    collectionCreationType = $"global::System.Collections.Generic.HashSet<{shortElementType}>";
                 }
                 else
                 {
-                    _sb.AppendIndentedLine($"var {varName}Collection = new global::System.Collections.Generic.List<{shortElementType}>();");
+                    collectionCreationType = $"global::System.Collections.Generic.List<{shortElementType}>";
                 }
+                _sb.AppendIndentedLine($"var {varName}Collection = new {collectionCreationType}();");
 
                 _sb.AppendIndentedLine($"while ({readerVar}.Position < {varName}End)");
                 _sb.StartNewBlock();
@@ -798,9 +1172,19 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine($"if ({varName}Entry.success)");
             _sb.StartNewBlock();
 
-            var keyType = TypeMapping.GetShortTypeName(dictKeyType);
-            var valueType = TypeMapping.GetShortTypeName(dictValueType);
-            _sb.AppendIndentedLine($"{varName} = new global::System.Collections.Generic.Dictionary<{keyType}, {valueType}>();");
+            // Use original dictionary type if it's a custom type (ConcurrentDictionary, ListDictionary, etc.)
+            string dictCreationType;
+            if (TypeHelper.IsCustomDictionaryType(typeName))
+            {
+                dictCreationType = $"global::{typeName}";
+            }
+            else
+            {
+                var keyType = TypeMapping.GetShortTypeName(dictKeyType);
+                var valueType = TypeMapping.GetShortTypeName(dictValueType);
+                dictCreationType = $"global::System.Collections.Generic.Dictionary<{keyType}, {valueType}>";
+            }
+            _sb.AppendIndentedLine($"{varName} = new {dictCreationType}();");
             _sb.AppendIndentedLine($"{varName}[{varName}Entry.key] = {varName}Entry.value;");
             _sb.EndBlock();
             _sb.DecreaseIndent();
@@ -859,16 +1243,32 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType);
             var normalizedElementType = TypeMapping.NormalizeTypeName(member.CollectionElementType);
 
-            // Determine if we need temp list
-            bool needsTempList = member.CollectionKind == CollectionKind.Array ||
-                (member.CollectionKind == CollectionKind.InterfaceCollection &&
-                 TypeMapping.NormalizeTypeName(member.Type).StartsWith("System.Collections.Generic.IEnumerable<"));
+            // Check for custom collection types (ValueLogTypeHashSet, etc.)
+            var normalizedMemberType = TypeMapping.NormalizeTypeName(member.Type);
+            bool isCustomCollection = TypeHelper.IsCustomHashSetType(normalizedMemberType) ||
+                                      TypeHelper.IsCustomListType(normalizedMemberType);
 
-            // Check if target collection is HashSet
-            bool isHashSet = TypeHelper.IsHashSetType(TypeMapping.NormalizeTypeName(member.Type));
-            string collectionTypeName = isHashSet
-                ? $"global::System.Collections.Generic.HashSet<{elementType}>"
-                : $"global::System.Collections.Generic.List<{elementType}>";
+            // Determine if we need temp list
+            // Custom collections don't use temp list - they implement ICollection and have Add method
+            bool needsTempList = !isCustomCollection && (
+                member.CollectionKind == CollectionKind.Array ||
+                (member.CollectionKind == CollectionKind.InterfaceCollection &&
+                 normalizedMemberType.StartsWith("System.Collections.Generic.IEnumerable<")));
+
+            // Determine collection type name for initialization
+            string collectionTypeName;
+            if (isCustomCollection)
+            {
+                // Use original custom type
+                collectionTypeName = $"global::{member.Type}";
+            }
+            else
+            {
+                bool isHashSet = TypeHelper.IsHashSetType(normalizedMemberType);
+                collectionTypeName = isHashSet
+                    ? $"global::System.Collections.Generic.HashSet<{elementType}>"
+                    : $"global::System.Collections.Generic.List<{elementType}>";
+            }
 
             string targetCollection = needsTempList ? $"_tempList_{member.Name}" : $"result.{member.Name}";
 
@@ -1053,6 +1453,15 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 case "System.Byte[]":
                     _sb.AppendIndentedLine($"{targetCollection}.Add(global::GProtobuf.Core.StreamReaders.ReadByteArray(ref reader));");
                     break;
+                case "System.Guid":
+                    _sb.AppendIndentedLine($"{targetCollection}.Add(global::GProtobuf.Core.StreamReaders.ReadGuid(ref reader, wireType));");
+                    break;
+                case "System.TimeSpan":
+                    _sb.AppendIndentedLine($"{targetCollection}.Add(global::GProtobuf.Core.StreamReaders.ReadTimeSpan(ref reader, wireType));");
+                    break;
+                case "System.DateTime":
+                    _sb.AppendIndentedLine($"{targetCollection}.Add(global::GProtobuf.Core.StreamReaders.ReadDateTime(ref reader, wireType));");
+                    break;
                 default:
                     _sb.AppendIndentedLine($"// WARNING: Unsupported single element type: {elementType}");
                     break;
@@ -1065,15 +1474,31 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var elementClassName = TypeNameHelper.GetClassName(member.CollectionElementType);
             var normalizedElementType = TypeMapping.NormalizeTypeName(member.CollectionElementType);
 
-            bool needsTempList = member.CollectionKind == CollectionKind.Array ||
-                (member.CollectionKind == CollectionKind.InterfaceCollection &&
-                 TypeMapping.NormalizeTypeName(member.Type).StartsWith("System.Collections.Generic.IEnumerable<"));
+            // Check for custom collection types (ValueLogTypeHashSet, etc.)
+            var normalizedMemberType = TypeMapping.NormalizeTypeName(member.Type);
+            bool isCustomCollection = TypeHelper.IsCustomHashSetType(normalizedMemberType) ||
+                                      TypeHelper.IsCustomListType(normalizedMemberType);
 
-            // Check if target collection is HashSet
-            bool isHashSet = TypeHelper.IsHashSetType(TypeMapping.NormalizeTypeName(member.Type));
-            string collectionTypeName = isHashSet
-                ? $"global::System.Collections.Generic.HashSet<{elementType}>"
-                : $"global::System.Collections.Generic.List<{elementType}>";
+            // Custom collections don't use temp list - they implement ICollection and have Add method
+            bool needsTempList = !isCustomCollection && (
+                member.CollectionKind == CollectionKind.Array ||
+                (member.CollectionKind == CollectionKind.InterfaceCollection &&
+                 normalizedMemberType.StartsWith("System.Collections.Generic.IEnumerable<")));
+
+            // Determine collection type name for initialization
+            string collectionTypeName;
+            if (isCustomCollection)
+            {
+                // Use original custom type
+                collectionTypeName = $"global::{member.Type}";
+            }
+            else
+            {
+                bool isHashSet = TypeHelper.IsHashSetType(normalizedMemberType);
+                collectionTypeName = isHashSet
+                    ? $"global::System.Collections.Generic.HashSet<{elementType}>"
+                    : $"global::System.Collections.Generic.List<{elementType}>";
+            }
 
             string targetCollection = needsTempList ? $"_tempList_{member.Name}" : $"result.{member.Name}";
 
@@ -1092,7 +1517,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 _sb.EndBlock();
             }
 
-            // Handle special types (DateTime, Guid, TimeSpan) that have predefined readers in GProtobuf.Core
+            // Handle special types (DateTime, Guid, TimeSpan, byte[]) that have predefined readers in GProtobuf.Core
             // These don't have generated ReadXxxContent methods
             switch (normalizedElementType)
             {
@@ -1101,6 +1526,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     return;
                 case "System.TimeSpan":
                     _sb.AppendIndentedLine($"{targetCollection}.Add(global::GProtobuf.Core.StreamReaders.ReadTimeSpan(ref reader, global::GProtobuf.Core.WireType.Len));");
+                    return;
+                case "System.Byte[]":
+                    _sb.AppendIndentedLine($"{targetCollection}.Add(global::GProtobuf.Core.StreamReaders.ReadByteArray(ref reader));");
                     return;
             }
 

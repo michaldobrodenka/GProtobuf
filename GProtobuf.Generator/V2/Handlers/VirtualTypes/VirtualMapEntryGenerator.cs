@@ -458,7 +458,17 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 var innerKeyType = elemInfo.DictionaryKeyType;
                 var innerValueType = elemInfo.DictionaryValueType;
 
-                _sb.AppendIndentedLine($"var {fieldPrefix}InnerDict = new global::System.Collections.Generic.Dictionary<{innerKeyType}, {innerValueType}>();");
+                // Use original dictionary type if it's a custom type (ConcurrentDictionary, ListDictionary, etc.)
+                string innerDictType;
+                if (TypeHelper.IsCustomDictionaryType(elemInfo.FullTypeName))
+                {
+                    innerDictType = $"global::{elemInfo.FullTypeName}";
+                }
+                else
+                {
+                    innerDictType = $"global::System.Collections.Generic.Dictionary<{innerKeyType}, {innerValueType}>";
+                }
+                _sb.AppendIndentedLine($"var {fieldPrefix}InnerDict = new {innerDictType}();");
                 _sb.AppendIndentedLine($"var {fieldPrefix}CollectionLength = reader.ReadVarUInt32();");
                 _sb.AppendIndentedLine($"var {fieldPrefix}CollectionEnd = reader.Position + (int){fieldPrefix}CollectionLength;");
                 _sb.AppendIndentedLine($"while (reader.Position < {fieldPrefix}CollectionEnd)");
