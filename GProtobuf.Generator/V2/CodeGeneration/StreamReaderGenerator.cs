@@ -1244,9 +1244,13 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var normalizedElementType = TypeMapping.NormalizeTypeName(member.CollectionElementType);
 
             // Check for custom collection types (ValueLogTypeHashSet, etc.)
+            // Note: IList<T>, ICollection<T> are NOT custom collections - they should use List<T>
             var normalizedMemberType = TypeMapping.NormalizeTypeName(member.Type);
-            bool isCustomCollection = TypeHelper.IsCustomHashSetType(normalizedMemberType) ||
-                                      TypeHelper.IsCustomListType(normalizedMemberType);
+            bool isInterfaceCollection = normalizedMemberType.Contains("IList<") ||
+                                         normalizedMemberType.Contains("ICollection<");
+            bool isCustomCollection = !isInterfaceCollection &&
+                                      (TypeHelper.IsCustomHashSetType(normalizedMemberType) ||
+                                       TypeHelper.IsCustomListType(normalizedMemberType));
 
             // Determine if we need temp list
             // Custom collections don't use temp list - they implement ICollection and have Add method
@@ -1475,9 +1479,13 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var normalizedElementType = TypeMapping.NormalizeTypeName(member.CollectionElementType);
 
             // Check for custom collection types (ValueLogTypeHashSet, etc.)
+            // Note: IList<T>, ICollection<T> are NOT custom collections - they should use List<T>
             var normalizedMemberType = TypeMapping.NormalizeTypeName(member.Type);
-            bool isCustomCollection = TypeHelper.IsCustomHashSetType(normalizedMemberType) ||
-                                      TypeHelper.IsCustomListType(normalizedMemberType);
+            bool isInterfaceCollection = normalizedMemberType.Contains("IList<") ||
+                                         normalizedMemberType.Contains("ICollection<");
+            bool isCustomCollection = !isInterfaceCollection &&
+                                      (TypeHelper.IsCustomHashSetType(normalizedMemberType) ||
+                                       TypeHelper.IsCustomListType(normalizedMemberType));
 
             // Custom collections don't use temp list - they implement ICollection and have Add method
             bool needsTempList = !isCustomCollection && (
