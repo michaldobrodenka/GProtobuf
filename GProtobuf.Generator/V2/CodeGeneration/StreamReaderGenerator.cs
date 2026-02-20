@@ -276,81 +276,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 return;
             }
 
-            // Standard path: create instance first, then populate
             GenerateObjectCreation(type, "result");
-            _sb.AppendNewLine();
-
-            // Track array fields that need temp list
-            var fieldsNeedingTempList = type.ProtoMembers?
-                .Where(m => m.IsCollection && (
-                    m.CollectionKind == CollectionKind.Array ||
-                    (m.CollectionKind == CollectionKind.InterfaceCollection && m.Type != null &&
-                     TypeMapping.NormalizeTypeName(m.Type).StartsWith("System.Collections.Generic.IEnumerable<") &&
-                     !m.Type.Contains("ICollection") &&
-                     !m.Type.Contains("IList"))
-                ))
-                .ToList();
-
-            if (fieldsNeedingTempList != null && fieldsNeedingTempList.Count > 0)
-            {
-                foreach (var member in fieldsNeedingTempList)
-                {
-                    var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType);
-                    _sb.AppendIndentedLine($"global::System.Collections.Generic.List<{elementType}> _tempList_{member.Name} = null;");
-                }
-                _sb.AppendNewLine();
-            }
-
-            _sb.AppendIndentedLine("while (!reader.IsEnd)");
-            _sb.StartNewBlock();
-            _sb.AppendIndentedLine("reader.ReadWireTypeAndFieldId(out var wireType, out var fieldId);");
-            _sb.AppendNewLine();
-
-            if (type.ProtoMembers != null && type.ProtoMembers.Count > 0)
-            {
-                _sb.AppendIndentedLine("switch (fieldId)");
-                _sb.StartNewBlock();
-
-                foreach (var member in type.ProtoMembers)
-                {
-                    GenerateFieldReadCase(member, nsPrefix);
-                }
-
-                _sb.AppendIndentedLine("default:");
-                _sb.IncreaseIndent();
-                _sb.AppendIndentedLine("reader.SkipField(wireType);");
-                _sb.AppendIndentedLine("break;");
-                _sb.DecreaseIndent();
-
-                _sb.EndBlock();
-            }
-            else
-            {
-                _sb.AppendIndentedLine("reader.SkipField(wireType);");
-            }
-
-            _sb.EndBlock();
-
-            // Convert temp lists to arrays if needed
-            if (fieldsNeedingTempList != null && fieldsNeedingTempList.Count > 0)
-            {
-                _sb.AppendNewLine();
-                foreach (var member in fieldsNeedingTempList)
-                {
-                    _sb.AppendIndentedLine($"if (_tempList_{member.Name} != null)");
-                    _sb.StartNewBlock();
-                    if (member.CollectionKind == CollectionKind.Array)
-                    {
-                        _sb.AppendIndentedLine($"result.{member.Name} = _tempList_{member.Name}.ToArray();");
-                    }
-                    else
-                    {
-                        _sb.AppendIndentedLine($"result.{member.Name} = _tempList_{member.Name};");
-                    }
-                    _sb.EndBlock();
-                }
-            }
-
+            _sb.AppendIndentedLine($"Populate{className}(ref reader, result);");
             _sb.AppendIndentedLine("return result;");
         }
 
