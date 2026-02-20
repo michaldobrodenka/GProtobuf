@@ -178,7 +178,51 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateCalculateSizeWithInheritance(TypeDefinition type, string className)
         {
-            // Wire format requires parent fields come before derived type wrappers
+            // protobuf-net wire format: base fields are OUTSIDE the ProtoInclude wrapper
+            // Wire format: [wrapper tag][wrapper length][derived fields ONLY] then [base fields]
+
+            // Handle ProtoIncludes with switch on derived types FIRST
+            _sb.AppendIndentedLine("switch (obj)");
+            _sb.StartNewBlock();
+
+            int caseIndex = 0;
+            if (type.ProtoIncludes != null)
+            {
+                foreach (var include in type.ProtoIncludes)
+                {
+                    var derivedClassName = TypeNameHelper.GetClassName(include.Type);
+                    var derivedNamespace = _registry.GetNamespaceForType(include.Type);
+                    _sb.AppendIndentedLine($"case global::{include.Type} derived{derivedClassName}:");
+                    _sb.IncreaseIndent();
+
+                    // Add tag size for ProtoInclude
+                    TagCodeHelper.AddTagSize(_sb, include.FieldId, WireType.Len);
+
+                    // Calculate wrapper content size (derived fields ONLY, not base)
+                    var wrapperCalcVar = $"wrapperCalc{caseIndex}";
+                    _sb.AppendIndentedLine($"var {wrapperCalcVar} = new global::GProtobuf.Core.WriteSizeCalculator();");
+
+                    // Derived type's own fields only
+                    string derivedSizeCalcPrefix = GeneratorHelpers.GetNamespacePrefix(derivedNamespace, _currentNamespace);
+                    _sb.AppendIndentedLine($"{derivedSizeCalcPrefix}SizeCalculators.Calculate{derivedClassName}OwnFieldsSize(ref {wrapperCalcVar}, derived{derivedClassName});");
+
+                    _sb.AppendIndentedLine($"calculator.WriteVarUInt32((uint){wrapperCalcVar}.Length);");
+                    _sb.AppendIndentedLine($"calculator.AddByteLength({wrapperCalcVar}.Length);");
+
+                    // Base class fields - OUTSIDE wrapper
+                    _sb.AppendIndentedLine($"// Base fields ({className}) - OUTSIDE wrapper");
+                    _sb.AppendIndentedLine($"Calculate{className}BaseFieldsOnlySize(ref calculator, derived{derivedClassName});");
+
+                    _sb.AppendIndentedLine("return;");  // Exit method after handling derived type
+                    _sb.DecreaseIndent();
+                    caseIndex++;
+                }
+            }
+
+            _sb.EndBlock();
+
+            // Default case: base type instance (obj is exactly BaseWithGuid, not a derived type)
+            // Only calculate base fields for non-derived instances
             if (type.ProtoMembers != null)
             {
                 foreach (var member in type.ProtoMembers)
@@ -195,43 +239,13 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     GenerateCustomBufferFieldSize(customMember, "obj");
                 }
             }
-
-            // Handle ProtoIncludes with switch on derived types
-            _sb.AppendIndentedLine("switch (obj)");
-            _sb.StartNewBlock();
-
-            int caseIndex = 0;
-            if (type.ProtoIncludes != null)
-            {
-                foreach (var include in type.ProtoIncludes)
-            {
-                var derivedClassName = TypeNameHelper.GetClassName(include.Type);
-                _sb.AppendIndentedLine($"case global::{include.Type} derived:");
-                _sb.IncreaseIndent();
-
-                // Add tag size for ProtoInclude
-                TagCodeHelper.AddTagSize(_sb, include.FieldId, WireType.Len);
-
-                // Calculate content size in separate calculator with unique name
-                var tempCalcVar = $"tempCalc{caseIndex}";
-                _sb.AppendIndentedLine($"var {tempCalcVar} = new global::GProtobuf.Core.WriteSizeCalculator();");
-                _sb.AppendIndentedLine($"Calculate{derivedClassName}ContentSize(ref {tempCalcVar}, derived);");
-                _sb.AppendIndentedLine($"calculator.WriteVarUInt32((uint){tempCalcVar}.Length);");
-                _sb.AppendIndentedLine($"calculator.AddByteLength({tempCalcVar}.Length);");
-
-                _sb.AppendIndentedLine("return;");  // CRITICAL FIX: return instead of break to exit method
-                _sb.DecreaseIndent();
-                caseIndex++;
-                }
-            }
-
-            _sb.EndBlock();
         }
 
         private void GenerateCalculateSizeForDerived(TypeDefinition type, string className)
         {
-            // Phase 2: Correct ProtoInclude wrapper generation
-            // Wire format: [wrapper tag][wrapper length][derived fields INSIDE][base fields AFTER]
+            // ProtoInclude wrapper generation with protobuf-net compatibility
+            // Wire format: [wrapper tag][wrapper length][derived fields ONLY] then [base fields OUTSIDE wrapper]
+            // NOTE: Base class fields are written OUTSIDE the wrapper
 
             var inheritanceChain = _registry.GetInheritanceChain(type.FullName);
             if (inheritanceChain.Count < 2)
@@ -244,25 +258,21 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // Reset nested calculator counter for this method
             ResetNestedCalcCounter();
 
-            // Get root (base) type
-            var rootTypeName = inheritanceChain[0];
-            var rootType = _registry.GetByFullName(rootTypeName);
-
-            _sb.AppendIndentedLine($"// ProtoInclude wrapper format (Level200 compatibility)");
-            _sb.AppendIndentedLine($"// Wire: [wrapper tag][length][derived fields INSIDE wrapper][base fields AFTER wrapper]");
+            _sb.AppendIndentedLine($"// ProtoInclude wrapper format (protobuf-net compatible)");
+            _sb.AppendIndentedLine($"// Wire: [wrapper tag][length][derived fields ONLY] then [base fields OUTSIDE wrapper]");
             _sb.AppendNewLine();
 
-            // Step 1: Calculate and add outermost wrapper size
+            // Calculate and add outermost wrapper size (derived fields only)
             GenerateOutermostWrapperSizeCalculation(inheritanceChain, type);
 
-            // Step 2: Calculate and add base fields size AFTER all wrappers
-            if (rootType?.ProtoMembers != null)
+            // Calculate base class fields OUTSIDE the wrapper
+            var baseTypeName = inheritanceChain[0];
+            var baseClassName = TypeNameHelper.GetClassName(baseTypeName);
+            var baseType = _registry.GetByFullName(baseTypeName);
+            if (baseType?.ProtoMembers != null && baseType.ProtoMembers.Count > 0)
             {
-                _sb.AppendIndentedLine($"// Base class fields ({TypeNameHelper.GetClassName(rootTypeName)}) - AFTER wrapper");
-                foreach (var member in rootType.ProtoMembers)
-                {
-                    GenerateFieldSize(member, "obj");
-                }
+                _sb.AppendIndentedLine($"// Base class fields ({baseClassName}) - OUTSIDE wrapper");
+                _sb.AppendIndentedLine($"Calculate{baseClassName}BaseFieldsOnlySize(ref calculator, obj);");
             }
         }
 
@@ -428,6 +438,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         /// <summary>
         /// Recursively calculates wrapper content size for the given level and all nested levels.
+        /// NOTE: Base class fields are calculated OUTSIDE the wrapper by the caller.
         /// </summary>
         private void CalculateWrapperContentSizeRecursive(IReadOnlyList<string> chain, int levelIndex, string calcVar)
         {
@@ -437,7 +448,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var currentClassName = TypeNameHelper.GetClassName(currentTypeName);
             var currentType = _registry.GetByFullName(currentTypeName);
 
-            // Add this level's OWN fields size
+            // Add this level's OWN fields size ONLY (not base fields)
             _sb.AppendIndentedLine($"// Add {currentClassName}'s own fields size");
             _sb.AppendIndentedLine($"Calculate{currentClassName}OwnFieldsSize(ref {calcVar}, obj);");
 
@@ -467,6 +478,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     _sb.AppendIndentedLine($"{calcVar}.AddByteLength({nestedCalcVar}.Length);");
                 }
             }
+            // NOTE: Base class fields are NOT included here - they're calculated OUTSIDE the wrapper
         }
 
         /// <summary>
@@ -707,7 +719,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         /// <summary>
         /// Generates size calculation for nested derived type fields (with ProtoInclude wrapper).
-        /// Wire format: [field tag][total length] [wrapper tag][wrapper length] [derived fields] [base fields]
+        /// Wire format: [field tag][total length] [wrapper tag][wrapper length][derived fields ONLY][base fields OUTSIDE wrapper]
+        /// NOTE: Base fields are calculated OUTSIDE the wrapper for protobuf-net compatibility.
         /// </summary>
         private void GenerateNestedDerivedTypeSize(ProtoMemberAttribute member, string sourceVar, string typeName, TypeDefinition typeDef)
         {
@@ -747,20 +760,19 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine($"// ProtoInclude wrapper (field {protoInclude.FieldId} in {parentTypeName})");
             _sb.AppendIndentedLine($"{nestedCalcVar}.WriteVarUInt32({wrapperTag}u);");
 
-            // Calculate wrapper content size (derived-specific fields)
+            // Calculate wrapper content size (derived fields ONLY, not base)
             var wrapperContentCalcVar = isNonNullableStruct ? $"wrapperContent_{member.FieldId}" : "wrapperContentCalc";
             _sb.AppendIndentedLine($"var {wrapperContentCalcVar} = new global::GProtobuf.Core.WriteSizeCalculator();");
 
             string sizeCalcPrefix = GeneratorHelpers.GetNamespacePrefix(typeNamespace, _currentNamespace);
 
             _sb.AppendIndentedLine($"{sizeCalcPrefix}SizeCalculators.Calculate{typeName}OwnFieldsSize(ref {wrapperContentCalcVar}, {valueArg});");
+
             _sb.AppendIndentedLine($"{nestedCalcVar}.WriteVarUInt32((uint){wrapperContentCalcVar}.Length);");
             _sb.AppendIndentedLine($"{nestedCalcVar}.AddByteLength({wrapperContentCalcVar}.Length);");
-            _sb.AppendNewLine();
 
-            // Add base fields size (AFTER wrapper)
-            // IMPORTANT: Use BaseFieldsOnlySize to avoid runtime dispatch that would count derived fields twice
-            _sb.AppendIndentedLine($"// Base fields ({parentTypeName})");
+            // Base fields calculated OUTSIDE wrapper
+            _sb.AppendIndentedLine($"// Base fields ({parentTypeName}) - OUTSIDE wrapper");
             string parentSizeCalcPrefix = GeneratorHelpers.GetNamespacePrefix(derivedInfo.ParentNamespace, _currentNamespace);
             _sb.AppendIndentedLine($"{parentSizeCalcPrefix}SizeCalculators.Calculate{parentTypeName}BaseFieldsOnlySize(ref {nestedCalcVar}, {valueArg});");
             _sb.AppendNewLine();
@@ -799,6 +811,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// Generates size calculation for polymorphic fields (field declared as base type with ProtoIncludes).
         /// Example: [ProtoMember(2)] ProtoParameterBase ProtoValue (where ProtoParameterBase has multiple ProtoIncludes)
         /// Generates runtime type dispatch to calculate ProtoInclude wrapper size for derived type instances.
+        /// NOTE: Base fields are calculated OUTSIDE the wrapper for protobuf-net compatibility.
         /// </summary>
         private void GeneratePolymorphicFieldSize(ProtoMemberAttribute member, string sourceVar, string typeName, TypeDefinition typeDef)
         {
@@ -839,7 +852,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 _sb.IncreaseIndent();
                 _sb.StartNewBlock();
 
-                // Calculate total size (wrapper + derived fields + base fields)
+                // Calculate total size (wrapper + base fields OUTSIDE wrapper)
                 var totalCalcVar = $"totalCalc{derivedClassName}";
                 _sb.AppendIndentedLine($"var {totalCalcVar} = new global::GProtobuf.Core.WriteSizeCalculator();");
                 _sb.AppendNewLine();
@@ -848,19 +861,19 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 _sb.AppendIndentedLine($"// ProtoInclude wrapper (field {protoInclude.FieldId} in {parentTypeName})");
                 _sb.AppendIndentedLine($"{totalCalcVar}.WriteVarUInt32({wrapperTag}u);");
 
-                // Wrapper content size (derived fields only)
+                // Wrapper content size (derived fields ONLY, not base)
                 var wrapperCalcVar = $"wrapperCalc{derivedClassName}";
                 _sb.AppendIndentedLine($"var {wrapperCalcVar} = new global::GProtobuf.Core.WriteSizeCalculator();");
 
                 string derivedSizeCalcPrefix = GeneratorHelpers.GetNamespacePrefix(derivedNamespace, _currentNamespace);
 
                 _sb.AppendIndentedLine($"{derivedSizeCalcPrefix}SizeCalculators.Calculate{derivedClassName}OwnFieldsSize(ref {wrapperCalcVar}, derived{derivedClassName});");
+
                 _sb.AppendIndentedLine($"{totalCalcVar}.WriteVarUInt32((uint){wrapperCalcVar}.Length);");
                 _sb.AppendIndentedLine($"{totalCalcVar}.AddByteLength({wrapperCalcVar}.Length);");
-                _sb.AppendNewLine();
 
-                // Base fields size (AFTER wrapper)
-                _sb.AppendIndentedLine($"// Base fields ({parentTypeName})");
+                // Base fields calculated OUTSIDE wrapper
+                _sb.AppendIndentedLine($"// Base fields ({parentTypeName}) - OUTSIDE wrapper");
                 string parentSizeCalcPrefix = GeneratorHelpers.GetNamespacePrefix(derivedInfo.ParentNamespace, _currentNamespace);
                 _sb.AppendIndentedLine($"{parentSizeCalcPrefix}SizeCalculators.Calculate{parentTypeName}BaseFieldsOnlySize(ref {totalCalcVar}, derived{derivedClassName});");
                 _sb.AppendNewLine();

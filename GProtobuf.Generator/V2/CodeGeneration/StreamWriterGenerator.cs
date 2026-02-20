@@ -340,6 +340,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         /// <summary>
         /// Calculates wrapper content size for writing (same logic as in SizeCalculatorGenerator).
+        /// NOTE: Base class fields are written OUTSIDE the wrapper (at parent message level).
         /// </summary>
         private void CalculateWrapperContentSizeForWrite(IReadOnlyList<string> chain, int levelIndex, string calcVar)
         {
@@ -349,7 +350,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var currentClassName = TypeNameHelper.GetClassName(currentTypeName);
             var currentType = _registry.GetByFullName(currentTypeName);
 
-            // Add this level's OWN fields size
+            // Add this level's OWN fields size ONLY (not base fields)
             _sb.AppendIndentedLine($"// Calculate {currentClassName}'s own fields size");
             _sb.AppendIndentedLine($"SizeCalculators.Calculate{currentClassName}OwnFieldsSize(ref {calcVar}, instance);");
 
@@ -379,10 +380,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     _sb.AppendIndentedLine($"{calcVar}.AddByteLength({nestedCalcVar}.Length);");
                 }
             }
+            // NOTE: Base class fields are NOT included here - they're written OUTSIDE the wrapper
         }
 
         /// <summary>
         /// Recursively writes wrapper content (own fields + nested wrappers).
+        /// NOTE: Base class fields are written OUTSIDE the wrapper (at parent message level).
         /// </summary>
         private void WriteWrapperContentRecursive(IReadOnlyList<string> chain, int levelIndex)
         {
@@ -392,7 +395,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var currentClassName = TypeNameHelper.GetClassName(currentTypeName);
             var currentType = _registry.GetByFullName(currentTypeName);
 
-            // Write this level's OWN fields FIRST
+            // Write this level's OWN fields ONLY (not base fields)
             _sb.AppendIndentedLine($"// Write {currentClassName}'s own fields");
             _sb.AppendIndentedLine($"Write{currentClassName}OwnFields(ref writer, instance);");
 
@@ -422,6 +425,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     WriteWrapperContentRecursive(chain, levelIndex + 1);
                 }
             }
+            // NOTE: Base class fields are NOT written here - they're written OUTSIDE the wrapper
         }
 
         /// <summary>
@@ -500,6 +504,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         /// <summary>
         /// Generates Write{Type}_As{Ancestor} method for a specific ancestor.
+        /// NOTE: For protobuf-net compatibility, ancestor fields are written OUTSIDE the wrapper.
         /// </summary>
         private void GenerateWriteAsSpecificParent(
             TypeDefinition type,
@@ -514,21 +519,19 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine($"private static void Write{className}_As{ancestorClassName}(ref {_writerType} writer, global::{type.FullName} instance)");
             _sb.StartNewBlock();
 
-            // CRITICAL: protobuf-net Level200 wire format order for WriteC_AsA with chain [A, B, C]:
-            //   1. ProtoInclude wrappers: B wrapper (field 5) containing C wrapper (field 10)
-            //   2. Ancestor A fields AFTER the wrappers
+            // protobuf-net wire format:
+            // 1. ProtoInclude wrapper(s) containing ONLY derived fields
+            // 2. Ancestor fields written OUTSIDE the wrapper
 
-            // Step 1: Generate nested ProtoInclude wrappers (B -> C)
-            GenerateNestedWrappersForAsParent(inheritanceChain, ancestorIndex + 1, typeIndex);
+            // Generate nested ProtoInclude wrappers (derived fields only)
+            GenerateNestedWrappersForAsParent(inheritanceChain, ancestorIndex + 1, typeIndex, ancestorIndex);
 
-            // Step 2: Write ancestor (A) fields AFTER the wrappers
+            // Write ancestor fields OUTSIDE the wrapper
             var ancestorType = _registry.GetByFullName(ancestorTypeName);
-            if (ancestorType?.ProtoMembers != null)
+            if (ancestorType?.ProtoMembers != null && ancestorType.ProtoMembers.Count > 0)
             {
-                foreach (var member in ancestorType.ProtoMembers)
-                {
-                    GenerateFieldWrite(member, "instance");
-                }
+                _sb.AppendIndentedLine($"// Ancestor fields ({ancestorClassName}) - OUTSIDE wrapper");
+                _sb.AppendIndentedLine($"Write{ancestorClassName}BaseFieldsOnly(ref writer, instance);");
             }
 
             _sb.EndBlock();
@@ -537,11 +540,13 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         /// <summary>
         /// Recursively generates nested wrappers from currentIndex to targetIndex.
+        /// NOTE: Ancestor fields are written OUTSIDE the wrapper by the caller.
         /// </summary>
         private void GenerateNestedWrappersForAsParent(
             IReadOnlyList<string> chain,
             int currentIndex,
-            int targetIndex)
+            int targetIndex,
+            int ancestorIndex)
         {
             if (currentIndex > targetIndex)
                 return;
@@ -559,7 +564,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // Write tag for wrapper
             TagCodeHelper.WriteTag(_sb, protoInclude.FieldId, WireType.Len);
 
-            // Calculate size for this wrapper
+            // Calculate size for this wrapper (ONLY derived fields, not ancestor)
             var calcVar = $"calc{currentIndex}";
             _sb.AppendIndentedLine($"var {calcVar} = new global::GProtobuf.Core.WriteSizeCalculator();");
 
@@ -567,7 +572,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // Otherwise, calculate parent fields + nested wrapper
             if (currentIndex == targetIndex)
             {
-                // This is the innermost level - calculate own fields
+                // This is the innermost level - calculate own fields only
                 _sb.AppendIndentedLine($"SizeCalculators.Calculate{currentClassName}OwnFieldsSize(ref {calcVar}, instance);");
             }
             else
@@ -575,12 +580,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 // This is intermediate level - calculate own fields + nested wrapper
                 var currentType = _registry.GetByFullName(currentTypeName);
 
-                // Calculate current level's fields
-                if (currentType?.ProtoMembers != null)
+                // Calculate current level's OWN fields (not inherited)
+                var ownMembers = _registry.GetOwnProtoMembers(currentTypeName);
+                if (ownMembers != null && ownMembers.Count > 0)
                 {
-                    foreach (var member in currentType.ProtoMembers)
+                    foreach (var member in ownMembers)
                     {
-                        // Generate size calculation for this field
                         GenerateFieldSizeCalculation(member, "instance", calcVar);
                     }
                 }
@@ -598,13 +603,14 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     _sb.AppendIndentedLine($"var {nestedCalcVar} = new global::GProtobuf.Core.WriteSizeCalculator();");
 
                     // Recursively calculate nested size
-                    GenerateNestedSizeCalculationForAsParent(chain, currentIndex + 1, targetIndex, nestedCalcVar);
+                    GenerateNestedSizeCalculationForAsParent(chain, currentIndex + 1, targetIndex, nestedCalcVar, ancestorIndex);
 
                     // Add length prefix + content size
                     _sb.AppendIndentedLine($"{calcVar}.WriteVarUInt32((uint){nestedCalcVar}.Length);");
                     _sb.AppendIndentedLine($"{calcVar}.AddByteLength({nestedCalcVar}.Length);");
                 }
             }
+            // NOTE: Ancestor fields are NOT included here - they're written OUTSIDE the wrapper
 
             // Write length prefix
             _sb.AppendIndentedLine($"writer.WriteVarUInt32((uint){calcVar}.Length);");
@@ -612,34 +618,37 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // Write content
             if (currentIndex == targetIndex)
             {
-                // Write own fields
+                // Write own fields only
                 _sb.AppendIndentedLine($"Write{currentClassName}OwnFields(ref writer, instance);");
             }
             else
             {
-                // Write parent fields + nested wrapper
-                var currentType = _registry.GetByFullName(currentTypeName);
-                if (currentType?.ProtoMembers != null)
+                // Write OWN fields (not inherited) + nested wrapper
+                var ownMembers = _registry.GetOwnProtoMembers(currentTypeName);
+                if (ownMembers != null && ownMembers.Count > 0)
                 {
-                    foreach (var member in currentType.ProtoMembers)
+                    foreach (var member in ownMembers)
                     {
                         GenerateFieldWrite(member, "instance");
                     }
                 }
 
                 // Recursively write nested wrapper
-                GenerateNestedWrappersForAsParent(chain, currentIndex + 1, targetIndex);
+                GenerateNestedWrappersForAsParent(chain, currentIndex + 1, targetIndex, ancestorIndex);
             }
+            // NOTE: Ancestor fields are NOT written here - they're written OUTSIDE the wrapper by the caller
         }
 
         /// <summary>
         /// Recursively calculates size for nested wrappers.
+        /// NOTE: Ancestor fields are NOT included in wrapper - they're calculated separately outside.
         /// </summary>
         private void GenerateNestedSizeCalculationForAsParent(
             IReadOnlyList<string> chain,
             int currentIndex,
             int targetIndex,
-            string calcVar)
+            string calcVar,
+            int ancestorIndex)
         {
             if (currentIndex > targetIndex)
                 return;
@@ -654,13 +663,14 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
             else
             {
-                // Intermediate level - own fields + nested wrapper
+                // Intermediate level - OWN fields (not inherited) + nested wrapper
                 var currentType = _registry.GetByFullName(currentTypeName);
 
-                // Calculate current level fields
-                if (currentType?.ProtoMembers != null)
+                // Calculate current level OWN fields (not inherited)
+                var ownMembers = _registry.GetOwnProtoMembers(currentTypeName);
+                if (ownMembers != null && ownMembers.Count > 0)
                 {
-                    foreach (var member in currentType.ProtoMembers)
+                    foreach (var member in ownMembers)
                     {
                         GenerateFieldSizeCalculation(member, "instance", calcVar);
                     }
@@ -676,12 +686,13 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     var nestedCalcVar = $"n{currentIndex}";
                     _sb.AppendIndentedLine($"var {nestedCalcVar} = new global::GProtobuf.Core.WriteSizeCalculator();");
 
-                    GenerateNestedSizeCalculationForAsParent(chain, currentIndex + 1, targetIndex, nestedCalcVar);
+                    GenerateNestedSizeCalculationForAsParent(chain, currentIndex + 1, targetIndex, nestedCalcVar, ancestorIndex);
 
                     _sb.AppendIndentedLine($"{calcVar}.WriteVarUInt32((uint){nestedCalcVar}.Length);");
                     _sb.AppendIndentedLine($"{calcVar}.AddByteLength({nestedCalcVar}.Length);");
                 }
             }
+            // NOTE: Ancestor fields are NOT included here - they're calculated separately outside the wrapper
         }
 
         private void GenerateSimpleWriteMethod(TypeDefinition type, string className)
@@ -814,8 +825,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateWriteMethodForDerived(TypeDefinition type, string className)
         {
-            // Phase 2: Correct ProtoInclude wrapper generation
-            // Wire format: [wrapper tag][wrapper length][derived fields INSIDE][base fields AFTER]
+            // ProtoInclude wrapper generation with protobuf-net compatibility
+            // Wire format: [wrapper tag][wrapper length][derived fields ONLY][base fields OUTSIDE wrapper]
+            // NOTE: Base class fields are written AFTER the wrapper, at the parent message level
 
             var inheritanceChain = _registry.GetInheritanceChain(type.FullName);
             if (inheritanceChain.Count < 2)
@@ -828,25 +840,21 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // Reset nested calculator counter for this method
             ResetNestedCalcCounter();
 
-            // Get root (base) type
-            var rootTypeName = inheritanceChain[0];
-            var rootType = _registry.GetByFullName(rootTypeName);
-
-            _sb.AppendIndentedLine($"// ProtoInclude wrapper format (Level200 compatibility)");
-            _sb.AppendIndentedLine($"// Wire: [wrapper tag][length][derived fields INSIDE wrapper][base fields AFTER wrapper]");
+            _sb.AppendIndentedLine($"// ProtoInclude wrapper format (protobuf-net compatible)");
+            _sb.AppendIndentedLine($"// Wire: [wrapper tag][length][derived fields ONLY] then [base fields OUTSIDE wrapper]");
             _sb.AppendNewLine();
 
-            // Step 1: Write outermost wrapper (tag + length + content)
+            // Write outermost wrapper (tag + length + derived fields only)
             GenerateOutermostWrapper(inheritanceChain, type);
 
-            // Step 2: Write base fields AFTER all wrappers
-            if (rootType?.ProtoMembers != null)
+            // Write base class fields OUTSIDE the wrapper (at parent message level)
+            var baseTypeName = inheritanceChain[0];
+            var baseClassName = TypeNameHelper.GetClassName(baseTypeName);
+            var baseType = _registry.GetByFullName(baseTypeName);
+            if (baseType?.ProtoMembers != null && baseType.ProtoMembers.Count > 0)
             {
-                _sb.AppendIndentedLine($"// Base class fields ({TypeNameHelper.GetClassName(rootTypeName)}) - AFTER wrapper");
-                foreach (var member in rootType.ProtoMembers)
-                {
-                    GenerateFieldWrite(member, "instance");
-                }
+                _sb.AppendIndentedLine($"// Base class fields ({baseClassName}) - OUTSIDE wrapper");
+                _sb.AppendIndentedLine($"Write{baseClassName}BaseFieldsOnly(ref writer, instance);");
             }
         }
 
@@ -1066,7 +1074,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// <summary>
         /// Generates write code for nested derived type fields (concrete derived type declared in ProtoMember).
         /// Example: [ProtoMember(1)] ModbusManualTransaction Transaction (where ModbusManualTransaction : ModbusTransaction)
-        /// Wire format: [field tag][total length] [wrapper tag][wrapper length] [derived fields] [base fields AFTER wrapper]
+        /// Wire format: [field tag][total length] [wrapper tag][wrapper length][derived fields only][base fields OUTSIDE wrapper]
+        /// NOTE: Base fields are written OUTSIDE the wrapper for protobuf-net compatibility.
         /// </summary>
         private void GenerateNestedDerivedTypeWrite(ProtoMemberAttribute member, string sourceVar, string typeName, TypeDefinition typeDef)
         {
@@ -1090,7 +1099,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             _sb.AppendIndentedLine($"// ProtoInclude wrapper for nested derived type {typeName}");
 
-            // Step 1: Calculate full size (wrapper + derived fields + base fields)
+            // Step 1: Calculate full size (wrapper + base fields OUTSIDE wrapper)
             _sb.AppendIndentedLine($"var {calcVar} = new global::GProtobuf.Core.WriteSizeCalculator();");
             _sb.AppendNewLine();
 
@@ -1098,21 +1107,20 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine($"// ProtoInclude wrapper (field {protoInclude.FieldId} in {parentTypeName})");
             _sb.AppendIndentedLine($"{calcVar}.WriteVarUInt32({wrapperTag}u);");
 
-            // Calculate wrapper content size (derived-specific fields only)
+            // Calculate wrapper content size (derived fields ONLY, not base)
             var wrapperContentCalcVar = isNonNullableStruct ? $"wrapperContent_{member.FieldId}" : "wrapperContentCalc";
             _sb.AppendIndentedLine($"var {wrapperContentCalcVar} = new global::GProtobuf.Core.WriteSizeCalculator();");
 
             string sizeCalcNamespace = GeneratorHelpers.GetNamespacePrefix(typeNamespace, _currentNamespace);
 
             _sb.AppendIndentedLine($"{sizeCalcNamespace}SizeCalculators.Calculate{typeName}OwnFieldsSize(ref {wrapperContentCalcVar}, {valueArg});");
+
             _sb.AppendIndentedLine($"{calcVar}.WriteVarUInt32((uint){wrapperContentCalcVar}.Length);");
             _sb.AppendIndentedLine($"{calcVar}.AddByteLength({wrapperContentCalcVar}.Length);");
-            _sb.AppendNewLine();
 
-            // Calculate base fields size (AFTER wrapper)
-            // IMPORTANT: Use BaseFieldsOnlySize to avoid runtime dispatch that would count derived fields twice
-            _sb.AppendIndentedLine($"// Base fields ({parentTypeName})");
+            // Base fields size calculated OUTSIDE wrapper
             string parentSizeCalcPrefix = GeneratorHelpers.GetNamespacePrefix(derivedInfo.ParentNamespace, _currentNamespace);
+            _sb.AppendIndentedLine($"// Base fields ({parentTypeName}) - OUTSIDE wrapper");
             _sb.AppendIndentedLine($"{parentSizeCalcPrefix}SizeCalculators.Calculate{parentTypeName}BaseFieldsOnlySize(ref {calcVar}, {valueArg});");
             _sb.AppendNewLine();
 
@@ -1131,9 +1139,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine($"{writerNamespace}{_writerKind}Writers.Write{typeName}OwnFields(ref writer, {valueArg});");
             _sb.AppendNewLine();
 
-            // Step 5: Write base fields (AFTER wrapper)
-            // IMPORTANT: Use BaseFieldsOnly to avoid runtime dispatch that would duplicate derived fields
+            // Step 5: Write base fields OUTSIDE wrapper
             string parentWriterPrefix = GeneratorHelpers.GetNamespacePrefix(derivedInfo.ParentNamespace, _currentNamespace);
+            _sb.AppendIndentedLine($"// Base fields ({parentTypeName}) - OUTSIDE wrapper");
             _sb.AppendIndentedLine($"{parentWriterPrefix}{_writerKind}Writers.Write{parentTypeName}BaseFieldsOnly(ref writer, {valueArg});");
         }
 
@@ -1167,6 +1175,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// Generates write code for polymorphic fields (field declared as base type with ProtoIncludes).
         /// Example: [ProtoMember(2)] ProtoParameterBase ProtoValue (where ProtoParameterBase has multiple ProtoIncludes)
         /// Generates runtime type dispatch to add ProtoInclude wrapper for derived type instances.
+        /// NOTE: Base fields are written OUTSIDE the wrapper for protobuf-net compatibility.
         /// </summary>
         private void GeneratePolymorphicFieldWrite(ProtoMemberAttribute member, string sourceVar, string typeName, TypeDefinition typeDef)
         {
@@ -1204,7 +1213,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 _sb.IncreaseIndent();
                 _sb.StartNewBlock();
 
-                // Step 1: Calculate total size (wrapper + derived fields + base fields)
+                // Step 1: Calculate total size (wrapper + base fields OUTSIDE wrapper)
                 _sb.AppendIndentedLine($"var totalCalc{derivedClassName} = new global::GProtobuf.Core.WriteSizeCalculator();");
                 _sb.AppendNewLine();
 
@@ -1212,19 +1221,19 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 _sb.AppendIndentedLine($"// ProtoInclude wrapper (field {protoInclude.FieldId} in {parentTypeName})");
                 _sb.AppendIndentedLine($"totalCalc{derivedClassName}.WriteVarUInt32({wrapperTag}u);");
 
-                // Wrapper content size (derived fields only)
+                // Wrapper content size (derived fields ONLY, not base)
                 _sb.AppendIndentedLine($"var wrapperCalc{derivedClassName} = new global::GProtobuf.Core.WriteSizeCalculator();");
 
                 string derivedSizeCalcPrefix = GeneratorHelpers.GetNamespacePrefix(derivedNamespace, _currentNamespace);
 
                 _sb.AppendIndentedLine($"{derivedSizeCalcPrefix}SizeCalculators.Calculate{derivedClassName}OwnFieldsSize(ref wrapperCalc{derivedClassName}, derived{derivedClassName});");
+
                 _sb.AppendIndentedLine($"totalCalc{derivedClassName}.WriteVarUInt32((uint)wrapperCalc{derivedClassName}.Length);");
                 _sb.AppendIndentedLine($"totalCalc{derivedClassName}.AddByteLength(wrapperCalc{derivedClassName}.Length);");
-                _sb.AppendNewLine();
 
-                // Base fields size (AFTER wrapper)
-                _sb.AppendIndentedLine($"// Base fields ({parentTypeName})");
+                // Base fields size calculated OUTSIDE wrapper
                 string parentSizeCalcPrefix = GeneratorHelpers.GetNamespacePrefix(derivedInfo.ParentNamespace, _currentNamespace);
+                _sb.AppendIndentedLine($"// Base fields ({parentTypeName}) - OUTSIDE wrapper");
                 _sb.AppendIndentedLine($"{parentSizeCalcPrefix}SizeCalculators.Calculate{parentTypeName}BaseFieldsOnlySize(ref totalCalc{derivedClassName}, derived{derivedClassName});");
                 _sb.AppendNewLine();
 
@@ -1243,8 +1252,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 _sb.AppendIndentedLine($"{derivedWriterPrefix}{_writerKind}Writers.Write{derivedClassName}OwnFields(ref writer, derived{derivedClassName});");
                 _sb.AppendNewLine();
 
-                // Step 5: Write base fields (AFTER wrapper)
+                // Step 5: Write base fields OUTSIDE wrapper
                 string parentWriterPrefix = GeneratorHelpers.GetNamespacePrefix(derivedInfo.ParentNamespace, _currentNamespace);
+                _sb.AppendIndentedLine($"// Base fields ({parentTypeName}) - OUTSIDE wrapper");
                 _sb.AppendIndentedLine($"{parentWriterPrefix}{_writerKind}Writers.Write{parentTypeName}BaseFieldsOnly(ref writer, derived{derivedClassName});");
 
                 _sb.EndBlock();
