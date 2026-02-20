@@ -122,7 +122,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         /// <summary>
         /// Analyzes a type and returns detailed information about it.
         /// </summary>
-        private TypeAnalysisInfo AnalyzeType(string typeName)
+        internal TypeAnalysisInfo AnalyzeType(string typeName)
         {
             // Handle null/empty type names
             if (string.IsNullOrEmpty(typeName))

@@ -383,35 +383,229 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         {
             var keyType = typeInfo.DictionaryKeyType;
             var valueType = typeInfo.DictionaryValueType;
-            var mapEntryTypeName = typeInfo.MapEntryTypeName;
+            var keyTypeInfo = _registry?.AnalyzeType(keyType);
+            var valueTypeInfo = _registry?.AnalyzeType(valueType);
 
-            // Read inner dictionary length for adaptive capacity
-            _sb.AppendIndentedLine("var innerDictLength = reader.ReadVarUInt32();");
-            _sb.AppendIndentedLine("var innerDictEnd = reader.Position + (int)innerDictLength;");
+            // protobuf-net uses TWO different wire formats for nested dictionaries:
+            // Format A (repeated field): [field2 tag][entryLen][fields] - field 2 appears once per inner entry
+            // Format B (packed blob): [field2 tag][totalLen][entry1Len][fields][entry2Len][fields]... - all entries in one blob
+            //
+            // We detect the format by checking if the first byte matches the expected field 1 tag for the inner key type.
+            // The expected tag is: (1 << 3) | wireType, where wireType depends on the key type:
+            // - int/enum: wireType 0 (varint) -> tag 0x08
+            // - string: wireType 2 (Len) -> tag 0x0A
+            // - float: wireType 5 (Fixed32) -> tag 0x0D
+            // - double: wireType 1 (Fixed64) -> tag 0x09
+
+            // Calculate expected field 1 tag for inner key
+            int expectedKeyWireType = GetWireTypeForType(keyType, keyTypeInfo);
+            int expectedField1Tag = (1 << 3) | expectedKeyWireType;
+
+            // Read the blob length
+            _sb.AppendIndentedLine("var innerBlobLength = reader.ReadVarUInt32();");
+            _sb.AppendIndentedLine("var innerBlobEnd = reader.Position + (int)innerBlobLength;");
             _sb.AppendNewLine();
 
-            // Determine the correct dictionary type to instantiate
+            // Initialize dictionary only once using null-coalescing
             bool isCustomDict = TypeHelper.IsCustomDictionaryType(typeInfo.FullTypeName);
             if (isCustomDict)
             {
-                // Custom dictionary type - use parameterless constructor (custom types may not support capacity)
-                _sb.AppendIndentedLine($"{targetVar} = new global::{typeInfo.FullTypeName}();");
+                _sb.AppendIndentedLine($"{targetVar} ??= new global::{typeInfo.FullTypeName}();");
             }
             else
             {
-                // Standard Dictionary<K,V> with adaptive capacity estimation
-                _sb.AppendIndentedLine("// OPTIMIZATION: adaptive capacity estimation");
-                _sb.AppendIndentedLine("int estimatedCapacity = EstimateMapCapacity(innerDictLength);");
-                _sb.AppendIndentedLine($"{targetVar} = new global::System.Collections.Generic.Dictionary<{keyType}, {valueType}>(estimatedCapacity);");
+                _sb.AppendIndentedLine($"{targetVar} ??= new global::System.Collections.Generic.Dictionary<{keyType}, {valueType}>();");
             }
             _sb.AppendNewLine();
 
-            _sb.AppendIndentedLine("// Read inner dictionary entries");
-            _sb.AppendIndentedLine("while (reader.Position < innerDictEnd)");
+            // Peek at first byte to determine format
+            _sb.AppendIndentedLine("if (innerBlobLength > 0)");
             _sb.StartNewBlock();
-            _sb.AppendIndentedLine($"var entry = Read{mapEntryTypeName}(ref reader);");
-            _sb.AppendIndentedLine($"if (entry.success) {targetVar}[entry.key] = entry.value;");
-            _sb.EndBlock();
+            _sb.AppendIndentedLine("var firstByte = reader.PeekByte();");
+            _sb.AppendNewLine();
+
+            // If first byte matches expected field 1 tag for inner key, it's Format A (direct fields)
+            // Otherwise it's Format B (length-prefixed entries)
+            _sb.AppendIndentedLine($"if (firstByte == {expectedField1Tag}) // Expected field 1 tag for {keyType}");
+            _sb.StartNewBlock();
+
+            // Format A: single entry, read fields directly
+            GenerateInnerEntryFieldsRead(targetVar, keyType, valueType, keyTypeInfo, valueTypeInfo, "innerBlobEnd");
+
+            _sb.EndBlock(); // if Format A
+            _sb.AppendIndentedLine("else");
+            _sb.StartNewBlock();
+
+            // Format B: multiple length-prefixed entries
+            _sb.AppendIndentedLine("while (reader.Position < innerBlobEnd)");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine("var innerEntryLength = reader.ReadVarUInt32();");
+            _sb.AppendIndentedLine("var innerEntryEnd = reader.Position + (int)innerEntryLength;");
+            _sb.AppendNewLine();
+
+            GenerateInnerEntryFieldsRead(targetVar, keyType, valueType, keyTypeInfo, valueTypeInfo, "innerEntryEnd");
+
+            _sb.EndBlock(); // while
+            _sb.EndBlock(); // else Format B
+            _sb.EndBlock(); // if (innerBlobLength > 0)
+        }
+
+        /// <summary>
+        /// Generates code to read inner entry fields (key/value) and add to dictionary.
+        /// </summary>
+        private void GenerateInnerEntryFieldsRead(string targetVar, string keyType, string valueType,
+            TypeAnalysisInfo keyTypeInfo, TypeAnalysisInfo valueTypeInfo, string endVar)
+        {
+            var shortKeyType = GetKeyValueShortTypeName(keyType, keyTypeInfo);
+            var shortValueType = GetKeyValueShortTypeName(valueType, valueTypeInfo);
+
+            _sb.AppendIndentedLine($"{shortKeyType} innerTempKey = default;");
+            _sb.AppendIndentedLine($"{shortValueType} innerTempValue = default;");
+            _sb.AppendNewLine();
+
+            _sb.AppendIndentedLine($"while (reader.Position < {endVar})");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine("var innerTag = reader.ReadVarUInt32();");
+            _sb.AppendIndentedLine("var innerFieldId = (int)(innerTag >> 3);");
+            _sb.AppendIndentedLine("var innerWireType = (int)(innerTag & 0x7);");
+            _sb.AppendNewLine();
+            _sb.AppendIndentedLine("switch (innerFieldId)");
+            _sb.StartNewBlock();
+
+            // Case 1: inner key
+            _sb.AppendIndentedLine("case 1:");
+            _sb.IncreaseIndent();
+            GenerateInlineFieldRead("innerTempKey", keyType, keyTypeInfo);
+            _sb.AppendIndentedLine("break;");
+            _sb.DecreaseIndent();
+
+            // Case 2: inner value
+            _sb.AppendIndentedLine("case 2:");
+            _sb.IncreaseIndent();
+            GenerateInlineFieldRead("innerTempValue", valueType, valueTypeInfo);
+            _sb.AppendIndentedLine("break;");
+            _sb.DecreaseIndent();
+
+            // Default: skip unknown
+            _sb.AppendIndentedLine("default:");
+            _sb.IncreaseIndent();
+            _sb.AppendIndentedLine("reader.SkipField((global::GProtobuf.Core.WireType)innerWireType);");
+            _sb.AppendIndentedLine("break;");
+            _sb.DecreaseIndent();
+
+            _sb.EndBlock(); // switch
+            _sb.EndBlock(); // while
+
+            // Add entry to dict
+            _sb.AppendIndentedLine($"{targetVar}[innerTempKey] = innerTempValue;");
+        }
+
+        /// <summary>
+        /// Gets short type name for inline variable declaration.
+        /// </summary>
+        private string GetKeyValueShortTypeName(string typeName, TypeAnalysisInfo typeInfo)
+        {
+            if (typeInfo == null) return typeName;
+            if (typeInfo.IsPrimitive) return typeInfo.ShortTypeName ?? typeName;
+            if (typeInfo.IsEnum) return $"global::{typeName}";
+            return GetFullTypeName(typeName, typeInfo);
+        }
+
+        /// <summary>
+        /// Gets the protobuf wire type for a given type.
+        /// </summary>
+        /// <returns>
+        /// Wire type value: 0=VarInt, 1=Fixed64, 2=Len, 5=Fixed32
+        /// </returns>
+        private int GetWireTypeForType(string typeName, TypeAnalysisInfo typeInfo)
+        {
+            if (typeInfo == null) return 2; // Default to Len for unknown types
+
+            // Enum is always varint
+            if (typeInfo.IsEnum) return 0;
+
+            // Primitives - check normalized type name
+            var normalized = TypeMapping.NormalizeTypeName(typeName);
+            return normalized switch
+            {
+                // VarInt types (wire type 0)
+                "System.Int32" => 0,
+                "System.Int64" => 0,
+                "System.UInt32" => 0,
+                "System.UInt64" => 0,
+                "System.Int16" => 0,
+                "System.UInt16" => 0,
+                "System.Byte" => 0,
+                "System.SByte" => 0,
+                "System.Boolean" => 0,
+
+                // Fixed64 types (wire type 1)
+                "System.Double" => 1,
+
+                // Fixed32 types (wire type 5)
+                "System.Single" => 5,
+
+                // Len types (wire type 2)
+                "System.String" => 2,
+                "System.Guid" => 2,
+                "System.DateTime" => 2,
+                "System.TimeSpan" => 2,
+                "System.Decimal" => 2,
+
+                // Default to Len for custom types, collections, etc.
+                _ => 2
+            };
+        }
+
+        /// <summary>
+        /// Generates inline field read for simple types (used in nested dict reading).
+        /// </summary>
+        private void GenerateInlineFieldRead(string targetVar, string typeName, TypeAnalysisInfo typeInfo)
+        {
+            if (typeInfo == null)
+            {
+                _sb.AppendIndentedLine($"// WARNING: Cannot analyze type '{typeName}', skipping");
+                return;
+            }
+
+            if (typeInfo.IsEnum)
+            {
+                _sb.AppendIndentedLine($"{targetVar} = (global::{typeName})reader.ReadVarInt32();");
+                return;
+            }
+
+            if (typeInfo.IsPrimitive)
+            {
+                var readExpr = TypeMapping.GetElementReadExpression(typeName, DataFormat.Default, "reader");
+                if (readExpr != null)
+                {
+                    _sb.AppendIndentedLine($"{targetVar} = {readExpr};");
+                    return;
+                }
+            }
+
+            if (typeInfo.IsString)
+            {
+                _sb.AppendIndentedLine($"{targetVar} = global::GProtobuf.Core.SpanReaders.ReadString(ref reader, global::GProtobuf.Core.WireType.Len);");
+                return;
+            }
+
+            if (typeInfo.IsCustomType)
+            {
+                // For custom types, read as length-prefixed submessage
+                var spanReadersClass = GetSpanReadersClass(typeName);
+                var uniqueId = System.Guid.NewGuid().ToString("N").Substring(0, 8);
+                _sb.AppendIndentedLine($"var customLen_{uniqueId} = reader.ReadVarUInt32();");
+                _sb.AppendIndentedLine($"var customSpan_{uniqueId} = reader.GetSlice((int)customLen_{uniqueId});");
+                _sb.AppendIndentedLine($"var customReader_{uniqueId} = new SpanReader(customSpan_{uniqueId});");
+                _sb.AppendIndentedLine($"{targetVar} = new global::{typeName}();");
+                _sb.AppendIndentedLine($"{spanReadersClass}.Populate{typeInfo.ShortTypeName}(ref customReader_{uniqueId}, {targetVar});");
+                return;
+            }
+
+            // For any remaining unsupported types, skip with a warning
+            _sb.AppendIndentedLine($"// WARNING: Type '{typeName}' not supported in nested dict inline read");
+            _sb.AppendIndentedLine("reader.SkipField((global::GProtobuf.Core.WireType)innerWireType);");
         }
 
         private void GenerateCollectionFieldRead(string targetVar, TypeAnalysisInfo typeInfo, string wireTypeVar, string fieldPrefix = "")

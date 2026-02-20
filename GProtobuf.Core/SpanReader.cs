@@ -562,6 +562,18 @@ namespace GProtobuf.Core
         public bool EndOfData => position >= buffer.Length;
 
         /// <summary>
+        /// Peeks at the next byte without advancing the position.
+        /// </summary>
+        /// <returns>The byte at the current position.</returns>
+        /// <exception cref="InvalidOperationException">If no bytes remain in the buffer.</exception>
+        public byte PeekByte()
+        {
+            if (position >= buffer.Length)
+                throw new InvalidOperationException("Cannot peek: no bytes remaining in buffer.");
+            return buffer[position];
+        }
+
+        /// <summary>
         /// Validates that the specified number of bytes are available in the buffer.
         /// </summary>
         /// <param name="length">Number of bytes to check availability for.</param>

@@ -62,13 +62,15 @@ namespace GProtobuf.Generator.V2
                 return $"ArrayOf{GetSafeTypeName(elementType)}";
             }
 
-            // Handle Dictionary<K, V>
+            // Handle Dictionary<K, V> and custom dictionary types (ConcurrentDictionary, ListDictionary, etc.)
             if (IsDictionaryType(typeName))
             {
                 var (keyType, valueType) = ParseTwoGenericArgs(typeName);
                 if (keyType != null && valueType != null)
                 {
-                    return $"DictionaryOf{GetSafeTypeName(keyType)}And{GetSafeTypeName(valueType)}";
+                    // Determine dictionary prefix - preserve custom dictionary type names
+                    var dictPrefix = GetDictionaryPrefix(typeName);
+                    return $"{dictPrefix}Of{GetSafeTypeName(keyType)}And{GetSafeTypeName(valueType)}";
                 }
             }
 
@@ -193,6 +195,30 @@ namespace GProtobuf.Generator.V2
         {
             return typeName.Contains("Dictionary<") ||
                    typeName.Contains("IDictionary<");
+        }
+
+        /// <summary>
+        /// Gets the dictionary type prefix for naming.
+        /// Returns "ConcurrentDictionary" for ConcurrentDictionary, "Dictionary" for standard Dictionary, etc.
+        /// </summary>
+        private static string GetDictionaryPrefix(string typeName)
+        {
+            // Extract the dictionary type name (before the '<')
+            int genericIndex = typeName.IndexOf('<');
+            if (genericIndex < 0)
+                return "Dictionary";
+
+            string outerType = typeName.Substring(0, genericIndex);
+
+            // Extract just the class name (remove namespace)
+            int lastDotIndex = outerType.LastIndexOf('.');
+            if (lastDotIndex >= 0)
+            {
+                outerType = outerType.Substring(lastDotIndex + 1);
+            }
+
+            // Return the dictionary class name (ConcurrentDictionary, ListDictionary, Dictionary, etc.)
+            return outerType;
         }
 
         private static bool IsListType(string typeName)
