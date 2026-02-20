@@ -66,7 +66,8 @@ public static class StandaloneTypeAnalyzer
     {
         var elementType = arrayType.ElementType;
         var elementTypeName = elementType.ToDisplayString();
-        var isPrimitive = IsPrimitiveType(elementTypeName);
+        var isEnum = IsEnumType(elementType);
+        var isPrimitive = IsPrimitiveType(elementTypeName) || isEnum;
 
         // byte[] is handled specially - not as a collection
         if (elementType.SpecialType == SpecialType.System_Byte)
@@ -116,7 +117,8 @@ public static class StandaloneTypeAnalyzer
             ValueType: null,
             TypeSymbol: arrayType,
             ElementKind: elementKind,
-            NestedElementInfo: nestedElementInfo);
+            NestedElementInfo: nestedElementInfo,
+            ElementIsEnum: isEnum);
     }
 
     private static StandaloneTypeInfo? AnalyzeGenericType(INamedTypeSymbol namedType)
@@ -149,7 +151,8 @@ public static class StandaloneTypeAnalyzer
     {
         var elementType = namedType.TypeArguments[0];
         var elementTypeName = elementType.ToDisplayString();
-        var isPrimitive = IsPrimitiveType(elementTypeName);
+        var isEnum = IsEnumType(elementType);
+        var isPrimitive = IsPrimitiveType(elementTypeName) || isEnum;
         var targetNamespace = GetTargetNamespace(elementType);
         var methodNameSuffix = "ListOf" + GetSafeTypeName(elementTypeName);
 
@@ -182,7 +185,8 @@ public static class StandaloneTypeAnalyzer
             ValueType: null,
             TypeSymbol: namedType,
             ElementKind: elementKind,
-            NestedElementInfo: nestedElementInfo);
+            NestedElementInfo: nestedElementInfo,
+            ElementIsEnum: isEnum);
     }
 
     private static StandaloneTypeInfo AnalyzeDictionaryType(INamedTypeSymbol namedType, bool isCustomDictionary, INamedTypeSymbol? dictionaryInterface = null)
@@ -202,8 +206,10 @@ public static class StandaloneTypeAnalyzer
 
         var keyTypeName = keyType.ToDisplayString();
         var valueTypeName = valueType.ToDisplayString();
-        var keyIsPrimitive = IsPrimitiveType(keyTypeName);
-        var valueIsPrimitive = IsPrimitiveType(valueTypeName);
+        var keyIsEnum = IsEnumType(keyType);
+        var valueIsEnum = IsEnumType(valueType);
+        var keyIsPrimitive = IsPrimitiveType(keyTypeName) || keyIsEnum;
+        var valueIsPrimitive = IsPrimitiveType(valueTypeName) || valueIsEnum;
 
         // Target namespace from value type (more likely to be user type)
         var targetNamespace = GetTargetNamespace(valueType);
@@ -274,7 +280,9 @@ public static class StandaloneTypeAnalyzer
             IsCustomDictionaryType: isCustomDictionary,
             CustomDictionaryTypeName: isCustomDictionary ? namedType.ToDisplayString().Split('<')[0] : null,
             InnerElementType: innerElementType,
-            InnerElementIsPrimitive: innerElementIsPrimitive);
+            InnerElementIsPrimitive: innerElementIsPrimitive,
+            KeyIsEnum: keyIsEnum,
+            ValueIsEnum: valueIsEnum);
     }
 
     /// <summary>
@@ -328,6 +336,11 @@ public static class StandaloneTypeAnalyzer
     private static bool IsPrimitiveType(string typeName)
     {
         return PrimitiveTypes.Contains(typeName);
+    }
+
+    private static bool IsEnumType(ITypeSymbol typeSymbol)
+    {
+        return typeSymbol.TypeKind == TypeKind.Enum;
     }
 
     private static string GetTargetNamespace(ITypeSymbol typeSymbol)

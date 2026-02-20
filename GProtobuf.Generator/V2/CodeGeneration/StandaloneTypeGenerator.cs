@@ -93,10 +93,20 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 // Primitive types: protobuf-net uses unpacked format [tag=0x08][value] for each element
                 _sb.AppendIndentedLine("var tag = reader.ReadVarUInt32();");
-                var expectedWireType = GetWireType(elementType);
-                _sb.AppendIndentedLine($"if ((tag & 0x07) != {expectedWireType}) throw new InvalidDataException($\"Expected wire type {expectedWireType}, got {{tag & 0x07}}\");");
-                var readExpr = GetPrimitiveReadExpression(elementType);
-                _sb.AppendIndentedLine($"list.Add({readExpr});");
+
+                if (info.ElementIsEnum)
+                {
+                    // Enums are serialized as varint (wire type 0)
+                    _sb.AppendIndentedLine("if ((tag & 0x07) != 0) throw new InvalidDataException($\"Expected wire type 0, got {tag & 0x07}\");");
+                    _sb.AppendIndentedLine($"list.Add(({GetGlobalTypeName(elementType)})reader.ReadVarInt32());");
+                }
+                else
+                {
+                    var expectedWireType = GetWireType(elementType);
+                    _sb.AppendIndentedLine($"if ((tag & 0x07) != {expectedWireType}) throw new InvalidDataException($\"Expected wire type {expectedWireType}, got {{tag & 0x07}}\");");
+                    var readExpr = GetPrimitiveReadExpression(elementType);
+                    _sb.AppendIndentedLine($"list.Add({readExpr});");
+                }
             }
             else
             {
@@ -264,8 +274,16 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
                 if (nestedInfo.ElementIsPrimitive)
                 {
-                    var readExpr = GetPrimitiveReadExpression(elementType);
-                    _sb.AppendIndentedLine($"_tempList_{varName}.Add({readExpr});");
+                    if (nestedInfo.ElementIsEnum)
+                    {
+                        // Enum - cast from int
+                        _sb.AppendIndentedLine($"_tempList_{varName}.Add(({globalElementType})reader.ReadVarInt32());");
+                    }
+                    else
+                    {
+                        var readExpr = GetPrimitiveReadExpression(elementType);
+                        _sb.AppendIndentedLine($"_tempList_{varName}.Add({readExpr});");
+                    }
                 }
                 else
                 {
@@ -281,8 +299,17 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 // For lists, add directly
                 if (nestedInfo.ElementIsPrimitive)
                 {
-                    var readExpr = GetPrimitiveReadExpression(elementType);
-                    _sb.AppendIndentedLine($"{varName}.Add({readExpr});");
+                    if (nestedInfo.ElementIsEnum)
+                    {
+                        // Enum - cast from int
+                        var globalElementType = GetGlobalTypeName(elementType);
+                        _sb.AppendIndentedLine($"{varName}.Add(({globalElementType})reader.ReadVarInt32());");
+                    }
+                    else
+                    {
+                        var readExpr = GetPrimitiveReadExpression(elementType);
+                        _sb.AppendIndentedLine($"{varName}.Add({readExpr});");
+                    }
                 }
                 else
                 {
@@ -510,7 +537,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine("var writer = new global::GProtobuf.Core.StreamWriter(stream, stackalloc byte[256]);");
             _sb.AppendIndentedLine($"foreach (var item in {varName})");
             _sb.StartNewBlock();
-            GenerateElementWrite(elementType, info.ElementIsPrimitive, "item", "writer", false);
+            GenerateElementWrite(elementType, info.ElementIsPrimitive, info.ElementIsEnum, "item", "writer", false);
             _sb.EndBlock();
             _sb.AppendIndentedLine("writer.Flush();");
             _sb.EndBlock();
@@ -522,31 +549,41 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine("var writer = new global::GProtobuf.Core.BufferWriter(buffer);");
             _sb.AppendIndentedLine($"foreach (var item in {varName})");
             _sb.StartNewBlock();
-            GenerateElementWrite(elementType, info.ElementIsPrimitive, "item", "writer", true);
+            GenerateElementWrite(elementType, info.ElementIsPrimitive, info.ElementIsEnum, "item", "writer", true);
             _sb.EndBlock();
             _sb.AppendIndentedLine("writer.Flush();");
             _sb.EndBlock();
             _sb.AppendNewLine();
         }
 
-        private void GenerateElementWrite(string elementType, bool isPrimitive, string varName, string writerName, bool isBufferWriter)
+        private void GenerateElementWrite(string elementType, bool isPrimitive, bool isEnum, string varName, string writerName, bool isBufferWriter)
         {
             if (isPrimitive)
             {
-                // Primitive types: [tag][value] for each element (unpacked format)
-                var wireType = GetWireType(elementType);
-                var tag = (1 << 3) | wireType; // field 1 + wire type
-                _sb.AppendIndentedLine($"{writerName}.WriteVarUInt32(0x{tag:X2}); // field 1, wire type {wireType}");
-
-                // For string, use WriteString which handles length prefix
-                if (elementType == "string" || elementType == "System.String")
+                if (isEnum)
                 {
-                    _sb.AppendIndentedLine($"{writerName}.WriteString({varName});");
+                    // Enums are serialized as varint (wire type 0)
+                    // tag 0x08 = field 1, wire type 0 (varint)
+                    _sb.AppendIndentedLine($"{writerName}.WriteVarUInt32(0x08); // field 1, wire type 0 (varint)");
+                    _sb.AppendIndentedLine($"{writerName}.WriteVarInt32((int){varName});");
                 }
                 else
                 {
-                    var writeExpr = GetPrimitiveWriteExpression(elementType, varName);
-                    _sb.AppendIndentedLine($"{writerName}.{writeExpr};");
+                    // Primitive types: [tag][value] for each element (unpacked format)
+                    var wireType = GetWireType(elementType);
+                    var tag = (1 << 3) | wireType; // field 1 + wire type
+                    _sb.AppendIndentedLine($"{writerName}.WriteVarUInt32(0x{tag:X2}); // field 1, wire type {wireType}");
+
+                    // For string, use WriteString which handles length prefix
+                    if (elementType == "string" || elementType == "System.String")
+                    {
+                        _sb.AppendIndentedLine($"{writerName}.WriteString({varName});");
+                    }
+                    else
+                    {
+                        var writeExpr = GetPrimitiveWriteExpression(elementType, varName);
+                        _sb.AppendIndentedLine($"{writerName}.{writeExpr};");
+                    }
                 }
             }
             else
@@ -672,9 +709,21 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             if (nestedInfo.ElementIsPrimitive)
             {
-                // For primitive elements, use LINQ (no ref params needed)
-                var elemSize = GetPrimitiveSizeExpression(elementType, "x");
-                _sb.AppendIndentedLine($"var _listContentSize_{safeVarName}_{fieldNumber} = {varName}.Sum(x => 1 + {elemSize});");
+                if (nestedInfo.ElementIsEnum)
+                {
+                    // For enum elements, use loop with cast to int
+                    _sb.AppendIndentedLine($"var _listContentSize_{safeVarName}_{fieldNumber} = 0;");
+                    _sb.AppendIndentedLine($"foreach (var _item_{safeVarName}_{fieldNumber} in {varName})");
+                    _sb.StartNewBlock();
+                    _sb.AppendIndentedLine($"_listContentSize_{safeVarName}_{fieldNumber} += 1 + global::GProtobuf.Core.Utils.GetVarintSize((uint)(int)_item_{safeVarName}_{fieldNumber});");
+                    _sb.EndBlock();
+                }
+                else
+                {
+                    // For primitive elements, use LINQ (no ref params needed)
+                    var elemSize = GetPrimitiveSizeExpression(elementType, "x");
+                    _sb.AppendIndentedLine($"var _listContentSize_{safeVarName}_{fieldNumber} = {varName}.Sum(x => 1 + {elemSize});");
+                }
             }
             else
             {
@@ -771,9 +820,17 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             if (nestedInfo.ElementIsPrimitive)
             {
-                var wireType = GetWireType(elementType);
-                var itemTag = (1 << 3) | wireType;
-                _sb.AppendIndentedLine($"listSize_{fieldNumber} += 1 + {GetPrimitiveSizeExpression(elementType, $"item_{fieldNumber}")};");
+                if (nestedInfo.ElementIsEnum)
+                {
+                    // For enum elements, cast to int for size calculation
+                    _sb.AppendIndentedLine($"listSize_{fieldNumber} += 1 + global::GProtobuf.Core.Utils.GetVarintSize((uint)(int)item_{fieldNumber});");
+                }
+                else
+                {
+                    var wireType = GetWireType(elementType);
+                    var itemTag = (1 << 3) | wireType;
+                    _sb.AppendIndentedLine($"listSize_{fieldNumber} += 1 + {GetPrimitiveSizeExpression(elementType, $"item_{fieldNumber}")};");
+                }
             }
             else
             {
@@ -794,18 +851,27 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             if (nestedInfo.ElementIsPrimitive)
             {
-                var wireType = GetWireType(elementType);
-                var itemTag = (1 << 3) | wireType;
-                _sb.AppendIndentedLine($"writer.WriteVarUInt32(0x{itemTag:X2}); // field 1, wire type {wireType}");
-
-                if (elementType == "string" || elementType == "System.String")
+                if (nestedInfo.ElementIsEnum)
                 {
-                    _sb.AppendIndentedLine($"writer.WriteString(item_{fieldNumber});");
+                    // For enum elements, write as varint (wire type 0)
+                    _sb.AppendIndentedLine($"writer.WriteVarUInt32(0x08); // field 1, wire type 0 (varint)");
+                    _sb.AppendIndentedLine($"writer.WriteVarInt32((int)item_{fieldNumber});");
                 }
                 else
                 {
-                    var writeExpr = GetPrimitiveWriteExpression(elementType, $"item_{fieldNumber}");
-                    _sb.AppendIndentedLine($"writer.{writeExpr};");
+                    var wireType = GetWireType(elementType);
+                    var itemTag = (1 << 3) | wireType;
+                    _sb.AppendIndentedLine($"writer.WriteVarUInt32(0x{itemTag:X2}); // field 1, wire type {wireType}");
+
+                    if (elementType == "string" || elementType == "System.String")
+                    {
+                        _sb.AppendIndentedLine($"writer.WriteString(item_{fieldNumber});");
+                    }
+                    else
+                    {
+                        var writeExpr = GetPrimitiveWriteExpression(elementType, $"item_{fieldNumber}");
+                        _sb.AppendIndentedLine($"writer.{writeExpr};");
+                    }
                 }
             }
             else

@@ -109,7 +109,22 @@ public sealed record StandaloneTypeInfo(
     /// <summary>
     /// Whether inner element type is primitive
     /// </summary>
-    bool InnerElementIsPrimitive = false);
+    bool InnerElementIsPrimitive = false,
+
+    /// <summary>
+    /// Whether the element type is an enum (for array/list types)
+    /// </summary>
+    bool ElementIsEnum = false,
+
+    /// <summary>
+    /// Whether the key type is an enum (for dictionary types)
+    /// </summary>
+    bool KeyIsEnum = false,
+
+    /// <summary>
+    /// Whether the value type is an enum (for dictionary types)
+    /// </summary>
+    bool ValueIsEnum = false);
 
 /// <summary>
 /// Kind of standalone type for serialization

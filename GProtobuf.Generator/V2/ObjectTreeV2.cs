@@ -269,12 +269,21 @@ namespace GProtobuf.Generator.V2
                 if (isReferenceType && canPopulate)
                 {
                     // Reference types with optional instance parameter - unified API
-                    // Deserialize(data) - creates new instance
+                    // Deserialize(data) - creates new instance (for method group compatibility)
                     // Deserialize(data, existingInstance) - populates existing instance
-                    sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(ReadOnlySpan<byte> data, global::{type.FullName} existingInstance = null)");
+
+                    // Simple overload for method group compatibility (Func<ReadOnlySpan<byte>, T>)
+                    sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(ReadOnlySpan<byte> data)");
                     sb.StartNewBlock();
                     sb.AppendIndentedLine("var reader = new SpanReader(data);");
+                    sb.AppendIndentedLine($"return SpanReaders.Read{className}(ref reader);");
+                    sb.EndBlock();
+                    sb.AppendNewLine();
 
+                    // Overload with existingInstance for populating existing objects
+                    sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(ReadOnlySpan<byte> data, global::{type.FullName} existingInstance)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine("var reader = new SpanReader(data);");
                     sb.AppendIndentedLine("if (!(existingInstance is null))");
                     sb.StartNewBlock();
                     sb.AppendIndentedLine($"SpanReaders.Populate{className}(ref reader, existingInstance);");
@@ -284,20 +293,40 @@ namespace GProtobuf.Generator.V2
                     sb.EndBlock();
                     sb.AppendNewLine();
 
-                    // byte[] overload with optional instance (expression body for compact code)
-                    sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(byte[] data, global::{type.FullName} existingInstance = null) => Deserialize{className}(new ReadOnlySpan<byte>(data), existingInstance);");
+                    // byte[] overload for method group compatibility
+                    sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(byte[] data) => Deserialize{className}(new ReadOnlySpan<byte>(data));");
                     sb.AppendNewLine();
 
-                    // Stream overload with optional instance (allocates default buffer)
-                    sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(Stream stream, global::{type.FullName} existingInstance = null)");
+                    // byte[] overload with existingInstance
+                    sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(byte[] data, global::{type.FullName} existingInstance) => Deserialize{className}(new ReadOnlySpan<byte>(data), existingInstance);");
+                    sb.AppendNewLine();
+
+                    // Stream overload (allocates default buffer)
+                    sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(Stream stream)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine("Span<byte> buffer = stackalloc byte[global::GProtobuf.Core.StreamReader.DefaultBufferSize];");
+                    sb.AppendIndentedLine($"return Deserialize{className}(stream, buffer);");
+                    sb.EndBlock();
+                    sb.AppendNewLine();
+
+                    // Stream overload with existingInstance
+                    sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(Stream stream, global::{type.FullName} existingInstance)");
                     sb.StartNewBlock();
                     sb.AppendIndentedLine("Span<byte> buffer = stackalloc byte[global::GProtobuf.Core.StreamReader.DefaultBufferSize];");
                     sb.AppendIndentedLine($"return Deserialize{className}(stream, buffer, existingInstance);");
                     sb.EndBlock();
                     sb.AppendNewLine();
 
-                    // Stream overload with buffer and optional instance
-                    sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(Stream stream, Span<byte> buffer, global::{type.FullName} existingInstance = null)");
+                    // Stream overload with buffer
+                    sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(Stream stream, Span<byte> buffer)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine("var reader = new global::GProtobuf.Core.StreamReader(stream, buffer);");
+                    sb.AppendIndentedLine($"return StreamReaders.Read{className}(ref reader);");
+                    sb.EndBlock();
+                    sb.AppendNewLine();
+
+                    // Stream overload with buffer and existingInstance
+                    sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(Stream stream, Span<byte> buffer, global::{type.FullName} existingInstance)");
                     sb.StartNewBlock();
                     sb.AppendIndentedLine("var reader = new global::GProtobuf.Core.StreamReader(stream, buffer);");
                     // Use 'is not null' pattern to avoid triggering custom == operator
