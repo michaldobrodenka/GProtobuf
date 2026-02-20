@@ -1397,6 +1397,14 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             else
             {
                 // Complex type - nested message
+                _sb.AppendIndentedLine("if (wireType != global::GProtobuf.Core.WireType.Len)");
+                _sb.AppendIndentedLine("{");
+                _sb.IncreaseIndent();
+                _sb.AppendIndentedLine("reader.SkipField(wireType);");
+                _sb.AppendIndentedLine("break;");
+                _sb.DecreaseIndent();
+                _sb.AppendIndentedLine("}");
+
                 var typeName = TypeNameHelper.GetClassName(member.Type);
                 _sb.AppendIndentedLine("var length = reader.ReadVarInt32();");
                 _sb.AppendIndentedLine("var nestedReader = new SpanReader(reader.GetSlice(length));");
