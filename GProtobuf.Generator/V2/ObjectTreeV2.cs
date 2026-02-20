@@ -154,26 +154,6 @@ namespace GProtobuf.Generator.V2
 
                 WriteHeader(sb, ns);
 
-                // Remember position after header to insert Tags class later
-                var insertPosition = sb.Length;
-
-                // Create TagsGenerator with separate StringBuilder (will be inserted at insertPosition)
-                var tagsSb = new StringBuilderWithIndent();
-                tagsSb.IndentLevel = sb.IndentLevel; // Match indentation
-                var tagsGenerator = new TagsGenerator(tagsSb);
-
-                try
-                {
-                    // Collect tags from base types first
-                    tagsGenerator.CollectTags(types);
-
-                    // Collect tags from ProtoInclude types that will have WriteContent methods generated
-                    tagsGenerator.CollectTagsFromProtoIncludes(types, _registry);
-                }
-                catch (System.Exception ex)
-                {
-                    throw new System.Exception($"Error collecting tags from base types for namespace '{ns}'", ex);
-                }
 
                 // Get standalone types for this namespace
                 var standaloneTypes = _standaloneTypesByNamespace.TryGetValue(ns, out var list) ? list : new List<StandaloneTypeInfo>();
@@ -260,26 +240,6 @@ namespace GProtobuf.Generator.V2
                     throw new System.Exception($"Error in KeyValueClassGenerator for namespace '{ns}'", ex);
                 }
 
-                try
-                {
-                    // Collect tags from virtual types (Map entries, Tuples) registered by generators
-                    tagsGenerator.CollectTagsFromMapEntries(virtualMapRegistry.GetAllTypes());
-                    tagsGenerator.CollectTagsFromTuples(virtualTupleRegistry.GetAllTypes());
-
-                    // Generate Tags class AFTER collecting all tags (base + virtual)
-                    tagsGenerator.Generate();
-
-                    // Insert Tags class at the beginning (after header, before other classes)
-                    if (tagsSb.Length > 0)
-                    {
-                        sb.Insert(insertPosition, tagsSb.ToString());
-                    }
-                }
-                catch (System.Exception ex)
-                {
-                    throw new System.Exception($"Error generating Tags class for namespace '{ns}'", ex);
-                }
-
                 WriteFooter(sb);
 
                 return ($"{ns}.Serialization.cs", sb.ToString());
@@ -324,11 +284,8 @@ namespace GProtobuf.Generator.V2
                     sb.EndBlock();
                     sb.AppendNewLine();
 
-                    // byte[] overload with optional instance
-                    sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(byte[] data, global::{type.FullName} existingInstance = null)");
-                    sb.StartNewBlock();
-                    sb.AppendIndentedLine($"return Deserialize{className}(new ReadOnlySpan<byte>(data), existingInstance);");
-                    sb.EndBlock();
+                    // byte[] overload with optional instance (expression body for compact code)
+                    sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(byte[] data, global::{type.FullName} existingInstance = null) => Deserialize{className}(new ReadOnlySpan<byte>(data), existingInstance);");
                     sb.AppendNewLine();
 
                     // Stream overload with optional instance (allocates default buffer)
@@ -362,11 +319,8 @@ namespace GProtobuf.Generator.V2
                     sb.EndBlock();
                     sb.AppendNewLine();
 
-                    // Deserialize method - byte[] overload for compatibility with Reflection
-                    sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(byte[] data)");
-                    sb.StartNewBlock();
-                    sb.AppendIndentedLine($"return Deserialize{className}(new ReadOnlySpan<byte>(data));");
-                    sb.EndBlock();
+                    // Deserialize method - byte[] overload (expression body)
+                    sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(byte[] data) => Deserialize{className}(new ReadOnlySpan<byte>(data));");
                     sb.AppendNewLine();
 
                     // Deserialize method - Stream overload (allocates default buffer)
@@ -399,11 +353,8 @@ namespace GProtobuf.Generator.V2
                     sb.EndBlock();
                     sb.AppendNewLine();
 
-                    // Populate method - byte[] overload for compatibility with Reflection
-                    sb.AppendIndentedLine($"public static void Populate{className}(byte[] data, global::{type.FullName} instance)");
-                    sb.StartNewBlock();
-                    sb.AppendIndentedLine($"Populate{className}(new ReadOnlySpan<byte>(data), instance);");
-                    sb.EndBlock();
+                    // Populate method - byte[] overload (expression body)
+                    sb.AppendIndentedLine($"public static void Populate{className}(byte[] data, global::{type.FullName} instance) => Populate{className}(new ReadOnlySpan<byte>(data), instance);");
                     sb.AppendNewLine();
 
                     // Populate method - Stream overload (allocates default buffer)

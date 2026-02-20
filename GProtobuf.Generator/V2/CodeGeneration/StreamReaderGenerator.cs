@@ -578,7 +578,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateFieldReadCase(ProtoMemberAttribute member, string nsPrefix)
         {
-            _sb.AppendIndentedLine($"case {member.FieldId}:");
             var category = GeneratorHelpers.GetFieldCategory(member, _primitiveHandler);
 
             bool needsBraces = category == FieldCategory.Map ||
@@ -589,12 +588,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             if (needsBraces)
             {
-                _sb.IncreaseIndent();
-                _sb.AppendIndentedLine("{");
+                _sb.AppendIndentedLine($"case {member.FieldId}: {{");
                 _sb.IncreaseIndent();
             }
             else
             {
+                _sb.AppendIndentedLine($"case {member.FieldId}:");
                 _sb.IncreaseIndent();
             }
 
@@ -633,7 +632,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 _sb.DecreaseIndent();
                 _sb.AppendIndentedLine("}");
-                _sb.DecreaseIndent();
             }
             else
             {
@@ -1516,9 +1514,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var derivedNs = _registry.GetNamespaceForType(include.Type);
             var derivedNsPrefix = GeneratorHelpers.GetNamespacePrefix(derivedNs, _currentNamespace);
 
-            _sb.AppendIndentedLine($"case {include.FieldId}:");
-            _sb.IncreaseIndent();
-            _sb.AppendIndentedLine("{");
+            _sb.AppendIndentedLine($"case {include.FieldId}: {{");
             _sb.IncreaseIndent();
 
             _sb.AppendIndentedLine("var length = reader.ReadVarInt32();");
@@ -1544,7 +1540,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             _sb.DecreaseIndent();
             _sb.AppendIndentedLine("}");
-            _sb.DecreaseIndent();
         }
 
         #endregion

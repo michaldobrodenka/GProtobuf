@@ -686,11 +686,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateSimpleWriteMethod(TypeDefinition type, string className)
         {
-            ForEachTypeMember(
-                type,
-                "instance",
-                (member, src) => GenerateFieldWrite(member, src),
-                (customMember, src) => GenerateCustomBufferFieldWrite(customMember, src));
+            // Delegate to WriteXContent to avoid code duplication
+            // For simple types (no ProtoIncludes, not derived), WriteX and WriteXContent are identical
+            _sb.AppendIndentedLine($"Write{className}Content(ref writer, instance);");
         }
 
         private void GenerateWriteMethodWithInheritance(TypeDefinition type, string className)

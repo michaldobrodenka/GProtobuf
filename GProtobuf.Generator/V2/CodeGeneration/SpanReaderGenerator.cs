@@ -320,25 +320,23 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         private void GenerateReadMethod(TypeDefinition type)
         {
             var className = TypeNameHelper.GetClassName(type.FullName);
-
-            _sb.AppendIndentedLine($"public static global::{type.FullName} Read{className}(ref SpanReader reader)");
-            _sb.StartNewBlock();
-
             bool hasInheritance = GeneratorHelpers.HasInheritance(type, _registry);
 
             if (!hasInheritance)
             {
-                // Simple case - no inheritance, delegate to Content method
-                _sb.AppendIndentedLine($"return Read{className}Content(ref reader);");
+                // Simple case - no inheritance, use expression body for compact code
+                _sb.AppendIndentedLine($"public static global::{type.FullName} Read{className}(ref SpanReader reader) => Read{className}Content(ref reader);");
+                _sb.AppendNewLine();
             }
             else
             {
                 // Complex case with inheritance - handle ProtoIncludes
+                _sb.AppendIndentedLine($"public static global::{type.FullName} Read{className}(ref SpanReader reader)");
+                _sb.StartNewBlock();
                 GenerateReadMethodWithInheritance(type, className);
+                _sb.EndBlock();
+                _sb.AppendNewLine();
             }
-
-            _sb.EndBlock();
-            _sb.AppendNewLine();
         }
 
         private void GenerateReadMethodWithInheritance(TypeDefinition type, string className)
@@ -577,9 +575,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         {
             var nestedReaderVar = $"nestedReader{nextLevelIndex}";
 
-            _sb.AppendIndentedLine($"case {include.FieldId}:");
-            _sb.IncreaseIndent();
-            _sb.AppendIndentedLine("{");
+            _sb.AppendIndentedLine($"case {include.FieldId}: {{");
             _sb.IncreaseIndent();
 
             _sb.AppendIndentedLine($"var length{nextLevelIndex} = {currentReaderVar}.ReadVarInt32();");
@@ -591,7 +587,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine("break;");
             _sb.DecreaseIndent();
             _sb.AppendIndentedLine("}");
-            _sb.DecreaseIndent();
         }
 
         /// <summary>
@@ -599,19 +594,17 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// </summary>
         private void GenerateFieldReadCaseForDerived(ProtoMemberAttribute member, string wireTypeVar, string readerVar)
         {
-            _sb.AppendIndentedLine($"case {member.FieldId}:");
-
             bool needsBraces = member.IsMap || member.IsCollection ||
                               (!member.IsEnum && !_primitiveHandler.CanHandle(member.Type));
 
             if (needsBraces)
             {
-                _sb.IncreaseIndent();
-                _sb.AppendIndentedLine("{");
+                _sb.AppendIndentedLine($"case {member.FieldId}: {{");
                 _sb.IncreaseIndent();
             }
             else
             {
+                _sb.AppendIndentedLine($"case {member.FieldId}:");
                 _sb.IncreaseIndent();
             }
 
@@ -663,7 +656,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 _sb.DecreaseIndent();
                 _sb.AppendIndentedLine("}");
-                _sb.DecreaseIndent();
             }
             else
             {
@@ -1346,20 +1338,18 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// </summary>
         private void GenerateFieldPopulateCase(ProtoMemberAttribute member)
         {
-            _sb.AppendIndentedLine($"case {member.FieldId}:");
-
             // Determine if we need braces for variable scoping
             bool needsBraces = member.IsMap || member.IsCollection ||
                               (!member.IsEnum && !_primitiveHandler.CanHandle(member.Type));
 
             if (needsBraces)
             {
-                _sb.IncreaseIndent();
-                _sb.AppendIndentedLine("{");
+                _sb.AppendIndentedLine($"case {member.FieldId}: {{");
                 _sb.IncreaseIndent();
             }
             else
             {
+                _sb.AppendIndentedLine($"case {member.FieldId}:");
                 _sb.IncreaseIndent();
             }
 
@@ -1417,7 +1407,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 _sb.DecreaseIndent();
                 _sb.AppendIndentedLine("}");
-                _sb.DecreaseIndent();
             }
             else
             {
@@ -1495,9 +1484,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// </summary>
         private void GenerateCustomBufferFieldReadCase(CustomBufferMember member, string objectName)
         {
-            _sb.AppendIndentedLine($"case {member.FieldId}:");
-            _sb.IncreaseIndent();
-            _sb.AppendIndentedLine("{");
+            _sb.AppendIndentedLine($"case {member.FieldId}: {{");
             _sb.IncreaseIndent();
 
             _sb.AppendIndentedLine($"// Custom buffer field {member.FieldId}");
@@ -1518,7 +1505,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine("break;");
             _sb.DecreaseIndent();
             _sb.AppendIndentedLine("}");
-            _sb.DecreaseIndent();
         }
 
         /// <summary>
@@ -1527,9 +1513,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// </summary>
         private void GenerateCustomBufferFieldPopulateCase(CustomBufferMember member)
         {
-            _sb.AppendIndentedLine($"case {member.FieldId}:");
-            _sb.IncreaseIndent();
-            _sb.AppendIndentedLine("{");
+            _sb.AppendIndentedLine($"case {member.FieldId}: {{");
             _sb.IncreaseIndent();
 
             _sb.AppendIndentedLine($"// Custom buffer field {member.FieldId}");
@@ -1550,7 +1534,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine("break;");
             _sb.DecreaseIndent();
             _sb.AppendIndentedLine("}");
-            _sb.DecreaseIndent();
         }
 
         #endregion
@@ -1610,9 +1593,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// </summary>
         private void GenerateFieldReadCaseWithLazyInit(ProtoMemberAttribute member, string lazyInit)
         {
-            _sb.AppendIndentedLine($"case {member.FieldId}:");
-            _sb.IncreaseIndent();
-            _sb.AppendIndentedLine("{");
+            _sb.AppendIndentedLine($"case {member.FieldId}: {{");
             _sb.IncreaseIndent();
 
             GenerateWireTypeValidation(member);
@@ -1664,7 +1645,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine("break;");
             _sb.DecreaseIndent();
             _sb.AppendIndentedLine("}");
-            _sb.DecreaseIndent();
         }
 
         /// <summary>
@@ -1672,7 +1652,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// </summary>
         private void GenerateFieldReadCase(ProtoMemberAttribute member)
         {
-            _sb.AppendIndentedLine($"case {member.FieldId}:");
             var category = GeneratorHelpers.GetFieldCategory(member, _primitiveHandler);
 
             // Determine if we need braces for variable scoping
@@ -1684,12 +1663,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             if (needsBraces)
             {
-                _sb.IncreaseIndent();
-                _sb.AppendIndentedLine("{");
+                _sb.AppendIndentedLine($"case {member.FieldId}: {{");
                 _sb.IncreaseIndent();
             }
             else
             {
+                _sb.AppendIndentedLine($"case {member.FieldId}:");
                 _sb.IncreaseIndent();
             }
 
@@ -1733,7 +1712,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 _sb.DecreaseIndent();
                 _sb.AppendIndentedLine("}");
-                _sb.DecreaseIndent();
             }
             else
             {
@@ -1745,9 +1723,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         {
             var derivedClassName = TypeNameHelper.GetClassName(include.Type);
 
-            _sb.AppendIndentedLine($"case {include.FieldId}:");
-            _sb.IncreaseIndent();
-            _sb.AppendIndentedLine("{");
+            _sb.AppendIndentedLine($"case {include.FieldId}: {{");
             _sb.IncreaseIndent();
 
             // ProtoInclude always expects WireType.Len
@@ -1784,7 +1760,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             _sb.DecreaseIndent();
             _sb.AppendIndentedLine("}");
-            _sb.DecreaseIndent();
         }
 
         // Body versions for switch case (without continue/break - those are added by GenerateFieldReadCase)
