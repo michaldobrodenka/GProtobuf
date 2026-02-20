@@ -995,13 +995,19 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
                 var simpleName = Helpers.TypeNameHelper.GetClassName(member.Type);
 
+                // Derived types need Read{TypeName} (handles ProtoInclude wrapper)
+                // Non-derived types need Read{TypeName}Content (reads fields directly)
+                var parentType = _registry.GetParent(member.Type);
+                bool isDerivedType = !string.IsNullOrEmpty(parentType);
+                string methodSuffix = isDerivedType ? "" : "Content";
+
                 if (member.Namespace == _currentNamespace || string.IsNullOrEmpty(member.Namespace))
                 {
-                    _sb.AppendIndentedLine($"{targetVariable} = SpanReaders.Read{simpleName}Content(ref nestedReader);");
+                    _sb.AppendIndentedLine($"{targetVariable} = SpanReaders.Read{simpleName}{methodSuffix}(ref nestedReader);");
                 }
                 else
                 {
-                    _sb.AppendIndentedLine($"{targetVariable} = global::{member.Namespace}.Serialization.SpanReaders.Read{simpleName}Content(ref nestedReader);");
+                    _sb.AppendIndentedLine($"{targetVariable} = global::{member.Namespace}.Serialization.SpanReaders.Read{simpleName}{methodSuffix}(ref nestedReader);");
                 }
             }
 
@@ -1398,7 +1404,14 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 // Check if type is from different namespace and qualify the call
                 var typeNamespace = _registry.GetNamespaceForType(member.Type);
                 var nsPrefix = GeneratorHelpers.GetNamespacePrefix(typeNamespace, _currentNamespace);
-                _sb.AppendIndentedLine($"instance.{member.Name} = {nsPrefix}SpanReaders.Read{typeName}Content(ref nestedReader);");
+
+                // Derived types need Read{TypeName} (handles ProtoInclude wrapper)
+                // Non-derived types need Read{TypeName}Content (reads fields directly)
+                var parentType = _registry.GetParent(member.Type);
+                bool isDerivedType = !string.IsNullOrEmpty(parentType);
+                string methodSuffix = isDerivedType ? "" : "Content";
+
+                _sb.AppendIndentedLine($"instance.{member.Name} = {nsPrefix}SpanReaders.Read{typeName}{methodSuffix}(ref nestedReader);");
             }
 
             _sb.AppendIndentedLine("break;");

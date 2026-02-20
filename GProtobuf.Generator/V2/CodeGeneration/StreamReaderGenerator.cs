@@ -474,7 +474,13 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                         var typeNs = _registry?.GetNamespaceForType(member.Type) ?? string.Empty;
                         var typeNsPrefix = GeneratorHelpers.GetNamespacePrefix(typeNs, _currentNamespace);
 
-                        _sb.AppendIndentedLine($"{targetVariable} = {typeNsPrefix}SpanReaders.Read{simpleName}Content(ref nestedReader);");
+                        // Derived types need Read{TypeName} (handles ProtoInclude wrapper)
+                        // Non-derived types need Read{TypeName}Content (reads fields directly)
+                        var parentType = _registry?.GetParent(member.Type);
+                        bool isDerivedType = !string.IsNullOrEmpty(parentType);
+                        string methodSuffix = isDerivedType ? "" : "Content";
+
+                        _sb.AppendIndentedLine($"{targetVariable} = {typeNsPrefix}SpanReaders.Read{simpleName}{methodSuffix}(ref nestedReader);");
                     }
                     break;
             }
@@ -1480,7 +1486,15 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var elementNs = _registry.GetNamespaceForType(member.CollectionElementType);
             var elementNsPrefix = GeneratorHelpers.GetNamespacePrefix(elementNs, _currentNamespace);
 
-            _sb.AppendIndentedLine($"{targetCollection}.Add({elementNsPrefix}SpanReaders.Read{elementClassName}Content(ref itemReader));");
+            // Check if element type is polymorphic (derived type with parent, or base type with children)
+            // Polymorphic types need Read{ClassName} (handles ProtoInclude wrapper)
+            // Non-polymorphic types need Read{ClassName}Content (reads fields directly)
+            var parentType = _registry.GetParent(member.CollectionElementType);
+            var derivedTypes = _registry.GetAllDerivedTypes(member.CollectionElementType);
+            bool isPolymorphic = !string.IsNullOrEmpty(parentType) || derivedTypes.Count > 0;
+            string methodSuffix = isPolymorphic ? "" : "Content";
+
+            _sb.AppendIndentedLine($"{targetCollection}.Add({elementNsPrefix}SpanReaders.Read{elementClassName}{methodSuffix}(ref itemReader));");
         }
 
         private void GenerateTupleFieldReadBody(ProtoMemberAttribute member, string nsPrefix)
@@ -1504,8 +1518,14 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var typeNamespace = _registry.GetNamespaceForType(member.Type);
             var typeNsPrefix = GeneratorHelpers.GetNamespacePrefix(typeNamespace, _currentNamespace);
 
+            // Derived types need Read{TypeName} (handles ProtoInclude wrapper)
+            // Non-derived types need Read{TypeName}Content (reads fields directly)
+            var parentType = _registry.GetParent(member.Type);
+            bool isDerivedType = !string.IsNullOrEmpty(parentType);
+            string methodSuffix = isDerivedType ? "" : "Content";
+
             // Use SpanReaders for nested content (CreateSubReader returns SpanReader)
-            _sb.AppendIndentedLine($"result.{member.Name} = {typeNsPrefix}SpanReaders.Read{typeName}Content(ref nestedReader);");
+            _sb.AppendIndentedLine($"result.{member.Name} = {typeNsPrefix}SpanReaders.Read{typeName}{methodSuffix}(ref nestedReader);");
         }
 
         private void GenerateProtoIncludeReadCase(TypeDefinition parentType, ProtoIncludeAttribute include, string nsPrefix)
