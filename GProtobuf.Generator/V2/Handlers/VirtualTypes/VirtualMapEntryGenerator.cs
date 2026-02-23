@@ -1286,7 +1286,14 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 return $"new global::System.Collections.Generic.HashSet<{elemType}>()";
             }
 
-            // For primitives, strings, and custom types, use default
+            // For strings, use ""
+            var normalized = TypeMapping.NormalizeTypeName(typeName);
+            if (normalized == "System.String" || normalized == "string")
+            {
+                return "\"\"";
+            }
+
+            // For primitives and custom types, use default
             return "default";
         }
 

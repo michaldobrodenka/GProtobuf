@@ -993,19 +993,13 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
                 var simpleName = Helpers.TypeNameHelper.GetClassName(member.Type);
 
-                // Derived types need Read{TypeName} (handles ProtoInclude wrapper)
-                // Non-derived types need Read{TypeName}Content (reads fields directly)
-                var parentType = _registry.GetParent(member.Type);
-                bool isDerivedType = !string.IsNullOrEmpty(parentType);
-                string methodSuffix = isDerivedType ? "" : "Content";
-
                 if (member.Namespace == _currentNamespace || string.IsNullOrEmpty(member.Namespace))
                 {
-                    _sb.AppendIndentedLine($"{targetVariable} = SpanReaders.Read{simpleName}{methodSuffix}(ref nestedReader);");
+                    _sb.AppendIndentedLine($"{targetVariable} = SpanReaders.Read{simpleName}Content(ref nestedReader);");
                 }
                 else
                 {
-                    _sb.AppendIndentedLine($"{targetVariable} = global::{member.Namespace}.Serialization.SpanReaders.Read{simpleName}{methodSuffix}(ref nestedReader);");
+                    _sb.AppendIndentedLine($"{targetVariable} = global::{member.Namespace}.Serialization.SpanReaders.Read{simpleName}Content(ref nestedReader);");
                 }
             }
 
@@ -1229,13 +1223,309 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
             else
             {
-                // For types with inheritance, populate is more complex
-                // For now, just populate own fields
-                GenerateSimplePopulate(type, className);
+                // Check if this is a ProtoInclude derived type (has parent with ProtoInclude)
+                bool isProtoIncludeDerived = _registry.IsDerivedType(type.FullName);
+
+                if (isProtoIncludeDerived)
+                {
+                    // For ProtoInclude derived types, need to handle:
+                    // 1. Base class fields (e.g., field 1, 2, 3)
+                    // 2. ProtoInclude wrapper field (e.g., field 100) containing derived fields
+                    GeneratePopulateWithProtoInclude(type, className);
+                }
+                else
+                {
+                    // Flat inheritance or base type with ProtoIncludes - use simple populate
+                    GenerateSimplePopulate(type, className);
+                }
             }
 
             _sb.EndBlock();
             _sb.AppendNewLine();
+        }
+
+        /// <summary>
+        /// Generates Populate method for ProtoInclude derived types.
+        /// Handles base class fields and ProtoInclude wrapper containing derived fields.
+        /// </summary>
+        private void GeneratePopulateWithProtoInclude(TypeDefinition type, string className)
+        {
+            // Get parent type info
+            var parentTypeName = _registry.GetParent(type.FullName);
+            var parentType = _registry.GetByFullName(parentTypeName);
+
+            // Get ProtoInclude field id for this derived type
+            var protoIncludeFieldId = _registry.GetProtoIncludeFieldId(type.FullName);
+
+            if (parentType == null || protoIncludeFieldId == null)
+            {
+                // Fallback to simple populate if we can't find parent info
+                GenerateSimplePopulate(type, className);
+                return;
+            }
+
+            // Collect fields needing temp lists from both base and derived
+            var allFields = new List<ProtoMemberAttribute>();
+            if (parentType.ProtoMembers != null)
+                allFields.AddRange(parentType.ProtoMembers);
+            if (type.ProtoMembers != null)
+                allFields.AddRange(type.ProtoMembers);
+
+            var fieldsNeedingTempList = allFields
+                .Where(m => m.IsCollection && (
+                    m.CollectionKind == CollectionKind.Array ||
+                    (m.CollectionKind == CollectionKind.InterfaceCollection && m.Type != null &&
+                     TypeMapping.NormalizeTypeName(m.Type).StartsWith("System.Collections.Generic.IEnumerable<") &&
+                     !m.Type.Contains("ICollection") &&
+                     !m.Type.Contains("IList"))
+                ))
+                .ToList();
+
+            if (fieldsNeedingTempList.Count > 0)
+            {
+                foreach (var member in fieldsNeedingTempList)
+                {
+                    var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType);
+                    _sb.AppendIndentedLine($"global::System.Collections.Generic.List<{elementType}> _tempList_{member.Name} = null;");
+                }
+                _sb.AppendNewLine();
+            }
+
+            // Read loop
+            _sb.AppendIndentedLine("while (!reader.IsEnd)");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine("reader.ReadWireTypeAndFieldId(out var wireType, out var fieldId);");
+            _sb.AppendNewLine();
+
+            _sb.AppendIndentedLine("switch (fieldId)");
+            _sb.StartNewBlock();
+
+            // Generate cases for base class fields
+            if (parentType.ProtoMembers != null && parentType.ProtoMembers.Count > 0)
+            {
+                _sb.AppendIndentedLine($"// Base class fields from {parentTypeName}");
+                foreach (var member in parentType.ProtoMembers)
+                {
+                    GenerateFieldPopulateCase(member);
+                }
+            }
+
+            // Generate case for ProtoInclude wrapper field containing derived class fields
+            _sb.AppendIndentedLine($"// ProtoInclude wrapper field {protoIncludeFieldId} containing derived class fields");
+            _sb.AppendIndentedLine($"case {protoIncludeFieldId}: {{");
+            _sb.IncreaseIndent();
+
+            _sb.AppendIndentedLine("var protoIncludeLength = reader.ReadVarInt32();");
+            _sb.AppendIndentedLine("var protoIncludeReader = new SpanReader(reader.GetSlice(protoIncludeLength));");
+            _sb.AppendNewLine();
+
+            // Read derived fields from nested reader
+            _sb.AppendIndentedLine("while (!protoIncludeReader.IsEnd)");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine("protoIncludeReader.ReadWireTypeAndFieldId(out var derivedWireType, out var derivedFieldId);");
+            _sb.AppendNewLine();
+
+            if (type.ProtoMembers != null && type.ProtoMembers.Count > 0)
+            {
+                _sb.AppendIndentedLine("switch (derivedFieldId)");
+                _sb.StartNewBlock();
+
+                foreach (var member in type.ProtoMembers)
+                {
+                    GenerateFieldPopulateCaseWithReader(member, "protoIncludeReader", "derivedWireType");
+                }
+
+                // Default - skip unknown fields
+                _sb.AppendIndentedLine("default:");
+                _sb.IncreaseIndent();
+                _sb.AppendIndentedLine("protoIncludeReader.SkipField(derivedWireType);");
+                _sb.AppendIndentedLine("break;");
+                _sb.DecreaseIndent();
+
+                _sb.EndBlock(); // switch
+            }
+            else
+            {
+                _sb.AppendIndentedLine("protoIncludeReader.SkipField(derivedWireType);");
+            }
+
+            _sb.EndBlock(); // while protoIncludeReader
+
+            _sb.AppendIndentedLine("break;");
+            _sb.DecreaseIndent();
+            _sb.AppendIndentedLine("}");
+
+            // Default - skip unknown fields
+            _sb.AppendIndentedLine("default:");
+            _sb.IncreaseIndent();
+            _sb.AppendIndentedLine("reader.SkipField(wireType);");
+            _sb.AppendIndentedLine("break;");
+            _sb.DecreaseIndent();
+
+            _sb.EndBlock(); // switch
+            _sb.EndBlock(); // while reader
+
+            // Convert temp lists to arrays or assign to IEnumerable properties
+            if (fieldsNeedingTempList.Count > 0)
+            {
+                _sb.AppendNewLine();
+                foreach (var member in fieldsNeedingTempList)
+                {
+                    _sb.AppendIndentedLine($"if (_tempList_{member.Name} != null)");
+                    _sb.StartNewBlock();
+
+                    if (member.CollectionKind == CollectionKind.Array)
+                    {
+                        _sb.AppendIndentedLine($"instance.{member.Name} = _tempList_{member.Name}.ToArray();");
+                    }
+                    else
+                    {
+                        _sb.AppendIndentedLine($"instance.{member.Name} = _tempList_{member.Name};");
+                    }
+
+                    _sb.EndBlock();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Generates field populate case using a custom reader variable name.
+        /// Used for nested reading in ProtoInclude scenarios.
+        /// </summary>
+        private void GenerateFieldPopulateCaseWithReader(ProtoMemberAttribute member, string readerVar, string wireTypeVar)
+        {
+            // Determine if we need braces for variable scoping
+            bool needsBraces = member.IsMap || member.IsCollection ||
+                              (!member.IsEnum && !_primitiveHandler.CanHandle(member.Type));
+
+            if (needsBraces)
+            {
+                _sb.AppendIndentedLine($"case {member.FieldId}: {{");
+                _sb.IncreaseIndent();
+            }
+            else
+            {
+                _sb.AppendIndentedLine($"case {member.FieldId}:");
+                _sb.IncreaseIndent();
+            }
+
+            // Route to appropriate handler based on field type
+            if (member.IsMap)
+            {
+                var mapHandler = new MapHandler(_sb, _virtualMapRegistry, "SpanReaders", _registry);
+                mapHandler.GenerateRead(member, $"instance.{member.Name}", readerVar);
+            }
+            else if (member.IsCollection)
+            {
+                GenerateCollectionFieldPopulateBodyWithReader(member, readerVar, wireTypeVar);
+            }
+            else if (member.IsEnum)
+            {
+                _sb.AppendIndentedLine($"instance.{member.Name} = (global::{member.Type}){readerVar}.ReadVarInt32();");
+            }
+            else if (TupleHandler.IsTupleType(member.Type))
+            {
+                _tupleHandler.GenerateTupleRead($"instance.{member.Name}", member.Type, readerVar);
+            }
+            else if (_primitiveHandler.CanHandle(member.Type))
+            {
+                _primitiveHandler.GenerateRead(_sb, $"instance.{member.Name}", member.Type, member.DataFormat, readerVar, wireTypeVar);
+            }
+            else if (member.IsProtoVarint)
+            {
+                ProtoVarintTypeSupport.GenerateRead(_sb, member, $"instance.{member.Name}", readerVar);
+            }
+            else if (TypeMapping.IsUnsupportedType(member.Type))
+            {
+                _sb.AppendIndentedLine($"// WARNING: Field '{member.Name}' with type '{member.Type}' is unsupported and will be skipped");
+                _sb.AppendIndentedLine($"{readerVar}.SkipField({wireTypeVar});");
+            }
+            else
+            {
+                // Complex type - nested message
+                var typeName = TypeNameHelper.GetClassName(member.Type);
+                _sb.AppendIndentedLine($"var complexLen_{member.FieldId} = {readerVar}.ReadVarInt32();");
+                _sb.AppendIndentedLine($"var complexReader_{member.FieldId} = new SpanReader({readerVar}.GetSlice(complexLen_{member.FieldId}));");
+
+                var typeNamespace = _registry.GetNamespaceForType(member.Type);
+                var nsPrefix = GeneratorHelpers.GetNamespacePrefix(typeNamespace, _currentNamespace);
+                _sb.AppendIndentedLine($"instance.{member.Name} = {nsPrefix}SpanReaders.Read{typeName}Content(ref complexReader_{member.FieldId});");
+            }
+
+            _sb.AppendIndentedLine("break;");
+
+            if (needsBraces)
+            {
+                _sb.DecreaseIndent();
+                _sb.AppendIndentedLine("}");
+            }
+            else
+            {
+                _sb.DecreaseIndent();
+            }
+        }
+
+        /// <summary>
+        /// Generates collection field populate body using a custom reader variable.
+        /// </summary>
+        private void GenerateCollectionFieldPopulateBodyWithReader(ProtoMemberAttribute member, string readerVar, string wireTypeVar)
+        {
+            var normalizedType = TypeMapping.NormalizeTypeName(member.CollectionElementType);
+            bool isEnumCollection = _registry != null && (_registry.IsEnum(member.CollectionElementType) || _registry.IsEnum(normalizedType));
+
+            if (_primitiveHandler.CanHandleCollection(member.CollectionElementType) || isEnumCollection)
+            {
+                bool shouldBePacked = member.IsPacked;
+
+                if (shouldBePacked)
+                {
+                    _primitiveHandler.GenerateDualModePackedArrayRead(
+                        _sb,
+                        $"instance.{member.Name}",
+                        member.CollectionElementType,
+                        member.DataFormat,
+                        member.CollectionKind,
+                        member.Type,
+                        wireTypeVar,
+                        readerVar);
+                }
+                else
+                {
+                    var fieldIdVar = wireTypeVar.Replace("wireType", "fieldId").Replace("WireType", "FieldId");
+                    _primitiveHandler.GenerateNonPackedArrayRead(
+                        _sb,
+                        $"instance.{member.Name}",
+                        member.CollectionElementType,
+                        member.DataFormat,
+                        member.FieldId,
+                        member.CollectionKind,
+                        member.Type,
+                        readerVar,
+                        wireTypeVar,
+                        fieldIdVar);
+                }
+            }
+            else if (TupleHandler.IsTupleType(member.CollectionElementType))
+            {
+                _tupleHandler.GenerateTupleCollectionRead(
+                    $"instance.{member.Name}",
+                    member.CollectionElementType,
+                    member.FieldId,
+                    member.CollectionKind,
+                    member.Type,
+                    readerVar);
+            }
+            else
+            {
+                var elementClassName = TypeNameHelper.GetClassName(member.CollectionElementType);
+                _collectionHandler.GenerateComplexCollectionRead(
+                    $"instance.{member.Name}",
+                    member.CollectionElementType,
+                    elementClassName,
+                    member.CollectionKind,
+                    member.Type,
+                    readerVar);
+            }
         }
 
         private void GenerateSimplePopulate(TypeDefinition type, string className)
@@ -1395,14 +1685,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             else
             {
                 // Complex type - nested message
-                _sb.AppendIndentedLine("if (wireType != global::GProtobuf.Core.WireType.Len)");
-                _sb.AppendIndentedLine("{");
-                _sb.IncreaseIndent();
-                _sb.AppendIndentedLine("reader.SkipField(wireType);");
-                _sb.AppendIndentedLine("break;");
-                _sb.DecreaseIndent();
-                _sb.AppendIndentedLine("}");
-
                 var typeName = TypeNameHelper.GetClassName(member.Type);
                 _sb.AppendIndentedLine("var length = reader.ReadVarInt32();");
                 _sb.AppendIndentedLine("var nestedReader = new SpanReader(reader.GetSlice(length));");
@@ -1410,14 +1692,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 // Check if type is from different namespace and qualify the call
                 var typeNamespace = _registry.GetNamespaceForType(member.Type);
                 var nsPrefix = GeneratorHelpers.GetNamespacePrefix(typeNamespace, _currentNamespace);
-
-                // Derived types need Read{TypeName} (handles ProtoInclude wrapper)
-                // Non-derived types need Read{TypeName}Content (reads fields directly)
-                var parentType = _registry.GetParent(member.Type);
-                bool isDerivedType = !string.IsNullOrEmpty(parentType);
-                string methodSuffix = isDerivedType ? "" : "Content";
-
-                _sb.AppendIndentedLine($"instance.{member.Name} = {nsPrefix}SpanReaders.Read{typeName}{methodSuffix}(ref nestedReader);");
+                _sb.AppendIndentedLine($"instance.{member.Name} = {nsPrefix}SpanReaders.Read{typeName}Content(ref nestedReader);");
             }
 
             _sb.AppendIndentedLine("break;");

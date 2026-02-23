@@ -220,8 +220,10 @@ namespace GProtobuf.Generator.V2.Handlers
             _sb.AppendIndentedLine($"var entryEnd = {readerVar}.Position + (int)entryLength;");
 
             // Initialize key/value with defaults
-            _sb.AppendIndentedLine($"{keyType} key = default;");
-            _sb.AppendIndentedLine($"{valueType} value = default;");
+            var keyDefault = GetDefaultValueForType(keyType);
+            var valueDefault = GetDefaultValueForType(valueType);
+            _sb.AppendIndentedLine($"{keyType} key = {keyDefault};");
+            _sb.AppendIndentedLine($"{valueType} value = {valueDefault};");
 
             // Read entry fields
             _sb.AppendIndentedLine($"while ({readerVar}.Position < entryEnd)");
@@ -971,6 +973,20 @@ namespace GProtobuf.Generator.V2.Handlers
             var valueName = VirtualTypeNameGenerator.GetSafeTypeName(mapInfo.ValueType);
 
             return $"KeyValue_{keyName}_{valueName}";
+        }
+
+        /// <summary>
+        /// Returns the appropriate default value for a type.
+        /// String uses "" for protobuf-net 2.3.7 compatibility (protobuf spec default is empty string).
+        /// </summary>
+        private static string GetDefaultValueForType(string typeName)
+        {
+            var normalized = TypeMapping.NormalizeTypeName(typeName);
+            if (normalized == "System.String" || normalized == "string")
+            {
+                return "\"\"";
+            }
+            return "default";
         }
 
         #endregion
