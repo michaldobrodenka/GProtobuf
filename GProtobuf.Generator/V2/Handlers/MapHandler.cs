@@ -51,19 +51,29 @@ namespace GProtobuf.Generator.V2.Handlers
         /// Checks if a dictionary value type needs null checking.
         /// Returns true if null check should be generated, false otherwise.
         /// </summary>
-        private bool NeedsNullCheck(string valueType)
+        private bool NeedsNullCheck(string valueType, bool isEnum = false)
         {
+            // Enums are value types, never need null check
+            if (isEnum)
+                return false;
+
             // Primitives and arrays never need null check
             if (TypeHelper.IsPrimitiveType(valueType) || valueType.EndsWith("[]"))
                 return false;
 
-            // If we have TypeRegistry, check if it's a non-nullable struct
+            // If we have TypeRegistry, check if it's a non-nullable struct or enum
             if (_typeRegistry != null)
             {
                 var typeDef = _typeRegistry.GetByFullName(valueType);
                 if (typeDef != null && typeDef.IsStruct)
                 {
                     // Non-nullable struct doesn't need null check
+                    return false;
+                }
+
+                // Check if it's an enum type
+                if (_typeRegistry.IsEnum(valueType))
+                {
                     return false;
                 }
             }
@@ -505,8 +515,8 @@ namespace GProtobuf.Generator.V2.Handlers
             _sb.AppendIndentedLine($"foreach (var kvp in {sourceVar})");
             _sb.StartNewBlock();
 
-            // Skip null values for reference types (but not for non-nullable structs)
-            if (NeedsNullCheck(member.MapValueType))
+            // Skip null values for reference types (but not for non-nullable structs or enums)
+            if (NeedsNullCheck(member.MapValueType, member.MapValueIsEnum))
             {
                 _sb.AppendIndentedLine("if (kvp.Value == null) continue;");
             }
@@ -551,8 +561,8 @@ namespace GProtobuf.Generator.V2.Handlers
             _sb.AppendIndentedLine($"foreach (var kvp in {sourceVar})");
             _sb.StartNewBlock();
 
-            // Skip null values for reference types (but not for non-nullable structs)
-            if (NeedsNullCheck(valueType))
+            // Skip null values for reference types (but not for non-nullable structs or enums)
+            if (NeedsNullCheck(valueType, member.MapValueIsEnum))
             {
                 _sb.AppendIndentedLine("if (kvp.Value == null) continue;");
             }
@@ -774,8 +784,8 @@ namespace GProtobuf.Generator.V2.Handlers
             _sb.AppendIndentedLine($"foreach (var kvp in {sourceVar})");
             _sb.StartNewBlock();
 
-            // Skip null values for reference types (but not for non-nullable structs)
-            if (NeedsNullCheck(member.MapValueType))
+            // Skip null values for reference types (but not for non-nullable structs or enums)
+            if (NeedsNullCheck(member.MapValueType, member.MapValueIsEnum))
             {
                 _sb.AppendIndentedLine("if (kvp.Value == null) continue;");
             }
@@ -810,8 +820,8 @@ namespace GProtobuf.Generator.V2.Handlers
             _sb.AppendIndentedLine($"foreach (var kvp in {sourceVar})");
             _sb.StartNewBlock();
 
-            // Skip null values for reference types (but not for non-nullable structs)
-            if (NeedsNullCheck(valueType))
+            // Skip null values for reference types (but not for non-nullable structs or enums)
+            if (NeedsNullCheck(valueType, member.MapValueIsEnum))
             {
                 _sb.AppendIndentedLine("if (kvp.Value == null) continue;");
             }

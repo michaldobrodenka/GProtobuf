@@ -468,6 +468,7 @@ namespace GProtobuf.Generator.V2
             sb.AppendIndentedLine("using GProtobuf.Core;");
             sb.AppendIndentedLine("using System;");
             sb.AppendIndentedLine("using System.Collections.Generic;");
+            sb.AppendIndentedLine("using System.Linq;");
             sb.AppendIndentedLine("using System.IO;");
             sb.AppendIndentedLine("using System.Buffers;");
             sb.AppendIndentedLine("using System.Text;");

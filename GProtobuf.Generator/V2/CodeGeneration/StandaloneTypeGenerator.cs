@@ -96,9 +96,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
                 if (info.ElementIsEnum)
                 {
-                    // Enums are serialized as varint (wire type 0)
-                    _sb.AppendIndentedLine("if ((tag & 0x07) != 0) throw new InvalidDataException($\"Expected wire type 0, got {tag & 0x07}\");");
-                    _sb.AppendIndentedLine($"list.Add(({GetGlobalTypeName(elementType)})reader.ReadVarInt32());");
+                    // Enums are serialized as varints (wire type 0)
+                    _sb.AppendIndentedLine("if ((tag & 0x07) != 0) throw new InvalidDataException($\"Expected wire type 0 for enum, got {tag & 0x07}\");");
+                    _sb.AppendIndentedLine($"list.Add((global::{elementType})reader.ReadVarInt32());");
                 }
                 else
                 {
@@ -276,8 +276,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 {
                     if (nestedInfo.ElementIsEnum)
                     {
-                        // Enum - cast from int
-                        _sb.AppendIndentedLine($"_tempList_{varName}.Add(({globalElementType})reader.ReadVarInt32());");
+                        // Enum element - read as varint and cast
+                        _sb.AppendIndentedLine($"_tempList_{varName}.Add((global::{elementType})reader.ReadVarInt32());");
                     }
                     else
                     {
@@ -301,9 +301,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 {
                     if (nestedInfo.ElementIsEnum)
                     {
-                        // Enum - cast from int
-                        var globalElementType = GetGlobalTypeName(elementType);
-                        _sb.AppendIndentedLine($"{varName}.Add(({globalElementType})reader.ReadVarInt32());");
+                        // Enum element - read as varint and cast
+                        _sb.AppendIndentedLine($"{varName}.Add((global::{elementType})reader.ReadVarInt32());");
                     }
                     else
                     {
@@ -373,9 +372,17 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             if (nestedInfo.ElementIsPrimitive)
             {
-                // Primitive element
-                var readExpr = GetPrimitiveReadExpression(elementType);
-                _sb.AppendIndentedLine($"{varName}.Add({readExpr});");
+                if (nestedInfo.ElementIsEnum)
+                {
+                    // Enum element - read as varint and cast
+                    _sb.AppendIndentedLine($"{varName}.Add((global::{elementType})reader.ReadVarInt32());");
+                }
+                else
+                {
+                    // Primitive element
+                    var readExpr = GetPrimitiveReadExpression(elementType);
+                    _sb.AppendIndentedLine($"{varName}.Add({readExpr});");
+                }
             }
             else
             {
@@ -407,9 +414,17 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             if (nestedInfo.ElementIsPrimitive)
             {
-                // Primitive element
-                var readExpr = GetPrimitiveReadExpression(elementType);
-                _sb.AppendIndentedLine($"tempList_{varName}.Add({readExpr});");
+                if (nestedInfo.ElementIsEnum)
+                {
+                    // Enum element - read as varint and cast
+                    _sb.AppendIndentedLine($"tempList_{varName}.Add((global::{elementType})reader.ReadVarInt32());");
+                }
+                else
+                {
+                    // Primitive element
+                    var readExpr = GetPrimitiveReadExpression(elementType);
+                    _sb.AppendIndentedLine($"tempList_{varName}.Add({readExpr});");
+                }
             }
             else
             {
@@ -562,9 +577,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 if (isEnum)
                 {
-                    // Enums are serialized as varint (wire type 0)
-                    // tag 0x08 = field 1, wire type 0 (varint)
-                    _sb.AppendIndentedLine($"{writerName}.WriteVarUInt32(0x08); // field 1, wire type 0 (varint)");
+                    // Enums: [tag (wire type 0)][varint value]
+                    var tag = (1 << 3) | 0; // field 1 + wire type 0 (varint)
+                    _sb.AppendIndentedLine($"{writerName}.WriteVarUInt32(0x{tag:X2}); // field 1, wire type 0 (varint for enum)");
                     _sb.AppendIndentedLine($"{writerName}.WriteVarInt32((int){varName});");
                 }
                 else
@@ -667,7 +682,14 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             // Write value (field 2)
             _sb.AppendIndentedLine("// Value (field 2)");
-            GenerateTaggedFieldWrite(valueType, "kvp.Value", 2, info.ValueIsPrimitive, info.NestedValueInfo, writerClassName);
+            // For nested collections, pass the pre-calculated size variable to avoid duplicate calculation
+            string? valuePrecalculatedSizeVar = null;
+            if (info.NestedValueInfo != null && (info.NestedValueInfo.Kind == StandaloneTypeKind.List || info.NestedValueInfo.Kind == StandaloneTypeKind.Array))
+            {
+                var safeVarName = "kvp.Value".Replace(".", "_").Replace("[", "_").Replace("]", "_");
+                valuePrecalculatedSizeVar = $"_listContentSize_{safeVarName}_2";
+            }
+            GenerateTaggedFieldWrite(valueType, "kvp.Value", 2, info.ValueIsPrimitive, info.NestedValueInfo, writerClassName, valuePrecalculatedSizeVar);
         }
 
         private void GenerateSizeCalculation(string typeName, string varName, int fieldNumber, bool isPrimitive, StandaloneTypeInfo? nestedInfo, string resultVarName)
@@ -711,12 +733,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 if (nestedInfo.ElementIsEnum)
                 {
-                    // For enum elements, use loop with cast to int
-                    _sb.AppendIndentedLine($"var _listContentSize_{safeVarName}_{fieldNumber} = 0;");
-                    _sb.AppendIndentedLine($"foreach (var _item_{safeVarName}_{fieldNumber} in {varName})");
-                    _sb.StartNewBlock();
-                    _sb.AppendIndentedLine($"_listContentSize_{safeVarName}_{fieldNumber} += 1 + global::GProtobuf.Core.Utils.GetVarintSize((uint)(int)_item_{safeVarName}_{fieldNumber});");
-                    _sb.EndBlock();
+                    // For enum elements, calculate varint size
+                    _sb.AppendIndentedLine($"var _listContentSize_{safeVarName}_{fieldNumber} = {varName}.Sum(x => 1 + global::GProtobuf.Core.Utils.GetVarintSize((uint)(int)x));");
                 }
                 else
                 {
@@ -762,7 +780,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine($"var {resultVarName} = {tagSize} + global::GProtobuf.Core.Utils.GetVarintSize((uint)_dictContentSize_{safeVarName}_{fieldNumber}) + _dictContentSize_{safeVarName}_{fieldNumber};");
         }
 
-        private void GenerateTaggedFieldWrite(string typeName, string varName, int fieldNumber, bool isPrimitive, StandaloneTypeInfo? nestedInfo, string writerClassName)
+        private void GenerateTaggedFieldWrite(string typeName, string varName, int fieldNumber, bool isPrimitive, StandaloneTypeInfo? nestedInfo, string writerClassName, string? precalculatedListSizeVar = null)
         {
             var wireType = GetWireType(typeName);
             var tag = (fieldNumber << 3) | wireType;
@@ -784,12 +802,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             else if (nestedInfo != null && nestedInfo.Kind == StandaloneTypeKind.List)
             {
                 // Nested List<T> - calculate and write list content
-                GenerateNestedListWrite(varName, fieldNumber, nestedInfo, writerClassName);
+                GenerateNestedListWrite(varName, fieldNumber, nestedInfo, writerClassName, precalculatedListSizeVar);
             }
             else if (nestedInfo != null && nestedInfo.Kind == StandaloneTypeKind.Array)
             {
                 // Nested T[] - calculate and write array content
-                GenerateNestedArrayWrite(varName, fieldNumber, nestedInfo, writerClassName);
+                GenerateNestedArrayWrite(varName, fieldNumber, nestedInfo, writerClassName, precalculatedListSizeVar);
             }
             else if (nestedInfo != null && nestedInfo.Kind == StandaloneTypeKind.Dictionary)
             {
@@ -809,41 +827,51 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
         }
 
-        private void GenerateNestedListWrite(string varName, int fieldNumber, StandaloneTypeInfo nestedInfo, string writerClassName)
+        private void GenerateNestedListWrite(string varName, int fieldNumber, StandaloneTypeInfo nestedInfo, string writerClassName, string? precalculatedListSizeVar = null)
         {
             var elementType = nestedInfo.ElementType!;
+            string listSizeVar;
 
-            // Calculate list size first
-            _sb.AppendIndentedLine($"var listSize_{fieldNumber} = 0;");
-            _sb.AppendIndentedLine($"foreach (var item_{fieldNumber} in {varName})");
-            _sb.StartNewBlock();
-
-            if (nestedInfo.ElementIsPrimitive)
+            if (precalculatedListSizeVar != null)
             {
-                if (nestedInfo.ElementIsEnum)
-                {
-                    // For enum elements, cast to int for size calculation
-                    _sb.AppendIndentedLine($"listSize_{fieldNumber} += 1 + global::GProtobuf.Core.Utils.GetVarintSize((uint)(int)item_{fieldNumber});");
-                }
-                else
-                {
-                    var wireType = GetWireType(elementType);
-                    var itemTag = (1 << 3) | wireType;
-                    _sb.AppendIndentedLine($"listSize_{fieldNumber} += 1 + {GetPrimitiveSizeExpression(elementType, $"item_{fieldNumber}")};");
-                }
+                // Reuse pre-calculated size variable from GenerateSizeCalculation
+                listSizeVar = precalculatedListSizeVar;
             }
             else
             {
-                var className = TypeNameHelper.GetClassName(elementType);
-                var sizeCalcClass = NamespaceHelper.GetSizeCalculatorsClass(elementType, _registry);
-                _sb.AppendIndentedLine($"var itemCalc_{fieldNumber} = new global::GProtobuf.Core.WriteSizeCalculator();");
-                _sb.AppendIndentedLine($"{sizeCalcClass}.Calculate{className}ContentSize(ref itemCalc_{fieldNumber}, item_{fieldNumber});");
-                _sb.AppendIndentedLine($"listSize_{fieldNumber} += 1 + global::GProtobuf.Core.Utils.GetVarintSize((uint)itemCalc_{fieldNumber}.Length) + itemCalc_{fieldNumber}.Length;");
+                // Calculate list size (only when not pre-calculated)
+                listSizeVar = $"listSize_{fieldNumber}";
+                _sb.AppendIndentedLine($"var {listSizeVar} = 0;");
+                _sb.AppendIndentedLine($"foreach (var item_{fieldNumber} in {varName})");
+                _sb.StartNewBlock();
+
+                if (nestedInfo.ElementIsPrimitive)
+                {
+                    if (nestedInfo.ElementIsEnum)
+                    {
+                        // Enum element - varint size
+                        _sb.AppendIndentedLine($"{listSizeVar} += 1 + global::GProtobuf.Core.Utils.GetVarintSize((uint)(int)item_{fieldNumber});");
+                    }
+                    else
+                    {
+                        var wireType = GetWireType(elementType);
+                        var itemTag = (1 << 3) | wireType;
+                        _sb.AppendIndentedLine($"{listSizeVar} += 1 + {GetPrimitiveSizeExpression(elementType, $"item_{fieldNumber}")};");
+                    }
+                }
+                else
+                {
+                    var className = TypeNameHelper.GetClassName(elementType);
+                    var sizeCalcClass = NamespaceHelper.GetSizeCalculatorsClass(elementType, _registry);
+                    _sb.AppendIndentedLine($"var itemCalc_{fieldNumber} = new global::GProtobuf.Core.WriteSizeCalculator();");
+                    _sb.AppendIndentedLine($"{sizeCalcClass}.Calculate{className}ContentSize(ref itemCalc_{fieldNumber}, item_{fieldNumber});");
+                    _sb.AppendIndentedLine($"{listSizeVar} += 1 + global::GProtobuf.Core.Utils.GetVarintSize((uint)itemCalc_{fieldNumber}.Length) + itemCalc_{fieldNumber}.Length;");
+                }
+                _sb.EndBlock();
             }
-            _sb.EndBlock();
 
             // Write list length
-            _sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)listSize_{fieldNumber});");
+            _sb.AppendIndentedLine($"writer.WriteVarUInt32((uint){listSizeVar});");
 
             // Write each element
             _sb.AppendIndentedLine($"foreach (var item_{fieldNumber} in {varName})");
@@ -853,8 +881,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 if (nestedInfo.ElementIsEnum)
                 {
-                    // For enum elements, write as varint (wire type 0)
-                    _sb.AppendIndentedLine($"writer.WriteVarUInt32(0x08); // field 1, wire type 0 (varint)");
+                    // Enum element - write as varint
+                    _sb.AppendIndentedLine($"writer.WriteVarUInt32(0x08); // field 1, wire type 0 (varint for enum)");
                     _sb.AppendIndentedLine($"writer.WriteVarInt32((int)item_{fieldNumber});");
                 }
                 else
@@ -888,10 +916,10 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.EndBlock();
         }
 
-        private void GenerateNestedArrayWrite(string varName, int fieldNumber, StandaloneTypeInfo nestedInfo, string writerClassName)
+        private void GenerateNestedArrayWrite(string varName, int fieldNumber, StandaloneTypeInfo nestedInfo, string writerClassName, string? precalculatedListSizeVar = null)
         {
             // Arrays use the same format as Lists
-            GenerateNestedListWrite(varName, fieldNumber, nestedInfo, writerClassName);
+            GenerateNestedListWrite(varName, fieldNumber, nestedInfo, writerClassName, precalculatedListSizeVar);
         }
 
         private void GenerateNestedDictionaryWrite(string varName, int fieldNumber, StandaloneTypeInfo nestedInfo, string writerClassName)

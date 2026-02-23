@@ -129,9 +129,13 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             _sb.StartNewBlock();
 
             // Pre-declare WriteSizeCalculator for reuse across complex items (ref struct - stack allocated)
-            // This avoids declaring it multiple times inside the loop
-            _sb.AppendIndentedLine("global::GProtobuf.Core.WriteSizeCalculator itemCalc;");
-            _sb.AppendNewLine();
+            // Only declare if there are complex types that need it
+            bool hasComplexItems = tupleInfo.ItemTypes.Any(t => _typeHandler.AnalyzeType(t).Category == TypeCategory.Complex);
+            if (hasComplexItems)
+            {
+                _sb.AppendIndentedLine("global::GProtobuf.Core.WriteSizeCalculator itemCalc;");
+                _sb.AppendNewLine();
+            }
 
             // Write each item
             for (int i = 0; i < tupleInfo.Arity; i++)
@@ -212,9 +216,13 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             _sb.StartNewBlock();
 
             // Pre-declare WriteSizeCalculator for reuse across complex items (ref struct - stack allocated)
-            // This avoids declaring it multiple times inside the loop
-            _sb.AppendIndentedLine("global::GProtobuf.Core.WriteSizeCalculator itemCalc;");
-            _sb.AppendNewLine();
+            // Only declare if there are complex types that need it
+            bool hasComplexItems = tupleInfo.ItemTypes.Any(t => _typeHandler.AnalyzeType(t).Category == TypeCategory.Complex);
+            if (hasComplexItems)
+            {
+                _sb.AppendIndentedLine("global::GProtobuf.Core.WriteSizeCalculator itemCalc;");
+                _sb.AppendNewLine();
+            }
 
             // Calculate size for each item
             for (int i = 0; i < tupleInfo.Arity; i++)

@@ -66,8 +66,17 @@ public static class StandaloneTypeAnalyzer
     {
         var elementType = arrayType.ElementType;
         var elementTypeName = elementType.ToDisplayString();
-        var isEnum = IsEnumType(elementType);
-        var isPrimitive = IsPrimitiveType(elementTypeName) || isEnum;
+
+        // Check if element is an enum - enums are serialized as varints (like primitives)
+        var isElementEnum = elementType.TypeKind == TypeKind.Enum;
+        string? elementEnumUnderlyingType = null;
+        if (isElementEnum && elementType is INamedTypeSymbol enumType)
+        {
+            elementEnumUnderlyingType = enumType.EnumUnderlyingType?.ToDisplayString() ?? "System.Int32";
+        }
+
+        // Enums should be treated as primitives for wire format purposes
+        var isPrimitive = IsPrimitiveType(elementTypeName) || isElementEnum;
 
         // byte[] is handled specially - not as a collection
         if (elementType.SpecialType == SpecialType.System_Byte)
@@ -118,7 +127,8 @@ public static class StandaloneTypeAnalyzer
             TypeSymbol: arrayType,
             ElementKind: elementKind,
             NestedElementInfo: nestedElementInfo,
-            ElementIsEnum: isEnum);
+            ElementIsEnum: isElementEnum,
+            ElementEnumUnderlyingType: elementEnumUnderlyingType);
     }
 
     private static StandaloneTypeInfo? AnalyzeGenericType(INamedTypeSymbol namedType)
@@ -151,8 +161,17 @@ public static class StandaloneTypeAnalyzer
     {
         var elementType = namedType.TypeArguments[0];
         var elementTypeName = elementType.ToDisplayString();
-        var isEnum = IsEnumType(elementType);
-        var isPrimitive = IsPrimitiveType(elementTypeName) || isEnum;
+
+        // Check if element is an enum - enums are serialized as varints (like primitives)
+        var isElementEnum = elementType.TypeKind == TypeKind.Enum;
+        string? elementEnumUnderlyingType = null;
+        if (isElementEnum && elementType is INamedTypeSymbol enumType)
+        {
+            elementEnumUnderlyingType = enumType.EnumUnderlyingType?.ToDisplayString() ?? "System.Int32";
+        }
+
+        // Enums should be treated as primitives for wire format purposes
+        var isPrimitive = IsPrimitiveType(elementTypeName) || isElementEnum;
         var targetNamespace = GetTargetNamespace(elementType);
         var methodNameSuffix = "ListOf" + GetSafeTypeName(elementTypeName);
 
@@ -186,7 +205,8 @@ public static class StandaloneTypeAnalyzer
             TypeSymbol: namedType,
             ElementKind: elementKind,
             NestedElementInfo: nestedElementInfo,
-            ElementIsEnum: isEnum);
+            ElementIsEnum: isElementEnum,
+            ElementEnumUnderlyingType: elementEnumUnderlyingType);
     }
 
     private static StandaloneTypeInfo AnalyzeDictionaryType(INamedTypeSymbol namedType, bool isCustomDictionary, INamedTypeSymbol? dictionaryInterface = null)
@@ -206,10 +226,26 @@ public static class StandaloneTypeAnalyzer
 
         var keyTypeName = keyType.ToDisplayString();
         var valueTypeName = valueType.ToDisplayString();
-        var keyIsEnum = IsEnumType(keyType);
-        var valueIsEnum = IsEnumType(valueType);
-        var keyIsPrimitive = IsPrimitiveType(keyTypeName) || keyIsEnum;
-        var valueIsPrimitive = IsPrimitiveType(valueTypeName) || valueIsEnum;
+
+        // Check if key is an enum
+        var isKeyEnum = keyType.TypeKind == TypeKind.Enum;
+        string? keyEnumUnderlyingType = null;
+        if (isKeyEnum && keyType is INamedTypeSymbol keyEnumType)
+        {
+            keyEnumUnderlyingType = keyEnumType.EnumUnderlyingType?.ToDisplayString() ?? "System.Int32";
+        }
+
+        // Check if value is an enum
+        var isValueEnum = valueType.TypeKind == TypeKind.Enum;
+        string? valueEnumUnderlyingType = null;
+        if (isValueEnum && valueType is INamedTypeSymbol valueEnumType)
+        {
+            valueEnumUnderlyingType = valueEnumType.EnumUnderlyingType?.ToDisplayString() ?? "System.Int32";
+        }
+
+        // Enums should be treated as primitives for wire format purposes
+        var keyIsPrimitive = IsPrimitiveType(keyTypeName) || isKeyEnum;
+        var valueIsPrimitive = IsPrimitiveType(valueTypeName) || isValueEnum;
 
         // Target namespace from value type (more likely to be user type)
         var targetNamespace = GetTargetNamespace(valueType);
@@ -281,8 +317,10 @@ public static class StandaloneTypeAnalyzer
             CustomDictionaryTypeName: isCustomDictionary ? namedType.ToDisplayString().Split('<')[0] : null,
             InnerElementType: innerElementType,
             InnerElementIsPrimitive: innerElementIsPrimitive,
-            KeyIsEnum: keyIsEnum,
-            ValueIsEnum: valueIsEnum);
+            KeyIsEnum: isKeyEnum,
+            KeyEnumUnderlyingType: keyEnumUnderlyingType,
+            ValueIsEnum: isValueEnum,
+            ValueEnumUnderlyingType: valueEnumUnderlyingType);
     }
 
     /// <summary>
@@ -336,11 +374,6 @@ public static class StandaloneTypeAnalyzer
     private static bool IsPrimitiveType(string typeName)
     {
         return PrimitiveTypes.Contains(typeName);
-    }
-
-    private static bool IsEnumType(ITypeSymbol typeSymbol)
-    {
-        return typeSymbol.TypeKind == TypeKind.Enum;
     }
 
     private static string GetTargetNamespace(ITypeSymbol typeSymbol)

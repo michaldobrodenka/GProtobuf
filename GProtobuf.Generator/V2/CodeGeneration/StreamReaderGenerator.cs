@@ -257,10 +257,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             if (!constructorStrategy.IsSuccess)
             {
-                // Constructor matching failed - generate error comment and skip
                 _sb.AppendIndentedLine($"// ERROR: {constructorStrategy.ErrorMessage}");
-                _sb.AppendIndentedLine("reader.SkipField(global::GProtobuf.Core.WireType.VarInt); // Skip all fields due to constructor error");
-                _sb.AppendIndentedLine($"return default(global::{type.FullName});");
+                _sb.AppendIndentedLine($"throw new global::System.InvalidOperationException(\"Cannot deserialize type '{type.FullName}': {constructorStrategy.ErrorMessage?.Replace("\"", "\\\"")}\");");
                 return;
             }
 

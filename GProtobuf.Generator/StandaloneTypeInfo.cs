@@ -112,19 +112,36 @@ public sealed record StandaloneTypeInfo(
     bool InnerElementIsPrimitive = false,
 
     /// <summary>
-    /// Whether the element type is an enum (for array/list types)
+    /// Whether the element type is an enum (for List/Array types)
+    /// Enums are serialized as varints but require casting
     /// </summary>
     bool ElementIsEnum = false,
 
     /// <summary>
-    /// Whether the key type is an enum (for dictionary types)
+    /// The underlying type of the enum element (e.g., "System.Int32")
+    /// Only set when ElementIsEnum is true
+    /// </summary>
+    string? ElementEnumUnderlyingType = null,
+
+    /// <summary>
+    /// Whether the dictionary key type is an enum
     /// </summary>
     bool KeyIsEnum = false,
 
     /// <summary>
-    /// Whether the value type is an enum (for dictionary types)
+    /// The underlying type of the enum key (e.g., "System.Int32")
     /// </summary>
-    bool ValueIsEnum = false);
+    string? KeyEnumUnderlyingType = null,
+
+    /// <summary>
+    /// Whether the dictionary value type is an enum
+    /// </summary>
+    bool ValueIsEnum = false,
+
+    /// <summary>
+    /// The underlying type of the enum value (e.g., "System.Int32")
+    /// </summary>
+    string? ValueEnumUnderlyingType = null);
 
 /// <summary>
 /// Kind of standalone type for serialization

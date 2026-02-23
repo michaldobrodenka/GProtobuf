@@ -381,231 +381,11 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
 
         private void GenerateDictionaryFieldRead(string targetVar, TypeAnalysisInfo typeInfo)
         {
-            var keyType = typeInfo.DictionaryKeyType;
-            var valueType = typeInfo.DictionaryValueType;
-            var keyTypeInfo = _registry?.AnalyzeType(keyType);
-            var valueTypeInfo = _registry?.AnalyzeType(valueType);
+            var mapEntryTypeName = typeInfo.MapEntryTypeName;
 
-            // protobuf-net uses TWO different wire formats for nested dictionaries:
-            // Format A (repeated field): [field2 tag][entryLen][fields] - field 2 appears once per inner entry
-            // Format B (packed blob): [field2 tag][totalLen][entry1Len][fields][entry2Len][fields]... - all entries in one blob
-            //
-            // We detect the format by checking if the first byte matches the expected field 1 tag for the inner key type.
-            // The expected tag is: (1 << 3) | wireType, where wireType depends on the key type:
-            // - int/enum: wireType 0 (varint) -> tag 0x08
-            // - string: wireType 2 (Len) -> tag 0x0A
-            // - float: wireType 5 (Fixed32) -> tag 0x0D
-            // - double: wireType 1 (Fixed64) -> tag 0x09
-
-            // Calculate expected field 1 tag for inner key
-            int expectedKeyWireType = GetWireTypeForType(keyType, keyTypeInfo);
-            int expectedField1Tag = (1 << 3) | expectedKeyWireType;
-
-            // Read the blob length
-            _sb.AppendIndentedLine("var innerBlobLength = reader.ReadVarUInt32();");
-            _sb.AppendIndentedLine("var innerBlobEnd = reader.Position + (int)innerBlobLength;");
-            _sb.AppendNewLine();
-
-            // Initialize dictionary only once using null-coalescing
-            bool isCustomDict = TypeHelper.IsCustomDictionaryType(typeInfo.FullTypeName);
-            if (isCustomDict)
-            {
-                _sb.AppendIndentedLine($"{targetVar} ??= new global::{typeInfo.FullTypeName}();");
-            }
-            else
-            {
-                _sb.AppendIndentedLine($"{targetVar} ??= new global::System.Collections.Generic.Dictionary<{keyType}, {valueType}>();");
-            }
-            _sb.AppendNewLine();
-
-            // Peek at first byte to determine format
-            _sb.AppendIndentedLine("if (innerBlobLength > 0)");
-            _sb.StartNewBlock();
-            _sb.AppendIndentedLine("var firstByte = reader.PeekByte();");
-            _sb.AppendNewLine();
-
-            // If first byte matches expected field 1 tag for inner key, it's Format A (direct fields)
-            // Otherwise it's Format B (length-prefixed entries)
-            _sb.AppendIndentedLine($"if (firstByte == {expectedField1Tag}) // Expected field 1 tag for {keyType}");
-            _sb.StartNewBlock();
-
-            // Format A: single entry, read fields directly
-            GenerateInnerEntryFieldsRead(targetVar, keyType, valueType, keyTypeInfo, valueTypeInfo, "innerBlobEnd");
-
-            _sb.EndBlock(); // if Format A
-            _sb.AppendIndentedLine("else");
-            _sb.StartNewBlock();
-
-            // Format B: multiple length-prefixed entries
-            _sb.AppendIndentedLine("while (reader.Position < innerBlobEnd)");
-            _sb.StartNewBlock();
-            _sb.AppendIndentedLine("var innerEntryLength = reader.ReadVarUInt32();");
-            _sb.AppendIndentedLine("var innerEntryEnd = reader.Position + (int)innerEntryLength;");
-            _sb.AppendNewLine();
-
-            GenerateInnerEntryFieldsRead(targetVar, keyType, valueType, keyTypeInfo, valueTypeInfo, "innerEntryEnd");
-
-            _sb.EndBlock(); // while
-            _sb.EndBlock(); // else Format B
-            _sb.EndBlock(); // if (innerBlobLength > 0)
-        }
-
-        /// <summary>
-        /// Generates code to read inner entry fields (key/value) and add to dictionary.
-        /// </summary>
-        private void GenerateInnerEntryFieldsRead(string targetVar, string keyType, string valueType,
-            TypeAnalysisInfo keyTypeInfo, TypeAnalysisInfo valueTypeInfo, string endVar)
-        {
-            var shortKeyType = GetKeyValueShortTypeName(keyType, keyTypeInfo);
-            var shortValueType = GetKeyValueShortTypeName(valueType, valueTypeInfo);
-
-            _sb.AppendIndentedLine($"{shortKeyType} innerTempKey = default;");
-            _sb.AppendIndentedLine($"{shortValueType} innerTempValue = default;");
-            _sb.AppendNewLine();
-
-            _sb.AppendIndentedLine($"while (reader.Position < {endVar})");
-            _sb.StartNewBlock();
-            _sb.AppendIndentedLine("var innerTag = reader.ReadVarUInt32();");
-            _sb.AppendIndentedLine("var innerFieldId = (int)(innerTag >> 3);");
-            _sb.AppendIndentedLine("var innerWireType = (int)(innerTag & 0x7);");
-            _sb.AppendNewLine();
-            _sb.AppendIndentedLine("switch (innerFieldId)");
-            _sb.StartNewBlock();
-
-            // Case 1: inner key
-            _sb.AppendIndentedLine("case 1:");
-            _sb.IncreaseIndent();
-            GenerateInlineFieldRead("innerTempKey", keyType, keyTypeInfo);
-            _sb.AppendIndentedLine("break;");
-            _sb.DecreaseIndent();
-
-            // Case 2: inner value
-            _sb.AppendIndentedLine("case 2:");
-            _sb.IncreaseIndent();
-            GenerateInlineFieldRead("innerTempValue", valueType, valueTypeInfo);
-            _sb.AppendIndentedLine("break;");
-            _sb.DecreaseIndent();
-
-            // Default: skip unknown
-            _sb.AppendIndentedLine("default:");
-            _sb.IncreaseIndent();
-            _sb.AppendIndentedLine("reader.SkipField((global::GProtobuf.Core.WireType)innerWireType);");
-            _sb.AppendIndentedLine("break;");
-            _sb.DecreaseIndent();
-
-            _sb.EndBlock(); // switch
-            _sb.EndBlock(); // while
-
-            // Add entry to dict
-            _sb.AppendIndentedLine($"{targetVar}[innerTempKey] = innerTempValue;");
-        }
-
-        /// <summary>
-        /// Gets short type name for inline variable declaration.
-        /// </summary>
-        private string GetKeyValueShortTypeName(string typeName, TypeAnalysisInfo typeInfo)
-        {
-            if (typeInfo == null) return typeName;
-            if (typeInfo.IsPrimitive) return typeInfo.ShortTypeName ?? typeName;
-            if (typeInfo.IsEnum) return $"global::{typeName}";
-            return GetFullTypeName(typeName, typeInfo);
-        }
-
-        /// <summary>
-        /// Gets the protobuf wire type for a given type.
-        /// </summary>
-        /// <returns>
-        /// Wire type value: 0=VarInt, 1=Fixed64, 2=Len, 5=Fixed32
-        /// </returns>
-        private int GetWireTypeForType(string typeName, TypeAnalysisInfo typeInfo)
-        {
-            if (typeInfo == null) return 2; // Default to Len for unknown types
-
-            // Enum is always varint
-            if (typeInfo.IsEnum) return 0;
-
-            // Primitives - check normalized type name
-            var normalized = TypeMapping.NormalizeTypeName(typeName);
-            return normalized switch
-            {
-                // VarInt types (wire type 0)
-                "System.Int32" => 0,
-                "System.Int64" => 0,
-                "System.UInt32" => 0,
-                "System.UInt64" => 0,
-                "System.Int16" => 0,
-                "System.UInt16" => 0,
-                "System.Byte" => 0,
-                "System.SByte" => 0,
-                "System.Boolean" => 0,
-
-                // Fixed64 types (wire type 1)
-                "System.Double" => 1,
-
-                // Fixed32 types (wire type 5)
-                "System.Single" => 5,
-
-                // Len types (wire type 2)
-                "System.String" => 2,
-                "System.Guid" => 2,
-                "System.DateTime" => 2,
-                "System.TimeSpan" => 2,
-                "System.Decimal" => 2,
-
-                // Default to Len for custom types, collections, etc.
-                _ => 2
-            };
-        }
-
-        /// <summary>
-        /// Generates inline field read for simple types (used in nested dict reading).
-        /// </summary>
-        private void GenerateInlineFieldRead(string targetVar, string typeName, TypeAnalysisInfo typeInfo)
-        {
-            if (typeInfo == null)
-            {
-                _sb.AppendIndentedLine($"// WARNING: Cannot analyze type '{typeName}', skipping");
-                return;
-            }
-
-            if (typeInfo.IsEnum)
-            {
-                _sb.AppendIndentedLine($"{targetVar} = (global::{typeName})reader.ReadVarInt32();");
-                return;
-            }
-
-            if (typeInfo.IsPrimitive)
-            {
-                var readExpr = TypeMapping.GetElementReadExpression(typeName, DataFormat.Default, "reader");
-                if (readExpr != null)
-                {
-                    _sb.AppendIndentedLine($"{targetVar} = {readExpr};");
-                    return;
-                }
-            }
-
-            if (typeInfo.IsString)
-            {
-                _sb.AppendIndentedLine($"{targetVar} = global::GProtobuf.Core.SpanReaders.ReadString(ref reader, global::GProtobuf.Core.WireType.Len);");
-                return;
-            }
-
-            if (typeInfo.IsCustomType)
-            {
-                // For custom types, read as length-prefixed submessage
-                var spanReadersClass = GetSpanReadersClass(typeName);
-                var uniqueId = System.Guid.NewGuid().ToString("N").Substring(0, 8);
-                _sb.AppendIndentedLine($"var customLen_{uniqueId} = reader.ReadVarUInt32();");
-                _sb.AppendIndentedLine($"var customSpan_{uniqueId} = reader.GetSlice((int)customLen_{uniqueId});");
-                _sb.AppendIndentedLine($"var customReader_{uniqueId} = new SpanReader(customSpan_{uniqueId});");
-                _sb.AppendIndentedLine($"{targetVar} = new global::{typeName}();");
-                _sb.AppendIndentedLine($"{spanReadersClass}.Populate{typeInfo.ShortTypeName}(ref customReader_{uniqueId}, {targetVar});");
-                return;
-            }
-
-            // For any remaining unsupported types, skip with a warning
-            _sb.AppendIndentedLine($"// WARNING: Type '{typeName}' not supported in nested dict inline read");
-            _sb.AppendIndentedLine("reader.SkipField((global::GProtobuf.Core.WireType)innerWireType);");
+            _sb.AppendIndentedLine($"// Each field 2 is ONE entry of nested dictionary (repeated field semantics)");
+            _sb.AppendIndentedLine($"var innerEntry = Read{mapEntryTypeName}(ref reader);");
+            _sb.AppendIndentedLine($"if (innerEntry.success) {targetVar}[innerEntry.key] = innerEntry.value;");
         }
 
         private void GenerateCollectionFieldRead(string targetVar, TypeAnalysisInfo typeInfo, string wireTypeVar, string fieldPrefix = "")
@@ -820,9 +600,9 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             var wireType = isEnum ? WireType.VarInt : GetWireType(typeInfo);
             var (_, tagBytes) = TypeMapping.PrecomputeTagBytes(fieldId, wireType);
 
-            // For collections and arrays, tag is added per element inside the loop
+            // For collections, arrays, and dictionaries, tag is added per element inside the loop
             // Exception: byte[] is treated as a primitive and needs tag added here
-            if (!typeInfo.IsCollection && (!typeInfo.IsArray || isByteArray))
+            if (!typeInfo.IsCollection && !typeInfo.IsDictionary && (!typeInfo.IsArray || isByteArray))
             {
                 _sb.AppendIndentedLine($"{calcVar}.AddByteLength({tagBytes}); // tag for field {fieldId}");
             }
@@ -870,7 +650,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
 
             if (typeInfo.IsDictionary)
             {
-                GenerateDictionaryFieldSize(sourceVar, typeInfo, calcVar);
+                GenerateDictionaryFieldSize(sourceVar, typeInfo, calcVar, fieldId);
                 return;
             }
 
@@ -924,22 +704,22 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             }
         }
 
-        private void GenerateDictionaryFieldSize(string sourceVar, TypeAnalysisInfo typeInfo, string calcVar)
+        private void GenerateDictionaryFieldSize(string sourceVar, TypeAnalysisInfo typeInfo, string calcVar, int fieldId)
         {
             var mapEntryTypeName = typeInfo.MapEntryTypeName;
             var keyType = typeInfo.DictionaryKeyType;
             var valueType = typeInfo.DictionaryValueType;
 
+            var (_, tagBytes) = TypeMapping.PrecomputeTagBytes(fieldId, WireType.Len);
+
             // Determine the correct dictionary type to instantiate (custom or standard)
             string dictType;
             if (TypeHelper.IsCustomDictionaryType(typeInfo.FullTypeName))
             {
-                // Custom dictionary - use parameterless constructor
                 dictType = $"global::{typeInfo.FullTypeName}";
             }
             else
             {
-                // Standard Dictionary<K,V>
                 dictType = $"global::System.Collections.Generic.Dictionary<{keyType}, {valueType}>";
             }
 
@@ -947,25 +727,15 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             _sb.AppendIndentedLine($"var nestedDict = {sourceVar} ?? new {dictType}();");
             _sb.AppendNewLine();
 
-            _sb.AppendIndentedLine("if (nestedDict.Count == 0)");
-            _sb.StartNewBlock();
-            _sb.AppendIndentedLine("// Empty dictionary: length = varint(0) = 1 byte");
-            _sb.AppendIndentedLine($"{calcVar}.WriteVarUInt32(0);");
-            _sb.EndBlock();
-            _sb.AppendIndentedLine("else");
-            _sb.StartNewBlock();
-            _sb.AppendIndentedLine("// Non-empty: calculate actual size INCLUDING per-entry length prefixes");
-            _sb.AppendIndentedLine("var innerCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+            _sb.AppendIndentedLine("// Each inner entry is a repeated field with its own tag (protobuf-net Level200 format)");
             _sb.AppendIndentedLine("foreach (var kvp in nestedDict)");
             _sb.StartNewBlock();
+            _sb.AppendIndentedLine($"{calcVar}.AddByteLength({tagBytes}); // tag for repeated field {fieldId}");
             _sb.AppendIndentedLine("var innerEntryCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
             _sb.AppendIndentedLine($"SizeCalculators.Calculate{mapEntryTypeName}Size(ref innerEntryCalc, kvp.Key, kvp.Value);");
             _sb.AppendIndentedLine("// Each entry is written as: length_prefix + content");
-            _sb.AppendIndentedLine("innerCalc.WriteVarUInt32((uint)innerEntryCalc.Length);  // size of length prefix");
-            _sb.AppendIndentedLine("innerCalc.AddByteLength(innerEntryCalc.Length);         // size of content");
-            _sb.EndBlock();
-            _sb.AppendIndentedLine($"{calcVar}.WriteVarUInt32((uint)innerCalc.Length);");
-            _sb.AppendIndentedLine($"{calcVar}.AddByteLength(innerCalc.Length);");
+            _sb.AppendIndentedLine($"{calcVar}.WriteVarUInt32((uint)innerEntryCalc.Length);  // size of length prefix");
+            _sb.AppendIndentedLine($"{calcVar}.AddByteLength(innerEntryCalc.Length);         // size of content");
             _sb.EndBlock();
         }
 
@@ -1099,9 +869,9 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             var wireType = isEnum ? WireType.VarInt : GetWireType(typeInfo);
             var (bytesString, _) = TypeMapping.PrecomputeTagBytes(fieldId, wireType);
 
-            // For collections and arrays, tag is written per element inside the loop
+            // For collections, arrays, and dictionaries, tag is written per element inside the loop
             // Exception: byte[] is treated as a primitive and needs tag written here
-            if (!typeInfo.IsCollection && (!typeInfo.IsArray || isByteArray))
+            if (!typeInfo.IsCollection && !typeInfo.IsDictionary && (!typeInfo.IsArray || isByteArray))
             {
                 // Write tag
                 _sb.AppendIndentedLine($"writer.WriteSingleByte({bytesString}); // field {fieldId}");
@@ -1150,7 +920,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
 
             if (typeInfo.IsDictionary)
             {
-                GenerateDictionaryFieldWrite(sourceVar, typeInfo);
+                GenerateDictionaryFieldWrite(sourceVar, typeInfo, fieldId);
                 return;
             }
 
@@ -1205,39 +975,19 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             }
         }
 
-        private void GenerateDictionaryFieldWrite(string sourceVar, TypeAnalysisInfo typeInfo)
+        private void GenerateDictionaryFieldWrite(string sourceVar, TypeAnalysisInfo typeInfo, int fieldId)
         {
             var mapEntryTypeName = typeInfo.MapEntryTypeName;
-            var keyType = typeInfo.DictionaryKeyType;
-            var valueType = typeInfo.DictionaryValueType;
+            var (bytesString, _) = TypeMapping.PrecomputeTagBytes(fieldId, WireType.Len);
 
             // NOTE: nestedDict variable already created in size calculation phase
             // Just use it directly here
 
-            _sb.AppendIndentedLine("if (nestedDict.Count == 0)");
-            _sb.StartNewBlock();
-            _sb.AppendIndentedLine("// Empty dictionary: write length = 0");
-            _sb.AppendIndentedLine("writer.WriteVarUInt32(0);");
-            _sb.EndBlock();
-            _sb.AppendIndentedLine("else");
-            _sb.StartNewBlock();
-            _sb.AppendIndentedLine("// Non-empty: calculate and write actual size INCLUDING per-entry length prefixes");
-            _sb.AppendIndentedLine("var innerCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+            _sb.AppendIndentedLine("// Each inner entry is a repeated field with its own tag (protobuf-net Level200 format)");
             _sb.AppendIndentedLine("foreach (var kvp in nestedDict)");
             _sb.StartNewBlock();
-            _sb.AppendIndentedLine("var innerEntryCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
-            _sb.AppendIndentedLine($"SizeCalculators.Calculate{mapEntryTypeName}Size(ref innerEntryCalc, kvp.Key, kvp.Value);");
-            _sb.AppendIndentedLine("// Each entry is written as: length_prefix + content");
-            _sb.AppendIndentedLine("innerCalc.WriteVarUInt32((uint)innerEntryCalc.Length);  // size of length prefix");
-            _sb.AppendIndentedLine("innerCalc.AddByteLength(innerEntryCalc.Length);         // size of content");
-            _sb.EndBlock();
-            _sb.AppendIndentedLine("writer.WriteVarUInt32((uint)innerCalc.Length);");
-            _sb.AppendNewLine();
-            _sb.AppendIndentedLine("// Write inner dictionary entries");
-            _sb.AppendIndentedLine("foreach (var kvp in nestedDict)");
-            _sb.StartNewBlock();
+            _sb.AppendIndentedLine($"writer.WriteSingleByte({bytesString}); // tag for repeated field {fieldId}");
             _sb.AppendIndentedLine($"{_writerClassName}.Write{mapEntryTypeName}(ref writer, kvp.Key, kvp.Value);");
-            _sb.EndBlock();
             _sb.EndBlock();
         }
 

@@ -369,7 +369,7 @@ namespace GProtobuf.Generator.V2.Handlers
             sb.EndBlock();
             sb.AppendIndentedLine("else");
             sb.StartNewBlock();
-            sb.AppendIndentedLine($"{readerVar}.SkipField({wireTypeVar});");
+            sb.AppendIndentedLine($"throw new global::System.InvalidOperationException($\"Invalid wire type {{{wireTypeVar}}} for repeated primitive field. Expected {packedWireType} (packed) or {unpackedWireType} (unpacked).\");");
             sb.EndBlock();
         }
 
