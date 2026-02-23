@@ -326,8 +326,18 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                     _sb.AppendIndentedLine($"var {fieldPrefix}ItemLength = reader.ReadVarUInt32();");
                     _sb.AppendIndentedLine($"var {fieldPrefix}ItemSpan = reader.GetSlice((int){fieldPrefix}ItemLength);");
                     _sb.AppendIndentedLine($"var {fieldPrefix}ScopedReader = new SpanReader({fieldPrefix}ItemSpan);");
-                    _sb.AppendIndentedLine($"var {fieldPrefix}Item = new global::{elementType}();");
-                    _sb.AppendIndentedLine($"{spanReadersClass}.Populate{elemInfo.ShortTypeName}(ref {fieldPrefix}ScopedReader, {fieldPrefix}Item);");
+
+                    // Check if element type is a readonly struct - use ReadContent instead of Populate
+                    bool isReadonlyStruct = _typeRegistry?.IsReadonlyStruct(elementType) ?? false;
+                    if (isReadonlyStruct)
+                    {
+                        _sb.AppendIndentedLine($"var {fieldPrefix}Item = {spanReadersClass}.Read{elemInfo.ShortTypeName}Content(ref {fieldPrefix}ScopedReader);");
+                    }
+                    else
+                    {
+                        _sb.AppendIndentedLine($"var {fieldPrefix}Item = new global::{elementType}();");
+                        _sb.AppendIndentedLine($"{spanReadersClass}.Populate{elemInfo.ShortTypeName}(ref {fieldPrefix}ScopedReader, {fieldPrefix}Item);");
+                    }
                     _sb.AppendIndentedLine($"{tempListVar}.Add({fieldPrefix}Item);");
                 }
 
@@ -362,8 +372,17 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 _sb.AppendIndentedLine($"var {fieldPrefix}MsgSpan = reader.GetSlice((int){fieldPrefix}MsgLength);");
                 _sb.AppendIndentedLine($"var {fieldPrefix}ScopedReader = new SpanReader({fieldPrefix}MsgSpan);");
 
+                // Check if this is a readonly struct - use ReadContent instead of Populate
+                // For readonly structs, Populate is a no-op because fields cannot be modified after construction
+                bool isReadonlyStruct = _typeRegistry?.IsReadonlyStruct(typeName) ?? false;
+
+                if (isReadonlyStruct)
+                {
+                    // Readonly struct - must use ReadContent which returns a new instance
+                    _sb.AppendIndentedLine($"{targetVar} = {spanReadersClass}.Read{sanitizedName}Content(ref {fieldPrefix}ScopedReader);");
+                }
                 // Handle nullable types - create temp variable for Populate
-                if (typeName.EndsWith("?"))
+                else if (typeName.EndsWith("?"))
                 {
                     var nonNullableType = typeName.Substring(0, typeName.Length - 1);
                     _sb.AppendIndentedLine($"var {fieldPrefix}Temp = new global::{nonNullableType}();");
@@ -529,8 +548,18 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 _sb.AppendIndentedLine($"var {fieldPrefix}ItemLength = reader.ReadVarUInt32();");
                 _sb.AppendIndentedLine($"var {fieldPrefix}ItemSpan = reader.GetSlice((int){fieldPrefix}ItemLength);");
                 _sb.AppendIndentedLine($"var {fieldPrefix}ScopedReader = new SpanReader({fieldPrefix}ItemSpan);");
-                _sb.AppendIndentedLine($"var {fieldPrefix}Item = new global::{elementType}();");
-                _sb.AppendIndentedLine($"{spanReadersClass}.Populate{elemInfo.ShortTypeName}(ref {fieldPrefix}ScopedReader, {fieldPrefix}Item);");
+
+                // Check if element type is a readonly struct - use ReadContent instead of Populate
+                bool isReadonlyStruct = _typeRegistry?.IsReadonlyStruct(elementType) ?? false;
+                if (isReadonlyStruct)
+                {
+                    _sb.AppendIndentedLine($"var {fieldPrefix}Item = {spanReadersClass}.Read{elemInfo.ShortTypeName}Content(ref {fieldPrefix}ScopedReader);");
+                }
+                else
+                {
+                    _sb.AppendIndentedLine($"var {fieldPrefix}Item = new global::{elementType}();");
+                    _sb.AppendIndentedLine($"{spanReadersClass}.Populate{elemInfo.ShortTypeName}(ref {fieldPrefix}ScopedReader, {fieldPrefix}Item);");
+                }
                 _sb.AppendIndentedLine($"{targetVar}.Add({fieldPrefix}Item);");
             }
         }
@@ -840,14 +869,18 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 // Custom types - each element is a repeated field with tag
                 var (_, customTagBytes) = TypeMapping.PrecomputeTagBytes(fieldId, WireType.Len);
                 var sizeCalcClass = NamespaceHelper.GetSizeCalculatorsClass(typeInfo.CollectionElementType, _typeRegistry);
+
+                // Check if element type is a derived type with ProtoInclude - needs full serialization with wrapper
+                bool isDerivedType = _typeRegistry?.IsDerivedType(typeInfo.CollectionElementType) ?? false;
+                var sizeMethodSuffix = isDerivedType ? "Size" : "ContentSize";
+
                 _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
                 _sb.StartNewBlock();
-                // CRITICAL: null check for array/collection elements (protobuf semantics allow null in arrays)
                 _sb.AppendIndentedLine("if (item != null)");
                 _sb.StartNewBlock();
                 _sb.AppendIndentedLine($"{calcVar}.AddByteLength({customTagBytes}); // tag for repeated field {fieldId}");
                 _sb.AppendIndentedLine("var itemCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
-                _sb.AppendIndentedLine($"{sizeCalcClass}.Calculate{elemInfo.ShortTypeName}ContentSize(ref itemCalc, item);");
+                _sb.AppendIndentedLine($"{sizeCalcClass}.Calculate{elemInfo.ShortTypeName}{sizeMethodSuffix}(ref itemCalc, item);");
                 _sb.AppendIndentedLine($"{calcVar}.WriteVarUInt32((uint)itemCalc.Length);");
                 _sb.AppendIndentedLine($"{calcVar}.AddByteLength(itemCalc.Length);");
                 _sb.EndBlock();
@@ -1094,6 +1127,12 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 var (customBytesString, _) = TypeMapping.PrecomputeTagBytes(fieldId, WireType.Len);
                 var sizeCalcClass = NamespaceHelper.GetSizeCalculatorsClass(typeInfo.CollectionElementType, _typeRegistry);
                 var writersClass = NamespaceHelper.GetWritersClass(typeInfo.CollectionElementType, _writerClassName, _typeRegistry);
+
+                // Check if element type is a derived type with ProtoInclude - needs full serialization with wrapper
+                bool isDerivedType = _typeRegistry?.IsDerivedType(typeInfo.CollectionElementType) ?? false;
+                var methodSuffix = isDerivedType ? "" : "Content";
+                var sizeMethodSuffix = isDerivedType ? "Size" : "ContentSize";
+
                 _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
                 _sb.StartNewBlock();
                 // CRITICAL: null check for array/collection elements (protobuf semantics allow null in arrays)
@@ -1101,9 +1140,9 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 _sb.StartNewBlock();
                 _sb.AppendIndentedLine($"writer.WriteSingleByte({customBytesString}); // tag for repeated field {fieldId}");
                 _sb.AppendIndentedLine("var itemCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
-                _sb.AppendIndentedLine($"{sizeCalcClass}.Calculate{elemInfo.ShortTypeName}ContentSize(ref itemCalc, item);");
+                _sb.AppendIndentedLine($"{sizeCalcClass}.Calculate{elemInfo.ShortTypeName}{sizeMethodSuffix}(ref itemCalc, item);");
                 _sb.AppendIndentedLine("writer.WriteVarUInt32((uint)itemCalc.Length);");
-                _sb.AppendIndentedLine($"{writersClass}.Write{elemInfo.ShortTypeName}Content(ref writer, item);");
+                _sb.AppendIndentedLine($"{writersClass}.Write{elemInfo.ShortTypeName}{methodSuffix}(ref writer, item);");
                 _sb.EndBlock();
                 _sb.EndBlock();
             }

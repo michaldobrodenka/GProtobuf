@@ -34,7 +34,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         }
 
         protected StreamWriterGenerator(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry, VirtualTupleTypeRegistry virtualTupleRegistry, string writerKind)
-            : base(sb, registry, virtualMapRegistry, virtualTupleRegistry, passRegistryToPrimitiveHandler: false)
+            : base(sb, registry, virtualMapRegistry, virtualTupleRegistry, passRegistryToPrimitiveHandler: true)
         {
             _writerKind = writerKind;
             _writerType = $"global::GProtobuf.Core.{writerKind}Writer";
@@ -978,7 +978,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateCollectionFieldWrite(ProtoMemberAttribute member, string sourceVar)
         {
-            if (_primitiveHandler.CanHandleCollection(member.CollectionElementType))
+            // Check if element type is enum (enums use varint encoding like primitives)
+            var normalizedType = TypeMapping.NormalizeTypeName(member.CollectionElementType);
+            bool isEnumCollection = _registry != null && (_registry.IsEnum(member.CollectionElementType) || _registry.IsEnum(normalizedType));
+
+            if (_primitiveHandler.CanHandleCollection(member.CollectionElementType) || isEnumCollection)
             {
                 // Level200: Primitives MUST use packed encoding by default
                 bool shouldBePacked = member.IsPacked || TypeMapping.ShouldBePackedByDefault(member.CollectionElementType);
@@ -1355,7 +1359,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateCollectionFieldSizeCalculation(ProtoMemberAttribute member, string sourceVar, string calculatorVar)
         {
-            if (_primitiveHandler.CanHandleCollection(member.CollectionElementType))
+            // Check if element type is enum (enums use varint encoding like primitives)
+            var normalizedType = TypeMapping.NormalizeTypeName(member.CollectionElementType);
+            bool isEnumCollection = _registry != null && (_registry.IsEnum(member.CollectionElementType) || _registry.IsEnum(normalizedType));
+
+            if (_primitiveHandler.CanHandleCollection(member.CollectionElementType) || isEnumCollection)
             {
                 // Level200: Primitives MUST use packed encoding by default
                 bool shouldBePacked = member.IsPacked || TypeMapping.ShouldBePackedByDefault(member.CollectionElementType);

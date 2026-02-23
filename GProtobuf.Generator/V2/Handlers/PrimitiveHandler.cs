@@ -697,7 +697,14 @@ namespace GProtobuf.Generator.V2.Handlers
             int fieldId,
             string writerVar = "writer")
         {
-            var wireType = TypeMapping.GetWireType(elementTypeName, format);
+            var normalizedType = TypeMapping.NormalizeTypeName(elementTypeName);
+            var shortType = TypeMapping.GetShortTypeName(elementTypeName);
+
+            // Check if element type is enum
+            bool isEnum = IsEnumType(elementTypeName);
+
+            // For enums, use VarInt wire type; otherwise use TypeMapping
+            var wireType = isEnum ? WireType.VarInt : TypeMapping.GetWireType(elementTypeName, format);
 
             sb.AppendIndentedLine($"if ({sourceVar} != null)");
             sb.StartNewBlock();
@@ -705,7 +712,6 @@ namespace GProtobuf.Generator.V2.Handlers
             sb.StartNewBlock();
 
             // Add null validation for string and byte[] (Level200 compatibility)
-            var normalizedType = TypeMapping.NormalizeTypeName(elementTypeName);
             bool isString = normalizedType == "System.String";
             bool isByteArray = normalizedType == "System.Byte[]";
 
@@ -721,8 +727,17 @@ namespace GProtobuf.Generator.V2.Handlers
             }
 
             GenerateWriteTag(sb, fieldId, wireType, writerVar);
-            var elementWriteExpr = TypeMapping.GetElementWriteExpression(elementTypeName, "item", format, writerVar);
-            sb.AppendIndentedLine($"{elementWriteExpr};");
+
+            // For enums, cast to int and write as varint; otherwise use TypeMapping
+            if (isEnum)
+            {
+                sb.AppendIndentedLine($"{writerVar}.WriteVarInt32((int)item);");
+            }
+            else
+            {
+                var elementWriteExpr = TypeMapping.GetElementWriteExpression(elementTypeName, "item", format, writerVar);
+                sb.AppendIndentedLine($"{elementWriteExpr};");
+            }
 
             sb.EndBlock();
             sb.EndBlock();
@@ -828,7 +843,13 @@ namespace GProtobuf.Generator.V2.Handlers
             int fieldId,
             string calculatorVar = "calculator")
         {
-            var wireType = TypeMapping.GetWireType(elementTypeName, format);
+            var normalizedType = TypeMapping.NormalizeTypeName(elementTypeName);
+
+            // Check if element type is enum
+            bool isEnum = IsEnumType(elementTypeName);
+
+            // For enums, use VarInt wire type; otherwise use TypeMapping
+            var wireType = isEnum ? WireType.VarInt : TypeMapping.GetWireType(elementTypeName, format);
 
             sb.AppendIndentedLine($"if ({sourceVar} != null)");
             sb.StartNewBlock();
@@ -836,7 +857,6 @@ namespace GProtobuf.Generator.V2.Handlers
             sb.StartNewBlock();
 
             // Add null validation for string and byte[] (Level200 compatibility)
-            var normalizedType = TypeMapping.NormalizeTypeName(elementTypeName);
             bool isString = normalizedType == "System.String";
             bool isByteArray = normalizedType == "System.Byte[]";
 
@@ -852,8 +872,17 @@ namespace GProtobuf.Generator.V2.Handlers
             }
 
             GenerateSizeTag(sb, fieldId, wireType, calculatorVar);
-            var elementSizeExpr = TypeMapping.GetElementSizeExpression(elementTypeName, "item", format, calculatorVar);
-            sb.AppendIndentedLine($"{elementSizeExpr};");
+
+            // For enums, cast to int and calculate varint size; otherwise use TypeMapping
+            if (isEnum)
+            {
+                sb.AppendIndentedLine($"{calculatorVar}.WriteVarInt32((int)item);");
+            }
+            else
+            {
+                var elementSizeExpr = TypeMapping.GetElementSizeExpression(elementTypeName, "item", format, calculatorVar);
+                sb.AppendIndentedLine($"{elementSizeExpr};");
+            }
 
             sb.EndBlock();
             sb.EndBlock();

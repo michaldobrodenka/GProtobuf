@@ -182,6 +182,45 @@ namespace GProtobuf.Generator.V2
         }
 
         /// <summary>
+        /// Checks if a type is a readonly struct (struct with readonly fields or readonly struct modifier).
+        /// Used by code generators to determine if Populate method is usable or if ReadContent is required.
+        /// </summary>
+        /// <param name="typeName">Fully qualified type name.</param>
+        /// <returns>True if type is readonly struct, false otherwise.</returns>
+        /// <remarks>
+        /// For readonly structs, the Populate method is a no-op because fields cannot be modified after construction.
+        /// Code generators should use Read{ClassName}Content instead of Populate{ClassName} for readonly structs.
+        /// </remarks>
+        public bool IsReadonlyStruct(string typeName)
+        {
+            var type = GetByFullName(typeName);
+            if (type == null || !type.IsStruct)
+                return false;
+
+            // Check if TypeSymbol indicates readonly struct
+            if (type.TypeSymbol?.IsReadOnly == true)
+                return true;
+
+            // Fallback: Check if struct has readonly fields (for older code or when TypeSymbol.IsReadOnly is false)
+            if (type.TypeSymbol != null && type.ProtoMembers != null)
+            {
+                foreach (var member in type.ProtoMembers)
+                {
+                    var memberSymbol = type.TypeSymbol.GetMembers()
+                        .FirstOrDefault(s => s.Name == member.Name &&
+                            (s is Microsoft.CodeAnalysis.IFieldSymbol || s is Microsoft.CodeAnalysis.IPropertySymbol));
+
+                    if (memberSymbol is Microsoft.CodeAnalysis.IFieldSymbol fs && fs.IsReadOnly)
+                        return true;
+                    if (memberSymbol is Microsoft.CodeAnalysis.IPropertySymbol ps && ps.SetMethod == null)
+                        return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
         /// Gets all registered enum type names.
         /// </summary>
         /// <returns>Collection of fully qualified enum type names.</returns>
