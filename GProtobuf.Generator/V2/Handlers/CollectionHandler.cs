@@ -351,7 +351,6 @@ namespace GProtobuf.Generator.V2.Handlers
             }
             else
             {
-                // LEVEL200: Null elements in collections must throw exception (protobuf-net 2.3.7 behavior)
                 // Use ReferenceEquals to work with both value types (structs) and reference types (classes)
                 // For structs, ReferenceEquals will always return false (no null check needed)
                 // For classes, ReferenceEquals will return true if null

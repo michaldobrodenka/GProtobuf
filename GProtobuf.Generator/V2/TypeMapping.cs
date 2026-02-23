@@ -71,16 +71,6 @@ namespace GProtobuf.Generator.V2
                    normalized == "System.TimeSpan";
         }
 
-        /// <summary>
-        /// Determines if a repeated field should use packed encoding by default (Level200 compliance).
-        /// UNPACKED encoding is the default for protobuf-net 2.3.7 CompatibilityLevel.Level200.
-        /// </summary>
-        /// <remarks>
-        /// Level200 requirement: All repeated primitives (int32, int64, float, double, bool, etc.)
-        /// use UNPACKED encoding (repeated field tags) by default.
-        /// PACKED encoding (WireType.LengthDelimited) is only used when explicitly marked with IsPacked=true.
-        /// This matches protobuf-net 2.3.7 Level200 actual behavior.
-        /// </remarks>
         public static bool ShouldBePackedByDefault(string elementTypeName)
         {
             // Level200: primitives use UNPACKED encoding by default

@@ -594,9 +594,6 @@ namespace GProtobuf.Generator.V2.Handlers
         /// <summary>
         /// Generates write code for a single primitive value with tag.
         /// Includes default value check for non-nullable types.
-        /// protobuf-net 2.3.7 Level200 behavior:
-        /// - IsRequired on non-nullable types → ALWAYS serialize (bypass default check)
-        /// - IsRequired on nullable types → IGNORED (normal nullable check applies)
         /// </summary>
         public void GenerateWrite(
             StringBuilderWithIndent sb,
@@ -614,7 +611,6 @@ namespace GProtobuf.Generator.V2.Handlers
             if (!TypeMapping.IsSimpleType(typeName)) return;
 
             // Generate condition
-            // protobuf-net 2.3.7 Level200: IsRequired is IGNORED for nullable types
             if (isNullable)
             {
                 // Nullable types: always use HasValue check (IsRequired ignored)
@@ -738,9 +734,6 @@ namespace GProtobuf.Generator.V2.Handlers
 
         /// <summary>
         /// Generates size calculation for a single primitive value.
-        /// protobuf-net 2.3.7 Level200 behavior:
-        /// - IsRequired on non-nullable types → ALWAYS calculate size (bypass default check)
-        /// - IsRequired on nullable types → IGNORED (normal nullable check applies)
         /// </summary>
         public void GenerateSize(
             StringBuilderWithIndent sb,
@@ -755,7 +748,6 @@ namespace GProtobuf.Generator.V2.Handlers
             var wireType = TypeMapping.GetWireType(typeName, format);
 
             // Generate condition
-            // protobuf-net 2.3.7 Level200: IsRequired is IGNORED for nullable types
             if (isNullable)
             {
                 // Nullable types: always use HasValue check (IsRequired ignored)

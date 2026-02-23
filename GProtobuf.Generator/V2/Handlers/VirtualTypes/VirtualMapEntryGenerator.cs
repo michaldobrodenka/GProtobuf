@@ -811,7 +811,6 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 }
                 else
                 {
-                    // MapEntry Level200: use UNPACKED encoding for primitives (protobuf-net 2.3.7 compatibility)
                     // Inside MapEntry, repeated fields are serialized with one tag per element (not packed)
                     // This differs from top-level repeated fields which use packed encoding
                     var wireType = TypeMapping.GetWireType(typeInfo.CollectionElementType, DataFormat.Default);
@@ -829,7 +828,6 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             }
             else if (elemInfo.IsEnum)
             {
-                // MapEntry Level200: use UNPACKED encoding for enums (protobuf-net 2.3.7 compatibility)
                 var (_, enumTagBytes) = TypeMapping.PrecomputeTagBytes(fieldId, WireType.VarInt);
                 _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
                 _sb.StartNewBlock();
@@ -1067,7 +1065,6 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 }
                 else
                 {
-                    // MapEntry Level200: use UNPACKED encoding for primitives (protobuf-net 2.3.7 compatibility)
                     // Inside MapEntry, repeated fields are serialized with one tag per element (not packed)
                     var wireType = TypeMapping.GetWireType(typeInfo.CollectionElementType, DataFormat.Default);
                     var (bytesString, _) = TypeMapping.PrecomputeTagBytes(fieldId, wireType);
@@ -1084,7 +1081,6 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             }
             else if (elemInfo.IsEnum)
             {
-                // MapEntry Level200: use UNPACKED encoding for enums (protobuf-net 2.3.7 compatibility)
                 var (enumBytesString, _) = TypeMapping.PrecomputeTagBytes(fieldId, WireType.VarInt);
                 _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
                 _sb.StartNewBlock();

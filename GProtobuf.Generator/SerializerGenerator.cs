@@ -1038,9 +1038,6 @@ public sealed class SerializerGenerator : IIncrementalGenerator
 
     /// <summary>
     /// Determines if a type has a parameterless constructor (explicit or implicit).
-    /// This mimics protobuf-net 2.3.7 behavior:
-    /// - Explicit parameterless constructor (public/private/internal)
-    /// - Implicit constructor (no constructors defined)
     /// </summary>
     private static bool HasParameterlessConstructor(INamedTypeSymbol typeSymbol)
     {
