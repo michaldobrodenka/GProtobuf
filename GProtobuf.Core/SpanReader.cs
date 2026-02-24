@@ -1066,13 +1066,11 @@ namespace GProtobuf.Core
         /// - VarInt (0): Reads and discards varint
         /// - Fixed64b (1): Skips 8 bytes
         /// - Len (2): Reads length prefix, skips N bytes
+        /// - StartGroup (3): Skips all fields until matching EndGroup (protobuf-net compatibility)
+        /// - EndGroup (4): No-op, just a marker
         /// - Fixed32b (5): Skips 4 bytes
-        ///
-        /// <para><b>Unsupported Wire Types:</b></para>
-        /// - StartGroup (3), EndGroup (4): Legacy types, not supported in Level200
         /// </remarks>
         /// <exception cref="InvalidOperationException">
-        /// Thrown for unknown wire types (3, 4, 6, 7) or buffer overrun.
         /// </exception>
         public void SkipField(WireType wireType)
         {
@@ -1101,8 +1099,47 @@ namespace GProtobuf.Core
                     position += length;
                     break;
 
+                case WireType.StartGroup:
+                    // protobuf-net compatibility: Skip all fields until EndGroup
+                    SkipGroup();
+                    break;
+
+                case WireType.EndGroup:
+                    // EndGroup is just a marker, nothing to skip
+                    break;
+
                 default:
-                    throw new InvalidOperationException($"Unknown WireType: {wireType}");
+                    throw new InvalidOperationException($"Unknown WireType: {wireType}. Position: {position}, Buffer length: {buffer.Length}");
+            }
+        }
+
+        /// <summary>
+        /// Skips a group (fields between StartGroup and EndGroup).
+        /// Supports nested groups by tracking depth.
+        /// Used for protobuf-net backward compatibility.
+        /// </summary>
+        private void SkipGroup()
+        {
+            int depth = 1; // We're already inside one group
+
+            while (depth > 0 && !IsEnd)
+            {
+                ReadWireTypeAndFieldId(out var innerWireType, out var _);
+
+                switch (innerWireType)
+                {
+                    case WireType.StartGroup:
+                        depth++;
+                        break;
+
+                    case WireType.EndGroup:
+                        depth--;
+                        break;
+
+                    default:
+                        SkipField(innerWireType);
+                        break;
+                }
             }
         }
     }

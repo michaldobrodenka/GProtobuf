@@ -213,7 +213,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             _sb.AppendNewLine();
         }
 
-        private void GenerateFieldRead(string targetVar, string typeName, TypeAnalysisInfo typeInfo, bool isEnum, string fieldPrefix = "")
+        private void GenerateFieldRead(string targetVar, string typeName, TypeAnalysisInfo typeInfo, bool isEnum, string fieldPrefix = "", string wireTypeVar = "entryWireType")
         {
             // byte[] is a primitive type (bytes), not a collection - check this FIRST before anything else
             var normalizedType = TypeMapping.NormalizeTypeName(typeName);
@@ -253,7 +253,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             if (typeInfo.IsDictionary)
             {
                 // Nested dictionary - read as virtual map entry
-                GenerateDictionaryFieldRead(targetVar, typeInfo);
+                GenerateDictionaryFieldRead(targetVar, typeInfo, fieldPrefix);
                 return;
             }
 
@@ -289,7 +289,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 else if (elemInfo.IsPrimitive)
                 {
                     // Numeric primitives - packed format reads entire array at once
-                    _sb.AppendIndentedLine($"if (entryWireType == 2) // Len - packed format");
+                    _sb.AppendIndentedLine($"if ({wireTypeVar} == 2) // Len - packed format");
                     _sb.StartNewBlock();
                     var packedReadExpr = TypeMapping.GetPackedArrayReadExpression(elementType, DataFormat.Default, "reader");
                     if (packedReadExpr != null)
@@ -327,9 +327,16 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                     _sb.AppendIndentedLine($"var {fieldPrefix}ItemSpan = reader.GetSlice((int){fieldPrefix}ItemLength);");
                     _sb.AppendIndentedLine($"var {fieldPrefix}ScopedReader = new SpanReader({fieldPrefix}ItemSpan);");
 
+                    // Check if element type is a derived type (has ProtoInclude parent) - use Read{typeName} to handle wrapper
+                    bool isDerivedType = _typeRegistry?.IsDerivedType(elementType) ?? false;
                     // Check if element type is a readonly struct - use ReadContent instead of Populate
                     bool isReadonlyStruct = _typeRegistry?.IsReadonlyStruct(elementType) ?? false;
-                    if (isReadonlyStruct)
+                    if (isDerivedType)
+                    {
+                        // Derived type - use Read{typeName} which handles ProtoInclude wrapper format
+                        _sb.AppendIndentedLine($"var {fieldPrefix}Item = {spanReadersClass}.Read{elemInfo.ShortTypeName}(ref {fieldPrefix}ScopedReader);");
+                    }
+                    else if (isReadonlyStruct)
                     {
                         _sb.AppendIndentedLine($"var {fieldPrefix}Item = {spanReadersClass}.Read{elemInfo.ShortTypeName}Content(ref {fieldPrefix}ScopedReader);");
                     }
@@ -347,7 +354,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             if (typeInfo.IsCollection)
             {
                 // Collection value - need to handle both packed and non-packed formats
-                GenerateCollectionFieldRead(targetVar, typeInfo, "entryWireType", fieldPrefix);
+                GenerateCollectionFieldRead(targetVar, typeInfo, wireTypeVar, fieldPrefix);
                 return;
             }
 
@@ -372,11 +379,18 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 _sb.AppendIndentedLine($"var {fieldPrefix}MsgSpan = reader.GetSlice((int){fieldPrefix}MsgLength);");
                 _sb.AppendIndentedLine($"var {fieldPrefix}ScopedReader = new SpanReader({fieldPrefix}MsgSpan);");
 
+                // Check if type is a derived type (has ProtoInclude parent) - use Read{typeName} to handle wrapper
+                bool isDerivedType = _typeRegistry?.IsDerivedType(typeName) ?? false;
                 // Check if this is a readonly struct - use ReadContent instead of Populate
                 // For readonly structs, Populate is a no-op because fields cannot be modified after construction
                 bool isReadonlyStruct = _typeRegistry?.IsReadonlyStruct(typeName) ?? false;
 
-                if (isReadonlyStruct)
+                if (isDerivedType)
+                {
+                    // Derived type - use Read{typeName} which handles ProtoInclude wrapper format
+                    _sb.AppendIndentedLine($"{targetVar} = {spanReadersClass}.Read{sanitizedName}(ref {fieldPrefix}ScopedReader);");
+                }
+                else if (isReadonlyStruct)
                 {
                     // Readonly struct - must use ReadContent which returns a new instance
                     _sb.AppendIndentedLine($"{targetVar} = {spanReadersClass}.Read{sanitizedName}Content(ref {fieldPrefix}ScopedReader);");
@@ -398,13 +412,184 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             }
         }
 
-        private void GenerateDictionaryFieldRead(string targetVar, TypeAnalysisInfo typeInfo)
+        private void GenerateDictionaryFieldRead(string targetVar, TypeAnalysisInfo typeInfo, string fieldPrefix = "")
         {
-            var mapEntryTypeName = typeInfo.MapEntryTypeName;
+            var innerKeyType = typeInfo.DictionaryKeyType;
+            var innerValueType = typeInfo.DictionaryValueType;
 
-            _sb.AppendIndentedLine($"// Each field 2 is ONE entry of nested dictionary (repeated field semantics)");
-            _sb.AppendIndentedLine($"var innerEntry = Read{mapEntryTypeName}(ref reader);");
-            _sb.AppendIndentedLine($"if (innerEntry.success) {targetVar}[innerEntry.key] = innerEntry.value;");
+            // Analyze inner key/value types to determine how to read them
+            var innerKeyTypeInfo = _registry.AnalyzeType(innerKeyType);
+            var innerValueTypeInfo = _registry.AnalyzeType(innerValueType);
+
+            // Protobuf-net (including Level200) ALWAYS uses REPEATED format for nested dictionary entries.
+            // Each entry of the nested dictionary gets its own field tag (field 2).
+            // Wire format: [tag][entry1_len][entry1][tag][entry2_len][entry2]...
+            // This matches the write side (GenerateDictionaryFieldWrite/GenerateDictionaryFieldSize).
+            GenerateDictionaryFieldReadRepeated(targetVar, innerKeyType, innerKeyTypeInfo,
+                innerValueType, innerValueTypeInfo, fieldPrefix);
+        }
+
+        /// <summary>
+        /// Generates code for REPEATED format nested dictionaries (primitive/enum values).
+        /// In this format, each outer field 2 hit reads ONE entry of the inner dictionary.
+        /// Format: [entry_length][field1:key][field2:value] - called multiple times via repeated field 2
+        /// </summary>
+        private void GenerateDictionaryFieldReadRepeated(string targetVar,
+            string innerKeyType, TypeAnalysisInfo innerKeyTypeInfo,
+            string innerValueType, TypeAnalysisInfo innerValueTypeInfo,
+            string fieldPrefix)
+        {
+            var prefix = string.IsNullOrEmpty(fieldPrefix) ? "inner" : $"{fieldPrefix}Inner";
+            var entryLengthVar = $"{prefix}EntryLength";
+            var entryEndVar = $"{prefix}EntryEnd";
+            var keyVar = $"{prefix}Key";
+            var valueVar = $"{prefix}Value";
+            var tagVar = $"{prefix}Tag";
+            var fieldIdVar = $"{prefix}FieldId";
+            var wireTypeVar = $"{prefix}WireType";
+
+            var innerKeyFullType = GetFullTypeName(innerKeyType, innerKeyTypeInfo);
+            var innerValueFullType = GetFullTypeName(innerValueType, innerValueTypeInfo);
+
+            // REPEATED format: each case 2 hit reads ONE entry
+            // Format: [entry_length][field 1: key][field 2: value]
+            _sb.AppendIndentedLine($"// Nested dictionary entry - REPEATED format (primitive values)");
+            _sb.AppendIndentedLine($"var {entryLengthVar} = reader.ReadVarUInt32();");
+            _sb.AppendIndentedLine($"var {entryEndVar} = reader.Position + (int){entryLengthVar};");
+            _sb.AppendNewLine();
+
+            _sb.AppendIndentedLine($"{innerKeyFullType} {keyVar} = default;");
+            // For nested dictionaries/collections, use proper initializer instead of default (which is null)
+            var valueInit = GetDefaultInitializer(innerValueType, innerValueTypeInfo);
+            _sb.AppendIndentedLine($"{innerValueFullType} {valueVar} = {valueInit};");
+            _sb.AppendNewLine();
+
+            // Read entry fields
+            _sb.AppendIndentedLine($"while (reader.Position < {entryEndVar})");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine($"var {tagVar} = reader.ReadVarUInt32();");
+            _sb.AppendIndentedLine($"var {fieldIdVar} = (int)({tagVar} >> 3);");
+            _sb.AppendIndentedLine($"var {wireTypeVar} = (int)({tagVar} & 0x7);");
+            _sb.AppendNewLine();
+
+            _sb.AppendIndentedLine($"switch ({fieldIdVar})");
+            _sb.StartNewBlock();
+
+            // case 1: key
+            _sb.AppendIndentedLine($"case 1:");
+            _sb.IncreaseIndent();
+            GenerateFieldRead(keyVar, innerKeyType, innerKeyTypeInfo, innerKeyTypeInfo?.IsEnum ?? false, prefix + "Key", wireTypeVar);
+            _sb.AppendIndentedLine($"break;");
+            _sb.DecreaseIndent();
+
+            // case 2: value
+            _sb.AppendIndentedLine($"case 2:");
+            _sb.IncreaseIndent();
+            GenerateFieldRead(valueVar, innerValueType, innerValueTypeInfo, innerValueTypeInfo?.IsEnum ?? false, prefix + "Value", wireTypeVar);
+            _sb.AppendIndentedLine($"break;");
+            _sb.DecreaseIndent();
+
+            // default: skip
+            _sb.AppendIndentedLine($"default:");
+            _sb.IncreaseIndent();
+            _sb.AppendIndentedLine($"reader.SkipField((global::GProtobuf.Core.WireType){wireTypeVar});");
+            _sb.AppendIndentedLine($"break;");
+            _sb.DecreaseIndent();
+
+            _sb.EndBlock(); // switch
+            _sb.EndBlock(); // while
+
+            // Add this ONE entry to dictionary
+            _sb.AppendNewLine();
+            _sb.AppendIndentedLine($"{targetVar}[{keyVar}] = {valueVar};");
+        }
+
+        /// <summary>
+        /// Generates code for PACKED/Level200 format nested dictionaries (complex values like collections).
+        /// In this format, all entries are packed together with individual length prefixes.
+        /// Format: [total_length][entry1_len][entry1][entry2_len][entry2]...
+        /// </summary>
+        private void GenerateDictionaryFieldReadPacked(string targetVar,
+            string innerKeyType, TypeAnalysisInfo innerKeyTypeInfo,
+            string innerValueType, TypeAnalysisInfo innerValueTypeInfo,
+            string fieldPrefix)
+        {
+            var prefix = string.IsNullOrEmpty(fieldPrefix) ? "inner" : $"{fieldPrefix}Inner";
+            var dictLengthVar = $"{prefix}DictLength";
+            var dictEndVar = $"{prefix}DictEnd";
+            var entryLengthVar = $"{prefix}EntryLength";
+            var entryEndVar = $"{prefix}EntryEnd";
+            var keyVar = $"{prefix}Key";
+            var valueVar = $"{prefix}Value";
+            var tagVar = $"{prefix}Tag";
+            var fieldIdVar = $"{prefix}FieldId";
+            var wireTypeVar = $"{prefix}WireType";
+
+            var innerKeyFullType = GetFullTypeName(innerKeyType, innerKeyTypeInfo);
+            var innerValueFullType = GetFullTypeName(innerValueType, innerValueTypeInfo);
+            var valueDefaultInit = GetDefaultInitializer(innerValueType, innerValueTypeInfo);
+
+            // PACKED/Level200 format: all entries packed together
+            // Format: [total_length][entry1_len][entry1_fields][entry2_len][entry2_fields]...
+            _sb.AppendIndentedLine($"// Nested dictionary - PACKED/Level200 format (complex values)");
+            _sb.AppendIndentedLine($"var {dictLengthVar} = reader.ReadVarUInt32();");
+            _sb.AppendIndentedLine($"var {dictEndVar} = reader.Position + (int){dictLengthVar};");
+            _sb.AppendNewLine();
+
+            // Read ALL entries in outer loop
+            _sb.AppendIndentedLine($"while (reader.Position < {dictEndVar})");
+            _sb.StartNewBlock();
+
+            // Read entry length first
+            _sb.AppendIndentedLine($"var {entryLengthVar} = reader.ReadVarUInt32();");
+            _sb.AppendIndentedLine($"var {entryEndVar} = reader.Position + (int){entryLengthVar};");
+            _sb.AppendNewLine();
+
+            // Declare key and value for THIS entry
+            _sb.AppendIndentedLine($"{innerKeyFullType} {keyVar} = default;");
+            _sb.AppendIndentedLine($"{innerValueFullType} {valueVar} = {valueDefaultInit};");
+            _sb.AppendNewLine();
+
+            // Read entry fields
+            _sb.AppendIndentedLine($"while (reader.Position < {entryEndVar})");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine($"var {tagVar} = reader.ReadVarUInt32();");
+            _sb.AppendIndentedLine($"var {fieldIdVar} = (int)({tagVar} >> 3);");
+            _sb.AppendIndentedLine($"var {wireTypeVar} = (int)({tagVar} & 0x7);");
+            _sb.AppendNewLine();
+
+            _sb.AppendIndentedLine($"switch ({fieldIdVar})");
+            _sb.StartNewBlock();
+
+            // case 1: key
+            _sb.AppendIndentedLine($"case 1:");
+            _sb.IncreaseIndent();
+            GenerateFieldRead(keyVar, innerKeyType, innerKeyTypeInfo, innerKeyTypeInfo?.IsEnum ?? false, prefix + "Key", wireTypeVar);
+            _sb.AppendIndentedLine($"break;");
+            _sb.DecreaseIndent();
+
+            // case 2: value
+            _sb.AppendIndentedLine($"case 2:");
+            _sb.IncreaseIndent();
+            GenerateFieldRead(valueVar, innerValueType, innerValueTypeInfo, innerValueTypeInfo?.IsEnum ?? false, prefix + "Value", wireTypeVar);
+            _sb.AppendIndentedLine($"break;");
+            _sb.DecreaseIndent();
+
+            // default: skip
+            _sb.AppendIndentedLine($"default:");
+            _sb.IncreaseIndent();
+            _sb.AppendIndentedLine($"reader.SkipField((global::GProtobuf.Core.WireType){wireTypeVar});");
+            _sb.AppendIndentedLine($"break;");
+            _sb.DecreaseIndent();
+
+            _sb.EndBlock(); // switch
+            _sb.EndBlock(); // inner while (entry fields)
+
+            // Add entry to dictionary
+            _sb.AppendNewLine();
+            _sb.AppendIndentedLine($"{targetVar}[{keyVar}] = {valueVar};");
+
+            _sb.EndBlock(); // outer while (entries)
         }
 
         private void GenerateCollectionFieldRead(string targetVar, TypeAnalysisInfo typeInfo, string wireTypeVar, string fieldPrefix = "")
@@ -549,9 +734,16 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 _sb.AppendIndentedLine($"var {fieldPrefix}ItemSpan = reader.GetSlice((int){fieldPrefix}ItemLength);");
                 _sb.AppendIndentedLine($"var {fieldPrefix}ScopedReader = new SpanReader({fieldPrefix}ItemSpan);");
 
+                // Check if element type is a derived type (has ProtoInclude parent) - use Read{typeName} to handle wrapper
+                bool isDerivedType = _typeRegistry?.IsDerivedType(elementType) ?? false;
                 // Check if element type is a readonly struct - use ReadContent instead of Populate
                 bool isReadonlyStruct = _typeRegistry?.IsReadonlyStruct(elementType) ?? false;
-                if (isReadonlyStruct)
+                if (isDerivedType)
+                {
+                    // Derived type - use Read{typeName} which handles ProtoInclude wrapper format
+                    _sb.AppendIndentedLine($"var {fieldPrefix}Item = {spanReadersClass}.Read{elemInfo.ShortTypeName}(ref {fieldPrefix}ScopedReader);");
+                }
+                else if (isReadonlyStruct)
                 {
                     _sb.AppendIndentedLine($"var {fieldPrefix}Item = {spanReadersClass}.Read{elemInfo.ShortTypeName}Content(ref {fieldPrefix}ScopedReader);");
                 }
@@ -756,15 +948,16 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             _sb.AppendIndentedLine($"var nestedDict = {sourceVar} ?? new {dictType}();");
             _sb.AppendNewLine();
 
-            _sb.AppendIndentedLine("// Each inner entry is a repeated field with its own tag (protobuf-net Level200 format)");
+            // REPEATED format (standard protobuf): each entry gets its own field tag
+            // Format: [tag][entry1_len][entry1][tag][entry2_len][entry2]...
+            _sb.AppendIndentedLine("// Nested dictionary - REPEATED format (standard protobuf): each entry gets its own tag");
             _sb.AppendIndentedLine("foreach (var kvp in nestedDict)");
             _sb.StartNewBlock();
-            _sb.AppendIndentedLine($"{calcVar}.AddByteLength({tagBytes}); // tag for repeated field {fieldId}");
+            _sb.AppendIndentedLine($"{calcVar}.AddByteLength({tagBytes}); // tag for each nested entry");
             _sb.AppendIndentedLine("var innerEntryCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
             _sb.AppendIndentedLine($"SizeCalculators.Calculate{mapEntryTypeName}Size(ref innerEntryCalc, kvp.Key, kvp.Value);");
-            _sb.AppendIndentedLine("// Each entry is written as: length_prefix + content");
-            _sb.AppendIndentedLine($"{calcVar}.WriteVarUInt32((uint)innerEntryCalc.Length);  // size of length prefix");
-            _sb.AppendIndentedLine($"{calcVar}.AddByteLength(innerEntryCalc.Length);         // size of content");
+            _sb.AppendIndentedLine($"{calcVar}.WriteVarUInt32((uint)innerEntryCalc.Length);  // entry length prefix");
+            _sb.AppendIndentedLine($"{calcVar}.AddByteLength(innerEntryCalc.Length);         // entry content");
             _sb.EndBlock();
         }
 
@@ -1014,10 +1207,12 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             // NOTE: nestedDict variable already created in size calculation phase
             // Just use it directly here
 
-            _sb.AppendIndentedLine("// Each inner entry is a repeated field with its own tag (protobuf-net Level200 format)");
+            // REPEATED format (standard protobuf): each entry gets its own field tag
+            // Format: [tag][entry1_len][entry1][tag][entry2_len][entry2]...
+            _sb.AppendIndentedLine("// Nested dictionary - REPEATED format (standard protobuf): each entry gets its own tag");
             _sb.AppendIndentedLine("foreach (var kvp in nestedDict)");
             _sb.StartNewBlock();
-            _sb.AppendIndentedLine($"writer.WriteSingleByte({bytesString}); // tag for repeated field {fieldId}");
+            _sb.AppendIndentedLine($"writer.WriteSingleByte({bytesString}); // tag for each nested entry");
             _sb.AppendIndentedLine($"{_writerClassName}.Write{mapEntryTypeName}(ref writer, kvp.Key, kvp.Value);");
             _sb.EndBlock();
         }

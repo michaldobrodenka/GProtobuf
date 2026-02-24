@@ -472,7 +472,10 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                         var typeNs = _registry?.GetNamespaceForType(member.Type) ?? string.Empty;
                         var typeNsPrefix = GeneratorHelpers.GetNamespacePrefix(typeNs, _currentNamespace);
 
-                        _sb.AppendIndentedLine($"{targetVariable} = {typeNsPrefix}SpanReaders.Read{simpleName}Content(ref nestedReader);");
+                        // For derived types (with ProtoInclude parent), use Read{typeName} to handle ProtoInclude wrapper
+                        bool isDerivedType = _registry?.IsDerivedType(member.Type) ?? false;
+                        var readMethodSuffix = isDerivedType ? "" : "Content";
+                        _sb.AppendIndentedLine($"{targetVariable} = {typeNsPrefix}SpanReaders.Read{simpleName}{readMethodSuffix}(ref nestedReader);");
                     }
                     break;
             }
@@ -1127,7 +1130,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.IncreaseIndent();
             _sb.AppendIndentedLine($"var {varName}Len = {readerVar}.ReadVarInt32();");
             _sb.AppendIndentedLine($"var {varName}Reader = new global::GProtobuf.Core.SpanReader({readerVar}.GetSlice({varName}Len));");
-            _sb.AppendIndentedLine($"{varName} = {typeNsPrefix}SpanReaders.Read{className}Content(ref {varName}Reader);");
+
+            // For derived types (with ProtoInclude parent), use Read{typeName} to handle ProtoInclude wrapper
+            bool isDerivedType = _registry?.IsDerivedType(typeName) ?? false;
+            var readMethodSuffix = isDerivedType ? "" : "Content";
+            _sb.AppendIndentedLine($"{varName} = {typeNsPrefix}SpanReaders.Read{className}{readMethodSuffix}(ref {varName}Reader);");
             _sb.DecreaseIndent();
             _sb.AppendIndentedLine("}");
         }
@@ -1481,7 +1488,10 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var elementNs = _registry.GetNamespaceForType(member.CollectionElementType);
             var elementNsPrefix = GeneratorHelpers.GetNamespacePrefix(elementNs, _currentNamespace);
 
-            _sb.AppendIndentedLine($"{targetCollection}.Add({elementNsPrefix}SpanReaders.Read{elementClassName}Content(ref itemReader));");
+            // For derived types (with ProtoInclude parent), use Read{typeName} to handle ProtoInclude wrapper
+            bool isDerivedType = _registry?.IsDerivedType(member.CollectionElementType) ?? false;
+            var readMethodSuffix = isDerivedType ? "" : "Content";
+            _sb.AppendIndentedLine($"{targetCollection}.Add({elementNsPrefix}SpanReaders.Read{elementClassName}{readMethodSuffix}(ref itemReader));");
         }
 
         private void GenerateTupleFieldReadBody(ProtoMemberAttribute member, string nsPrefix)
@@ -1505,8 +1515,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var typeNamespace = _registry.GetNamespaceForType(member.Type);
             var typeNsPrefix = GeneratorHelpers.GetNamespacePrefix(typeNamespace, _currentNamespace);
 
+            // For derived types (with ProtoInclude parent), use Read{typeName} to handle ProtoInclude wrapper
+            bool isDerivedType = _registry?.IsDerivedType(member.Type) ?? false;
+            var readMethodSuffix = isDerivedType ? "" : "Content";
+
             // Use SpanReaders for nested content (CreateSubReader returns SpanReader)
-            _sb.AppendIndentedLine($"result.{member.Name} = {typeNsPrefix}SpanReaders.Read{typeName}Content(ref nestedReader);");
+            _sb.AppendIndentedLine($"result.{member.Name} = {typeNsPrefix}SpanReaders.Read{typeName}{readMethodSuffix}(ref nestedReader);");
         }
 
         private void GenerateProtoIncludeReadCase(TypeDefinition parentType, ProtoIncludeAttribute include, string nsPrefix)

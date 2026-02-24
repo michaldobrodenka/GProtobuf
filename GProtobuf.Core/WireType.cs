@@ -37,6 +37,18 @@ public enum WireType
     Len = 2,
 
     /// <summary>
+    /// Start of a group (deprecated in proto3, but still in wire format).
+    /// Used by protobuf-net for backward compatibility.
+    /// </summary>
+    StartGroup = 3,
+
+    /// <summary>
+    /// End of a group (deprecated in proto3, but still in wire format).
+    /// Used by protobuf-net for backward compatibility.
+    /// </summary>
+    EndGroup = 4,
+
+    /// <summary>
     /// Fixed 32-bit encoding (little-endian).
     /// Used for: fixed32, sfixed32, float.
     /// Encoding: Always exactly 4 bytes, little-endian byte order.

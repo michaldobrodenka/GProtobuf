@@ -1449,7 +1449,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
                 var typeNamespace = _registry.GetNamespaceForType(member.Type);
                 var nsPrefix = GeneratorHelpers.GetNamespacePrefix(typeNamespace, _currentNamespace);
-                _sb.AppendIndentedLine($"instance.{member.Name} = {nsPrefix}SpanReaders.Read{typeName}Content(ref complexReader_{member.FieldId});");
+
+                // For derived types (with ProtoInclude parent), use Read{typeName} to handle ProtoInclude wrapper
+                // For non-derived types, use Read{typeName}Content for direct field reading
+                bool isDerivedType = _registry?.IsDerivedType(member.Type) ?? false;
+                var readMethodSuffix = isDerivedType ? "" : "Content";
+                _sb.AppendIndentedLine($"instance.{member.Name} = {nsPrefix}SpanReaders.Read{typeName}{readMethodSuffix}(ref complexReader_{member.FieldId});");
             }
 
             _sb.AppendIndentedLine("break;");
@@ -1692,7 +1697,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 // Check if type is from different namespace and qualify the call
                 var typeNamespace = _registry.GetNamespaceForType(member.Type);
                 var nsPrefix = GeneratorHelpers.GetNamespacePrefix(typeNamespace, _currentNamespace);
-                _sb.AppendIndentedLine($"instance.{member.Name} = {nsPrefix}SpanReaders.Read{typeName}Content(ref nestedReader);");
+
+                // For derived types (with ProtoInclude parent), use Read{typeName} to handle ProtoInclude wrapper
+                // For non-derived types, use Read{typeName}Content for direct field reading
+                bool isDerivedType = _registry?.IsDerivedType(member.Type) ?? false;
+                var readMethodSuffix = isDerivedType ? "" : "Content";
+                _sb.AppendIndentedLine($"instance.{member.Name} = {nsPrefix}SpanReaders.Read{typeName}{readMethodSuffix}(ref nestedReader);");
             }
 
             _sb.AppendIndentedLine("break;");
