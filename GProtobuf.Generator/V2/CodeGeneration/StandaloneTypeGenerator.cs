@@ -120,13 +120,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine(returnStatement);
             _sb.EndBlock();
             _sb.AppendNewLine();
-
-            // byte[] overload
-            _sb.AppendIndentedLine($"public static {returnType} {methodName}(byte[] data)");
-            _sb.StartNewBlock();
-            _sb.AppendIndentedLine($"return {methodName}(new ReadOnlySpan<byte>(data));");
-            _sb.EndBlock();
-            _sb.AppendNewLine();
         }
 
         private void GenerateComplexElementRead(string elementType, string addMethod)
@@ -227,13 +220,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.EndBlock(); // while outer
 
             _sb.AppendIndentedLine("return dict;");
-            _sb.EndBlock();
-            _sb.AppendNewLine();
-
-            // byte[] overload
-            _sb.AppendIndentedLine($"public static {returnType} {methodName}(byte[] data)");
-            _sb.StartNewBlock();
-            _sb.AppendIndentedLine($"return {methodName}(new ReadOnlySpan<byte>(data));");
             _sb.EndBlock();
             _sb.AppendNewLine();
         }

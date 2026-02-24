@@ -293,14 +293,6 @@ namespace GProtobuf.Generator.V2
                     sb.EndBlock();
                     sb.AppendNewLine();
 
-                    // byte[] overload for method group compatibility
-                    sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(byte[] data) => Deserialize{className}(new ReadOnlySpan<byte>(data));");
-                    sb.AppendNewLine();
-
-                    // byte[] overload with existingInstance
-                    sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(byte[] data, global::{type.FullName} existingInstance) => Deserialize{className}(new ReadOnlySpan<byte>(data), existingInstance);");
-                    sb.AppendNewLine();
-
                     // Stream overload (allocates default buffer)
                     sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(Stream stream)");
                     sb.StartNewBlock();
@@ -348,10 +340,6 @@ namespace GProtobuf.Generator.V2
                     sb.EndBlock();
                     sb.AppendNewLine();
 
-                    // Deserialize method - byte[] overload (expression body)
-                    sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(byte[] data) => Deserialize{className}(new ReadOnlySpan<byte>(data));");
-                    sb.AppendNewLine();
-
                     // Deserialize method - Stream overload (allocates default buffer)
                     sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(Stream stream)");
                     sb.StartNewBlock();
@@ -380,10 +368,6 @@ namespace GProtobuf.Generator.V2
                     sb.AppendIndentedLine("var reader = new SpanReader(data);");
                     sb.AppendIndentedLine($"SpanReaders.Populate{className}(ref reader, instance);");
                     sb.EndBlock();
-                    sb.AppendNewLine();
-
-                    // Populate method - byte[] overload (expression body)
-                    sb.AppendIndentedLine($"public static void Populate{className}(byte[] data, global::{type.FullName} instance) => Populate{className}(new ReadOnlySpan<byte>(data), instance);");
                     sb.AppendNewLine();
 
                     // Populate method - Stream overload (allocates default buffer)
