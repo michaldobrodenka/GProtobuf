@@ -42,67 +42,14 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         }
 
         /// <summary>
-        /// Generates methods that work directly with KeyValue structs.
-        /// These methods wrap the existing MapEntry methods.
+        /// KeyValue wrapper methods are no longer generated.
+        /// MapEntry methods are called directly for better performance (avoids KeyValue struct allocation).
+        /// This method is kept for API compatibility but does nothing.
         /// </summary>
         public void GenerateKeyValueMethods(string generatorType)
         {
-            var allMapTypes = _mapRegistry.GetAllTypes();
-            if (allMapTypes == null || allMapTypes.Count == 0)
-                return;
-
-            _sb.AppendLine("");
-            _sb.AppendIndentedLine($"// KeyValue methods for {generatorType}");
-
-            foreach (var mapInfo in allMapTypes)
-            {
-                var className = GetKeyValueClassName(mapInfo);
-                var mapEntryName = mapInfo.TypeName;
-
-                switch (generatorType)
-                {
-                    case "SpanReaders":
-                        GenerateReadKeyValueMethod(className, mapEntryName);
-                        break;
-                    case "StreamWriters":
-                        GenerateWriteKeyValueMethod(className, mapEntryName, "global::GProtobuf.Core.StreamWriter", "StreamWriters");
-                        break;
-                    case "BufferWriters":
-                        GenerateWriteKeyValueMethod(className, mapEntryName, "global::GProtobuf.Core.BufferWriter", "BufferWriters");
-                        break;
-                    case "SizeCalculators":
-                        GenerateSizeKeyValueMethod(className, mapEntryName);
-                        break;
-                }
-            }
-        }
-
-        private void GenerateReadKeyValueMethod(string className, string mapEntryName)
-        {
-            _sb.AppendLine("");
-            _sb.AppendIndentedLine($"public static {className} Read{className}(ref SpanReader reader)");
-            _sb.StartNewBlock();
-            _sb.AppendIndentedLine($"var entry = SpanReaders.Read{mapEntryName}(ref reader);");
-            _sb.AppendIndentedLine($"return new {className} {{ Key = entry.key, Value = entry.value }};");
-            _sb.EndBlock();
-        }
-
-        private void GenerateWriteKeyValueMethod(string className, string mapEntryName, string writerTypeName, string generatorClassName)
-        {
-            _sb.AppendLine("");
-            _sb.AppendIndentedLine($"public static void Write{className}(ref {writerTypeName} writer, {className} keyValue)");
-            _sb.StartNewBlock();
-            _sb.AppendIndentedLine($"{generatorClassName}.Write{mapEntryName}(ref writer, keyValue.Key, keyValue.Value);");
-            _sb.EndBlock();
-        }
-
-        private void GenerateSizeKeyValueMethod(string className, string mapEntryName)
-        {
-            _sb.AppendLine("");
-            _sb.AppendIndentedLine($"public static void Calculate{className}Size(ref global::GProtobuf.Core.WriteSizeCalculator calculator, {className} keyValue)");
-            _sb.StartNewBlock();
-            _sb.AppendIndentedLine($"SizeCalculators.Calculate{mapEntryName}Size(ref calculator, keyValue.Key, keyValue.Value);");
-            _sb.EndBlock();
+            // No longer generates wrapper methods - MapEntry methods are called directly
+            // from MapHandler for read/write/size operations
         }
 
         /// <summary>

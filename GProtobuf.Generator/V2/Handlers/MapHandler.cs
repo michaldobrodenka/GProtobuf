@@ -164,50 +164,31 @@ namespace GProtobuf.Generator.V2.Handlers
         }
 
         /// <summary>
-        /// Generates code that calls the appropriate reader method (MapEntry for nested dictionaries, KeyValue otherwise).
+        /// Generates code that calls ReadMapEntry directly without creating intermediate KeyValue object.
+        /// ReadMapEntry returns (bool success, TKey key, TValue value) tuple.
         /// </summary>
         private void GenerateVirtualTypeRead(string targetVar, VirtualMapEntryInfo virtualInfo, ProtoMemberAttribute member, string dictCreationType, string readerVar)
         {
-            // NESTED DICTIONARY DETECTION:
-            // If value type is a dictionary, use MapEntry approach (Approach A)
-            // Otherwise, use KeyValue approach for compatibility
-            bool valueIsDictionary = TypeHelper.IsDictionaryType(virtualInfo.ValueType);
+            var mapEntryTypeName = VirtualTypeNameGenerator.GetMapEntryTypeName(virtualInfo.KeyType, virtualInfo.ValueType);
 
-            if (valueIsDictionary)
+            // Call ReadMapEntry directly - returns (bool success, TKey key, TValue value)
+            _sb.AppendIndentedLine($"var entry = SpanReaders.Read{mapEntryTypeName}(ref {readerVar});");
+            _sb.AppendIndentedLine($"if (entry.success)");
+            _sb.StartNewBlock();
+
+            // Initialize dictionary AFTER reading data, only if we have valid entry
+            _sb.AppendIndentedLine($"{targetVar} ??= new {dictCreationType}();");
+
+            if (TypeHelper.IsKeyValuePairCollection(member.Type))
             {
-                // APPROACH A: Native Dictionary with MapEntry reader
-                // Returns: (bool success, TKey key, TValue value)
-                var mapEntryTypeName = VirtualTypeNameGenerator.GetMapEntryTypeName(virtualInfo.KeyType, virtualInfo.ValueType);
-
-                _sb.AppendIndentedLine($"var entry = SpanReaders.Read{mapEntryTypeName}(ref {readerVar});");
-                _sb.AppendIndentedLine($"if (entry.success)");
-                _sb.StartNewBlock();
-
-                // Initialize dictionary AFTER reading data, only if we have valid entry
-                _sb.AppendIndentedLine($"{targetVar} ??= new {dictCreationType}();");
-                _sb.AppendIndentedLine($"{targetVar}[entry.key] = entry.value;");
-                _sb.EndBlock();
+                _sb.AppendIndentedLine($"{targetVar}.Add(new global::System.Collections.Generic.KeyValuePair<{member.MapKeyType}, {member.MapValueType}>(entry.key, entry.value));");
             }
             else
             {
-                // FALLBACK: KeyValue approach for backward compatibility
-                var keyValueClassName = GetKeyValueClassName(virtualInfo);
-
-                // Call the KeyValue reader method - read data first
-                _sb.AppendIndentedLine($"var keyValue = SpanReaders.Read{keyValueClassName}(ref {readerVar});");
-
-                // Initialize dictionary AFTER reading data successfully
-                _sb.AppendIndentedLine($"{targetVar} ??= new {dictCreationType}();");
-
-                if (TypeHelper.IsKeyValuePairCollection(member.Type))
-                {
-                    _sb.AppendIndentedLine($"{targetVar}.Add(new global::System.Collections.Generic.KeyValuePair<{member.MapKeyType}, {member.MapValueType}>(keyValue.Key, keyValue.Value));");
-                }
-                else
-                {
-                    _sb.AppendIndentedLine($"{targetVar}[keyValue.Key] = keyValue.Value;");
-                }
+                _sb.AppendIndentedLine($"{targetVar}[entry.key] = entry.value;");
             }
+
+            _sb.EndBlock();
         }
 
         /// <summary>
@@ -505,14 +486,12 @@ namespace GProtobuf.Generator.V2.Handlers
         }
 
         /// <summary>
-        /// Generates code that calls the appropriate writer method (MapEntry for nested dictionaries, KeyValue otherwise).
+        /// Generates code that calls WriteMapEntry directly with keyValue.Key, keyValue.Value.
         /// </summary>
         private void GenerateVirtualTypeWrite(string sourceVar, VirtualMapEntryInfo virtualInfo, ProtoMemberAttribute member)
         {
-            // NESTED DICTIONARY DETECTION:
-            // If value type is a dictionary, use MapEntry approach (Approach A)
-            // Otherwise, use KeyValue approach for compatibility
-            bool valueIsDictionary = TypeHelper.IsDictionaryType(virtualInfo.ValueType);
+            var mapEntryTypeName = VirtualTypeNameGenerator.GetMapEntryTypeName(virtualInfo.KeyType, virtualInfo.ValueType);
+            var keyValueClassName = GetKeyValueClassName(virtualInfo);
 
             _sb.AppendIndentedLine($"foreach (var kvp in {sourceVar})");
             _sb.StartNewBlock();
@@ -526,22 +505,9 @@ namespace GProtobuf.Generator.V2.Handlers
             // Write tag
             TagCodeHelper.WriteTag(_sb, member.FieldId, WireType.Len);
 
-            if (valueIsDictionary)
-            {
-                // APPROACH A: Native Dictionary with MapEntry writer
-                // Directly call WriteMapEntry without creating KeyValue object
-                var mapEntryTypeName = VirtualTypeNameGenerator.GetMapEntryTypeName(virtualInfo.KeyType, virtualInfo.ValueType);
-                _sb.AppendIndentedLine($"{_writerClassName}.Write{mapEntryTypeName}(ref writer, kvp.Key, kvp.Value);");
-            }
-            else
-            {
-                // FALLBACK: KeyValue approach for backward compatibility
-                var keyValueClassName = GetKeyValueClassName(virtualInfo);
-
-                // Create KeyValue struct and call the writer method
-                _sb.AppendIndentedLine($"var keyValue = new {keyValueClassName} {{ Key = kvp.Key, Value = kvp.Value }};");
-                _sb.AppendIndentedLine($"{_writerClassName}.Write{keyValueClassName}(ref writer, keyValue);");
-            }
+            // Create KeyValue struct and call WriteMapEntry directly
+            _sb.AppendIndentedLine($"var keyValue = new {keyValueClassName} {{ Key = kvp.Key, Value = kvp.Value }};");
+            _sb.AppendIndentedLine($"{_writerClassName}.Write{mapEntryTypeName}(ref writer, keyValue.Key, keyValue.Value);");
 
             _sb.EndBlock(); // foreach
         }
@@ -774,10 +740,11 @@ namespace GProtobuf.Generator.V2.Handlers
         }
 
         /// <summary>
-        /// Generates code that calls the KeyValue size calculator method.
+        /// Generates code that calls CalculateMapEntrySize directly with keyValue.Key, keyValue.Value.
         /// </summary>
         private void GenerateVirtualTypeSize(string sourceVar, VirtualMapEntryInfo virtualInfo, ProtoMemberAttribute member, string calculatorVar = "calculator")
         {
+            var mapEntryTypeName = VirtualTypeNameGenerator.GetMapEntryTypeName(virtualInfo.KeyType, virtualInfo.ValueType);
             var keyValueClassName = GetKeyValueClassName(virtualInfo);
             var (_, tagBytes) = TypeMapping.PrecomputeTagBytes(member.FieldId, WireType.Len);
 
@@ -792,10 +759,10 @@ namespace GProtobuf.Generator.V2.Handlers
                 _sb.AppendIndentedLine("if (kvp.Value == null) continue;");
             }
 
-            // Create KeyValue struct and calculate size
+            // Create KeyValue struct and calculate size directly
             _sb.AppendIndentedLine($"var keyValue = new {keyValueClassName} {{ Key = kvp.Key, Value = kvp.Value }};");
             _sb.AppendIndentedLine("entryCalc.Reset();");
-            _sb.AppendIndentedLine($"SizeCalculators.Calculate{keyValueClassName}Size(ref entryCalc, keyValue);");
+            _sb.AppendIndentedLine($"SizeCalculators.Calculate{mapEntryTypeName}Size(ref entryCalc, keyValue.Key, keyValue.Value);");
 
             // Add tag and length prefix size
             _sb.AppendIndentedLine($"{calculatorVar}.AddByteLength({tagBytes});");
@@ -960,7 +927,7 @@ namespace GProtobuf.Generator.V2.Handlers
 
         #endregion
 
-        #region KeyValue Helpers
+        #region Helpers
 
         /// <summary>
         /// Gets the KeyValue class name from map info.
