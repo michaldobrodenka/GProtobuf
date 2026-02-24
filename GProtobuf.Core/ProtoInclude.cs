@@ -57,6 +57,12 @@ namespace GProtobuf.Core
     public sealed class ProtoContractAttribute : Attribute
     {
         public string Name { get; set; }
+
+        /// <summary>
+        /// When true, generates recursion depth guard to protect against stack overflow.
+        /// Default is false (no guard generated).
+        /// </summary>
+        public bool EnableRecursionGuard { get; set; }
     }
 
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface, AllowMultiple = true, Inherited = false)]

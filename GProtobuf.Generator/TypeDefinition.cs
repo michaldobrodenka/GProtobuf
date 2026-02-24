@@ -64,4 +64,5 @@ public sealed record TypeDefinition(
     bool HasParameterlessConstructor,
     Microsoft.CodeAnalysis.INamedTypeSymbol? TypeSymbol = null,
     string? BaseClass = null,
-    List<CustomBufferMember>? CustomBufferMembers = null);
+    List<CustomBufferMember>? CustomBufferMembers = null,
+    bool EnableRecursionGuard = false);

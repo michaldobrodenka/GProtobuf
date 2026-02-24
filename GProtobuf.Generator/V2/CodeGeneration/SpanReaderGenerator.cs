@@ -775,9 +775,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 return;
             }
 
-            _sb.AppendIndentedLine("global::GProtobuf.Core.RecursionGuard.Enter();");
-            _sb.AppendIndentedLine("try");
-            _sb.StartNewBlock();
+            if (type.EnableRecursionGuard)
+            {
+                _sb.AppendIndentedLine("global::GProtobuf.Core.RecursionGuard.Enter();");
+                _sb.AppendIndentedLine("try");
+                _sb.StartNewBlock();
+            }
 
             bool hasInheritance = GeneratorHelpers.HasInheritance(type, _registry);
 
@@ -790,11 +793,14 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 GenerateReadContentWithInheritance(type, className);
             }
 
-            _sb.EndBlock(); // Close try block
-            _sb.AppendIndentedLine("finally");
-            _sb.StartNewBlock();
-            _sb.AppendIndentedLine("global::GProtobuf.Core.RecursionGuard.Exit();");
-            _sb.EndBlock(); // Close finally block
+            if (type.EnableRecursionGuard)
+            {
+                _sb.EndBlock(); // Close try block
+                _sb.AppendIndentedLine("finally");
+                _sb.StartNewBlock();
+                _sb.AppendIndentedLine("global::GProtobuf.Core.RecursionGuard.Exit();");
+                _sb.EndBlock(); // Close finally block
+            }
 
             _sb.EndBlock();
             _sb.AppendNewLine();

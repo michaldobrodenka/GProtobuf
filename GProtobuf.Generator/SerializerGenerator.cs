@@ -62,6 +62,7 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                 var customBufferMembers = GetCustomBufferMembers(typeWithAttribute);
                 var hasParameterlessConstructor = HasParameterlessConstructor(typeWithAttribute);
                 var baseClass = GetBaseClass(typeWithAttribute);
+                var enableRecursionGuard = GetEnableRecursionGuard(typeWithAttribute);
 
                 var typeDefinition = new TypeDefinition(
                     IsStruct: typeWithAttribute.TypeKind == Microsoft.CodeAnalysis.TypeKind.Struct,
@@ -73,7 +74,8 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                     hasParameterlessConstructor,
                     TypeSymbol: typeWithAttribute,
                     BaseClass: baseClass,
-                    CustomBufferMembers: customBufferMembers);
+                    CustomBufferMembers: customBufferMembers,
+                    EnableRecursionGuard: enableRecursionGuard);
 
                 return (namespaceName, typeDefinition);
             });
@@ -110,7 +112,8 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                     hasParameterlessConstructor,
                     TypeSymbol: typeWithAttribute,
                     BaseClass: baseClass,
-                    CustomBufferMembers: customBufferMembers);
+                    CustomBufferMembers: customBufferMembers,
+                    EnableRecursionGuard: false);
 
                 return (namespaceName, typeDefinition);
             });
@@ -1064,6 +1067,24 @@ public sealed class SerializerGenerator : IIncrementalGenerator
         }
 
         // Has explicit constructors but none are parameterless
+        return false;
+    }
+
+    /// <summary>
+    /// Extracts EnableRecursionGuard value from [ProtoContract] attribute.
+    /// </summary>
+    private static bool GetEnableRecursionGuard(INamedTypeSymbol typeSymbol)
+    {
+        var attr = typeSymbol.GetAttributes()
+            .FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == "ProtoBuf.ProtoContractAttribute");
+
+        if (attr == null) return false;
+
+        foreach (var arg in attr.NamedArguments)
+        {
+            if (arg.Key == "EnableRecursionGuard" && arg.Value.Value is bool value)
+                return value;
+        }
         return false;
     }
 }
