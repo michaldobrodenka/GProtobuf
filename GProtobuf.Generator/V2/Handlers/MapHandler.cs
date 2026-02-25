@@ -491,7 +491,6 @@ namespace GProtobuf.Generator.V2.Handlers
         private void GenerateVirtualTypeWrite(string sourceVar, VirtualMapEntryInfo virtualInfo, ProtoMemberAttribute member)
         {
             var mapEntryTypeName = VirtualTypeNameGenerator.GetMapEntryTypeName(virtualInfo.KeyType, virtualInfo.ValueType);
-            var keyValueClassName = GetKeyValueClassName(virtualInfo);
 
             _sb.AppendIndentedLine($"foreach (var kvp in {sourceVar})");
             _sb.StartNewBlock();
@@ -505,9 +504,8 @@ namespace GProtobuf.Generator.V2.Handlers
             // Write tag
             TagCodeHelper.WriteTag(_sb, member.FieldId, WireType.Len);
 
-            // Create KeyValue struct and call WriteMapEntry directly
-            _sb.AppendIndentedLine($"var keyValue = new {keyValueClassName} {{ Key = kvp.Key, Value = kvp.Value }};");
-            _sb.AppendIndentedLine($"{_writerClassName}.Write{mapEntryTypeName}(ref writer, keyValue.Key, keyValue.Value);");
+            // Call WriteMapEntry directly
+            _sb.AppendIndentedLine($"{_writerClassName}.Write{mapEntryTypeName}(ref writer, kvp.Key, kvp.Value);");
 
             _sb.EndBlock(); // foreach
         }
@@ -745,7 +743,6 @@ namespace GProtobuf.Generator.V2.Handlers
         private void GenerateVirtualTypeSize(string sourceVar, VirtualMapEntryInfo virtualInfo, ProtoMemberAttribute member, string calculatorVar = "calculator")
         {
             var mapEntryTypeName = VirtualTypeNameGenerator.GetMapEntryTypeName(virtualInfo.KeyType, virtualInfo.ValueType);
-            var keyValueClassName = GetKeyValueClassName(virtualInfo);
             var (_, tagBytes) = TypeMapping.PrecomputeTagBytes(member.FieldId, WireType.Len);
 
             _sb.AppendIndentedLine("var entryCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
@@ -759,10 +756,9 @@ namespace GProtobuf.Generator.V2.Handlers
                 _sb.AppendIndentedLine("if (kvp.Value == null) continue;");
             }
 
-            // Create KeyValue struct and calculate size directly
-            _sb.AppendIndentedLine($"var keyValue = new {keyValueClassName} {{ Key = kvp.Key, Value = kvp.Value }};");
+            // Calculate size directly
             _sb.AppendIndentedLine("entryCalc.Reset();");
-            _sb.AppendIndentedLine($"SizeCalculators.Calculate{mapEntryTypeName}Size(ref entryCalc, keyValue.Key, keyValue.Value);");
+            _sb.AppendIndentedLine($"SizeCalculators.Calculate{mapEntryTypeName}Size(ref entryCalc, kvp.Key, kvp.Value);");
 
             // Add tag and length prefix size
             _sb.AppendIndentedLine($"{calculatorVar}.AddByteLength({tagBytes});");
@@ -928,19 +924,6 @@ namespace GProtobuf.Generator.V2.Handlers
         #endregion
 
         #region Helpers
-
-        /// <summary>
-        /// Gets the KeyValue class name from map info.
-        /// Example: KeyValue_Int32_String
-        /// Uses VirtualTypeNameGenerator for consistent naming.
-        /// </summary>
-        private string GetKeyValueClassName(VirtualMapEntryInfo mapInfo)
-        {
-            var keyName = VirtualTypeNameGenerator.GetSafeTypeName(mapInfo.KeyType);
-            var valueName = VirtualTypeNameGenerator.GetSafeTypeName(mapInfo.ValueType);
-
-            return $"KeyValue_{keyName}_{valueName}";
-        }
 
         /// <summary>
         /// Returns the appropriate default value for a type.
