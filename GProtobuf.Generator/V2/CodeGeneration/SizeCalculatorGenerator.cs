@@ -53,11 +53,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     GenerateCalculateBaseFieldsOnlySizeMethod(type, className);
                 }
 
-                // Generate OwnFieldsSize method for derived types (used in ProtoInclude wrapper calculation)
+                // Generate OwnFieldsSize and WrapperSize methods for derived types
                 if (_registry.IsDerivedType(type.FullName))
                 {
                     var className = TypeNameHelper.GetClassName(type.FullName);
                     GenerateOwnFieldsSizeMethod(type, className);
+                    GenerateWrapperSizeMethod(type, className);
                 }
             }
 
@@ -66,7 +67,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var processedTypes = new HashSet<string>(types.Select(t => t.FullName));
             var protoIncludeTypes = CollectUnprocessedProtoIncludeTypes(processedTypes);
 
-            // Generate ContentSize and OwnFieldsSize methods for ProtoInclude types
+            // Generate ContentSize, OwnFieldsSize, and WrapperSize methods for ProtoInclude types
             foreach (var protoIncludeTypeName in protoIncludeTypes)
             {
                 var protoIncludeType = _registry.GetByFullName(protoIncludeTypeName);
@@ -74,11 +75,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 {
                     GenerateCalculateContentSizeMethod(protoIncludeType);
 
-                    // Also generate OwnFieldsSize if it's a derived type
+                    // Also generate OwnFieldsSize and WrapperSize if it's a derived type
                     if (_registry.IsDerivedType(protoIncludeTypeName))
                     {
                         var className = TypeNameHelper.GetClassName(protoIncludeTypeName);
                         GenerateOwnFieldsSizeMethod(protoIncludeType, className);
+                        GenerateWrapperSizeMethod(protoIncludeType, className);
                     }
 
                     processedTypes.Add(protoIncludeTypeName);
@@ -357,6 +359,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         /// <summary>
         /// Generates ContentSize method with type dispatch for base types with ProtoInclude.
+        /// For derived types: calls WrapperSize (wrapper + own fields).
+        /// Then always calls BaseFieldsOnlySize (base fields).
         /// </summary>
         private void GenerateCalculateContentSizeWithTypeDispatch(TypeDefinition type, string className)
         {
@@ -368,6 +372,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 return;
             }
 
+            _sb.AppendIndentedLine("// Dispatch to derived type wrapper calculation");
             _sb.AppendIndentedLine("switch (obj)");
             _sb.StartNewBlock();
 
@@ -376,15 +381,17 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 var derivedClassName = TypeNameHelper.GetClassName(derivedType);
                 _sb.AppendIndentedLine($"case global::{derivedType} derived:");
                 _sb.IncreaseIndent();
-                _sb.AppendIndentedLine($"Calculate{derivedClassName}ContentSize(ref calculator, derived);");
-                _sb.AppendIndentedLine("return;");
+                _sb.AppendIndentedLine($"Calculate{derivedClassName}WrapperSize(ref calculator, derived);");
+                _sb.AppendIndentedLine("break;");  // break, NOT return - continue to base fields
                 _sb.DecreaseIndent();
             }
 
             _sb.EndBlock();
+            _sb.AppendNewLine();
 
-            // Default case - base type fields
-            ForEachProtoMember(type.ProtoMembers, "obj", (member, src) => GenerateFieldSize(member, src));
+            // Base fields - always executed (for all types including derived)
+            _sb.AppendIndentedLine("// Base fields - always calculated");
+            _sb.AppendIndentedLine($"Calculate{className}BaseFieldsOnlySize(ref calculator, obj);");
         }
 
         /// <summary>
@@ -506,22 +513,63 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         }
 
         /// <summary>
+        /// Generates Calculate{ClassName}WrapperSize method for derived types.
+        /// Calculates ProtoInclude wrapper tag + length + own fields size.
+        /// Used by ContentSize methods to avoid code duplication.
+        /// </summary>
+        private void GenerateWrapperSizeMethod(TypeDefinition type, string className)
+        {
+            var derivedInfo = GeneratorHelpers.TryGetNestedDerivedTypeInfo(type.FullName, _registry);
+            if (derivedInfo == null)
+            {
+                _sb.AppendIndentedLine($"// WARNING: No ProtoInclude found for {className}, skipping WrapperSize generation");
+                return;
+            }
+
+            _sb.AppendIndentedLine($"/// <summary>");
+            _sb.AppendIndentedLine($"/// Calculates ProtoInclude wrapper size for {className}.");
+            _sb.AppendIndentedLine($"/// Wrapper tag + length prefix + own fields.");
+            _sb.AppendIndentedLine($"/// </summary>");
+            _sb.AppendIndentedLine($"private static void Calculate{className}WrapperSize(");
+            _sb.IncreaseIndent();
+            _sb.AppendIndentedLine($"ref global::GProtobuf.Core.WriteSizeCalculator calculator,");
+            _sb.AppendIndentedLine($"global::{type.FullName} obj)");
+            _sb.DecreaseIndent();
+            _sb.StartNewBlock();
+
+            // Tag size for ProtoInclude wrapper
+            TagCodeHelper.AddTagSize(_sb, derivedInfo.ProtoInclude.FieldId, WireType.Len);
+
+            // Calculate wrapper content (own fields only)
+            _sb.AppendIndentedLine($"var wrapperCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+            _sb.AppendIndentedLine($"Calculate{className}OwnFieldsSize(ref wrapperCalc, obj);");
+            _sb.AppendIndentedLine($"calculator.WriteVarUInt32((uint)wrapperCalc.Length);");
+            _sb.AppendIndentedLine($"calculator.AddByteLength(wrapperCalc.Length);");
+
+            _sb.EndBlock();
+            _sb.AppendNewLine();
+        }
+
+        /// <summary>
         /// Generates ContentSize calculation for derived types.
-        /// ContentSize calculates ONLY the fields, without ProtoInclude wrapper.
-        /// The wrapper is added by Write{Type}_AsParent methods.
+        /// Calls WrapperSize + BaseFieldsOnlySize for proper wire format.
+        /// Wire format: [wrapper tag][wrapper length][own fields inside][base fields outside]
         /// </summary>
         private void GenerateCalculateContentSizeForDerivedType(TypeDefinition type, string className)
         {
-            // Calculate root type fields (base class fields)
-            var rootTypeName = _registry.GetRootType(type.FullName);
-            var rootType = _registry.GetByFullName(rootTypeName);
-            ForEachProtoMember(rootType?.ProtoMembers, "obj", (member, src) => GenerateFieldSize(member, src));
+            // 1. Wrapper + own fields
+            _sb.AppendIndentedLine($"// ProtoInclude wrapper + own fields");
+            _sb.AppendIndentedLine($"Calculate{className}WrapperSize(ref calculator, obj);");
 
-            // Calculate own fields (if not root)
-            if (type.FullName != rootTypeName)
-            {
-                ForEachProtoMember(type.ProtoMembers, "obj", (member, src) => GenerateFieldSize(member, src));
-            }
+            // 2. Base fields
+            var rootTypeName = _registry.GetRootType(type.FullName);
+            var rootClassName = TypeNameHelper.GetClassName(rootTypeName);
+            var rootNamespace = _registry.GetNamespaceForType(rootTypeName);
+            var nsPrefix = GeneratorHelpers.GetNamespacePrefix(rootNamespace, _currentNamespace);
+
+            _sb.AppendNewLine();
+            _sb.AppendIndentedLine($"// Base fields ({rootClassName})");
+            _sb.AppendIndentedLine($"{nsPrefix}SizeCalculators.Calculate{rootClassName}BaseFieldsOnlySize(ref calculator, obj);");
         }
 
         #endregion
