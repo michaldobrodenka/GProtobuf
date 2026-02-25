@@ -1541,11 +1541,14 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine("var length = reader.ReadVarInt32();");
             _sb.AppendIndentedLine("var nestedReader = reader.CreateSubReader(length);");
 
+            // Save current result - may have fields already read (if ProtoInclude fieldId > own field IDs)
             _sb.AppendIndentedLine($"var oldResult = result;");
 
             // Use SpanReaders for derived content reading
             _sb.AppendIndentedLine($"result = {derivedNsPrefix}SpanReaders.Read{derivedClassName}Content(ref nestedReader);");
 
+            // Copy fields from old result to new result (if old result had values)
+            // This is needed when base class fields have lower field IDs than ProtoInclude
             _sb.AppendIndentedLine("if (oldResult != null)");
             _sb.StartNewBlock();
             if (parentType.ProtoMembers != null)
@@ -1557,6 +1560,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
             _sb.EndBlock();
 
+            // Continue to read any remaining fields after the ProtoInclude wrapper
             _sb.AppendIndentedLine("continue;");
 
             _sb.DecreaseIndent();

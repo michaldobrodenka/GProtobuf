@@ -396,13 +396,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
 
             // Handle own fields
-            // Abstract base classes with ProtoMembers MUST deserialize their fields
-            // even though they can't be instantiated directly. The deserialized values
-            // are copied to derived instances via "if (oldResult != null) result.Field = oldResult.Field"
-            // pattern in ProtoInclude case handlers.
+            // Base classes with ProtoMembers read their fields via the switch cases.
+            // Fields with lower IDs than ProtoInclude are read BEFORE the wrapper,
+            // then copied to the derived instance via oldResult pattern.
             //
-            // Example: MessageBase (abstract) has RequestsId field that must be read,
-            // even though MessageBase itself is never instantiated.
+            // Example: A has StringA (field 1) and ProtoInclude(5, B).
+            // Wire format: [tag 1 = StringA][value][tag 5 = B wrapper][B data]
             string lazyInit = type.IsAbstract ? null : $"result ??= new global::{type.FullName}();";
 
             if (type.ProtoMembers != null)
@@ -2042,30 +2041,27 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine("var length = reader.ReadVarInt32();");
             _sb.AppendIndentedLine("var nestedReader = new SpanReader(reader.GetSlice(length));");
 
-            // When ReadDerivedContent returns a more derived type (e.g., D instead of B),
-            // we must preserve fields already read from current type (e.g., StringB in B)
+            // Save current result - may have fields already read (if ProtoInclude fieldId > own field IDs)
             _sb.AppendIndentedLine($"var oldResult = result;");
 
-            // Read derived content (ONLY derived fields, from nested reader)
+            // Read derived content (derived fields from nested reader)
             _sb.AppendIndentedLine($"result = Read{derivedClassName}Content(ref nestedReader);");
 
             // Copy fields from old result to new result (if old result had values)
+            // This is needed when base class fields have lower field IDs than ProtoInclude
+            // and are therefore written/read BEFORE the ProtoInclude wrapper
             _sb.AppendIndentedLine("if (oldResult != null)");
             _sb.StartNewBlock();
             if (parentType.ProtoMembers != null)
             {
                 foreach (var member in parentType.ProtoMembers)
                 {
-                    // Copy each field from old result to new result
-                    // This preserves values read before the ProtoInclude wrapper
                     _sb.AppendIndentedLine($"result.{member.Name} = oldResult.{member.Name};");
                 }
             }
             _sb.EndBlock();
 
-            // We continue the while loop to read base fields that come AFTER the ProtoInclude wrapper.
-            // The reader position was already moved forward by GetSlice(), so we read from the correct position.
-            // Base fields (like RequestsId) will be read by the subsequent case statements in the switch.
+            // Continue to read any remaining fields after the ProtoInclude wrapper
             _sb.AppendIndentedLine("continue;");
 
             _sb.DecreaseIndent();

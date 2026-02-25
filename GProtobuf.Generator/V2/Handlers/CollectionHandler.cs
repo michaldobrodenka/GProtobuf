@@ -96,11 +96,8 @@ namespace GProtobuf.Generator.V2.Handlers
                 // Calculate and write length
                 _sb.AppendIndentedLine("var itemCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
 
-                // For polymorphic types, use dispatcher that includes ProtoInclude wrapper
-                // For concrete types, use Content method
-                var qualifiedSizeCall = isPolymorphic
-                    ? GetQualifiedCalculateSizeCall(elementTypeName, elementClassName)
-                    : GetQualifiedCalculateContentSizeCall(elementTypeName, elementClassName);
+                // ContentSize handles dispatcher logic for polymorphic types
+                var qualifiedSizeCall = GetQualifiedCalculateContentSizeCall(elementTypeName, elementClassName);
 
                 _sb.AppendIndentedLine($"{qualifiedSizeCall}(ref itemCalc, item);");
                 _sb.AppendIndentedLine("writer.WriteVarUInt32((uint)itemCalc.Length);");
@@ -371,11 +368,8 @@ namespace GProtobuf.Generator.V2.Handlers
                 // Calculate item content size
                 _sb.AppendIndentedLine("var itemCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
 
-                // For polymorphic types, use dispatcher that includes ProtoInclude wrapper
-                // For concrete types, use Content method
-                var qualifiedSizeCall = isPolymorphic
-                    ? GetQualifiedCalculateSizeCall(elementTypeName, elementClassName)
-                    : GetQualifiedCalculateContentSizeCall(elementTypeName, elementClassName);
+                // ContentSize handles dispatcher logic for polymorphic types
+                var qualifiedSizeCall = GetQualifiedCalculateContentSizeCall(elementTypeName, elementClassName);
 
                 _sb.AppendIndentedLine($"{qualifiedSizeCall}(ref itemCalc, item);");
 
@@ -502,19 +496,6 @@ namespace GProtobuf.Generator.V2.Handlers
             }
 
             return false;
-        }
-
-        /// <summary>
-        /// Builds fully qualified call to SizeCalculators.Calculate{ClassName}Size method (dispatcher with ProtoInclude).
-        /// </summary>
-        private string GetQualifiedCalculateSizeCall(string elementTypeName, string elementClassName)
-        {
-            var ns = GetTypeNamespace(elementTypeName);
-            if (ns == null)
-            {
-                return $"SizeCalculators.Calculate{elementClassName}Size";
-            }
-            return $"global::{ns}.Serialization.SizeCalculators.Calculate{elementClassName}Size";
         }
 
         /// <summary>
