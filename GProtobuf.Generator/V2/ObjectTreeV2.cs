@@ -189,15 +189,8 @@ namespace GProtobuf.Generator.V2
                     throw new System.Exception($"Error in SpanReaderGenerator for namespace '{ns}'. Inner: {ex.Message}. Stack: {ex.StackTrace}", ex);
                 }
 
-                try
-                {
-                    // Generate StreamReaders class (uses shared virtual registries)
-                    new StreamReaderGenerator(sb, _registry, virtualMapRegistry, virtualTupleRegistry).GenerateAll(types, ns);
-                }
-                catch (System.Exception ex)
-                {
-                    throw new System.Exception($"Error in StreamReaderGenerator for namespace '{ns}'", ex);
-                }
+                // StreamReaders class removed - logic inlined into Deserializers
+                // All Stream deserialization now uses ReadRemainingBytes() + SpanReaders
 
                 try
                 {
@@ -227,17 +220,6 @@ namespace GProtobuf.Generator.V2
                 catch (System.Exception ex)
                 {
                     throw new System.Exception($"Error in SizeCalculatorGenerator for namespace '{ns}'", ex);
-                }
-
-                try
-                {
-                    // Generate KeyValue structs AFTER all types are registered
-                    var keyValueGenerator = new KeyValueClassGenerator(sb, virtualMapRegistry);
-                    keyValueGenerator.GenerateAllKeyValueClasses();
-                }
-                catch (System.Exception ex)
-                {
-                    throw new System.Exception($"Error in KeyValueClassGenerator for namespace '{ns}'", ex);
                 }
 
                 WriteFooter(sb);
@@ -313,7 +295,9 @@ namespace GProtobuf.Generator.V2
                     sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(Stream stream, Span<byte> buffer)");
                     sb.StartNewBlock();
                     sb.AppendIndentedLine("var reader = new global::GProtobuf.Core.StreamReader(stream, buffer);");
-                    sb.AppendIndentedLine($"return StreamReaders.Read{className}(ref reader);");
+                    sb.AppendIndentedLine("var data = reader.ReadRemainingBytes();");
+                    sb.AppendIndentedLine("var spanReader = new SpanReader(data);");
+                    sb.AppendIndentedLine($"return SpanReaders.Read{className}(ref spanReader);");
                     sb.EndBlock();
                     sb.AppendNewLine();
 
@@ -321,13 +305,15 @@ namespace GProtobuf.Generator.V2
                     sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(Stream stream, Span<byte> buffer, global::{type.FullName} existingInstance)");
                     sb.StartNewBlock();
                     sb.AppendIndentedLine("var reader = new global::GProtobuf.Core.StreamReader(stream, buffer);");
+                    sb.AppendIndentedLine("var data = reader.ReadRemainingBytes();");
+                    sb.AppendIndentedLine("var spanReader = new SpanReader(data);");
                     // Use 'is not null' pattern to avoid triggering custom == operator
                     sb.AppendIndentedLine("if (!(existingInstance is null))");
                     sb.StartNewBlock();
-                    sb.AppendIndentedLine($"StreamReaders.Populate{className}(ref reader, existingInstance);");
+                    sb.AppendIndentedLine($"SpanReaders.Populate{className}(ref spanReader, existingInstance);");
                     sb.AppendIndentedLine("return existingInstance;");
                     sb.EndBlock();
-                    sb.AppendIndentedLine($"return StreamReaders.Read{className}(ref reader);");
+                    sb.AppendIndentedLine($"return SpanReaders.Read{className}(ref spanReader);");
                     sb.EndBlock();
                     sb.AppendNewLine();
                 }
@@ -352,7 +338,9 @@ namespace GProtobuf.Generator.V2
                     sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(Stream stream, Span<byte> buffer)");
                     sb.StartNewBlock();
                     sb.AppendIndentedLine("var reader = new global::GProtobuf.Core.StreamReader(stream, buffer);");
-                    sb.AppendIndentedLine($"return StreamReaders.Read{className}(ref reader);");
+                    sb.AppendIndentedLine("var data = reader.ReadRemainingBytes();");
+                    sb.AppendIndentedLine("var spanReader = new SpanReader(data);");
+                    sb.AppendIndentedLine($"return SpanReaders.Read{className}(ref spanReader);");
                     sb.EndBlock();
                     sb.AppendNewLine();
                 }
@@ -382,7 +370,9 @@ namespace GProtobuf.Generator.V2
                     sb.AppendIndentedLine($"public static void Populate{className}(Stream stream, Span<byte> buffer, global::{type.FullName} instance)");
                     sb.StartNewBlock();
                     sb.AppendIndentedLine("var reader = new global::GProtobuf.Core.StreamReader(stream, buffer);");
-                    sb.AppendIndentedLine($"StreamReaders.Populate{className}(ref reader, instance);");
+                    sb.AppendIndentedLine("var data = reader.ReadRemainingBytes();");
+                    sb.AppendIndentedLine("var spanReader = new SpanReader(data);");
+                    sb.AppendIndentedLine($"SpanReaders.Populate{className}(ref spanReader, instance);");
                     sb.EndBlock();
                     sb.AppendNewLine();
                 }

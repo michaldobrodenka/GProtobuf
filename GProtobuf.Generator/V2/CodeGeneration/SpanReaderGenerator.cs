@@ -281,16 +281,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 }
             }
 
-            // Generate KeyValue methods that use MapEntry methods
-            try
-            {
-                var keyValueGenerator = new KeyValueClassGenerator(_sb, _virtualMapRegistry);
-                keyValueGenerator.GenerateKeyValueMethods("SpanReaders");
-            }
-            catch (System.Exception ex)
-            {
-                throw new System.Exception("Error in GenerateKeyValueMethods", ex);
-            }
         }
 
         /// <summary>
@@ -1171,9 +1161,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// </summary>
         private void GeneratePopulateMethod(TypeDefinition type)
         {
-            // Skip abstract types - can't populate them directly
-            if (type.IsAbstract)
-                return;
 
             var className = TypeNameHelper.GetClassName(type.FullName);
 
@@ -2041,25 +2028,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine("var length = reader.ReadVarInt32();");
             _sb.AppendIndentedLine("var nestedReader = new SpanReader(reader.GetSlice(length));");
 
-            // Save current result - may have fields already read (if ProtoInclude fieldId > own field IDs)
-            _sb.AppendIndentedLine($"var oldResult = result;");
-
             // Read derived content (derived fields from nested reader)
+            // Note: ProtoInclude must be the first tag, so no base fields can have been read before this
             _sb.AppendIndentedLine($"result = Read{derivedClassName}Content(ref nestedReader);");
-
-            // Copy fields from old result to new result (if old result had values)
-            // This is needed when base class fields have lower field IDs than ProtoInclude
-            // and are therefore written/read BEFORE the ProtoInclude wrapper
-            _sb.AppendIndentedLine("if (oldResult != null)");
-            _sb.StartNewBlock();
-            if (parentType.ProtoMembers != null)
-            {
-                foreach (var member in parentType.ProtoMembers)
-                {
-                    _sb.AppendIndentedLine($"result.{member.Name} = oldResult.{member.Name};");
-                }
-            }
-            _sb.EndBlock();
 
             // Continue to read any remaining fields after the ProtoInclude wrapper
             _sb.AppendIndentedLine("continue;");
@@ -2214,24 +2185,10 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine($"{derivedReaderPrefix}Populate{typeName}(ref wrapperReader, result.{member.Name});");
             _sb.AppendNewLine();
 
-            // Read remaining base fields (AFTER wrapper) by reading parent instance and copying fields
-            _sb.AppendIndentedLine($"// Read base fields (AFTER wrapper) - read as parent type and copy fields");
-
-            // Get parent type reader prefix
+            // Read remaining base fields (AFTER wrapper) directly into the derived instance
+            _sb.AppendIndentedLine($"// Read base fields (AFTER wrapper) - populate directly on derived instance");
             string parentReaderPrefix = GeneratorHelpers.GetNamespacePrefix(derivedInfo.ParentNamespace, _currentNamespace) + "SpanReaders.";
-
-            // Read parent instance
-            _sb.AppendIndentedLine($"var baseInstance = {parentReaderPrefix}Read{parentTypeName}Content(ref nestedReader);");
-
-            // Copy base fields from parent instance to derived instance
-            if (parentType?.ProtoMembers != null && parentType.ProtoMembers.Any())
-            {
-                _sb.AppendIndentedLine($"// Copy base fields from parent instance to derived instance");
-                foreach (var baseMember in parentType.ProtoMembers)
-                {
-                    _sb.AppendIndentedLine($"result.{member.Name}.{baseMember.Name} = baseInstance.{baseMember.Name};");
-                }
-            }
+            _sb.AppendIndentedLine($"{parentReaderPrefix}Populate{parentTypeName}(ref nestedReader, result.{member.Name});");
 
             _sb.EndBlock();
             _sb.AppendIndentedLine("else");

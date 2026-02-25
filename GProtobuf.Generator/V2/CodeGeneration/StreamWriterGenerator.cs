@@ -115,9 +115,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 generator.GenerateWriter(virtualType);
             }
 
-            // Generate KeyValue methods that use MapEntry methods
-            var keyValueGenerator = new KeyValueClassGenerator(_sb, _virtualMapRegistry);
-            keyValueGenerator.GenerateKeyValueMethods(_className);
         }
 
         /// <summary>
@@ -341,6 +338,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// <summary>
         /// Calculates wrapper content size for writing (same logic as in SizeCalculatorGenerator).
         /// NOTE: Base class fields are written OUTSIDE the wrapper (at parent message level).
+        /// ProtoInclude wrapper is calculated FIRST, then own fields.
         /// </summary>
         private void CalculateWrapperContentSizeForWrite(IReadOnlyList<string> chain, int levelIndex, string calcVar)
         {
@@ -350,11 +348,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var currentClassName = TypeNameHelper.GetClassName(currentTypeName);
             var currentType = _registry.GetByFullName(currentTypeName);
 
-            // Add this level's OWN fields size ONLY (not base fields)
-            _sb.AppendIndentedLine($"// Calculate {currentClassName}'s own fields size");
-            _sb.AppendIndentedLine($"SizeCalculators.Calculate{currentClassName}OwnFieldsSize(ref {calcVar}, instance);");
-
-            // If there's a next level, add nested wrapper size
+            // If there's a next level, add nested wrapper size first
             if (levelIndex + 1 < chain.Count)
             {
                 var nextTypeName = chain[levelIndex + 1];
@@ -363,7 +357,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
                 if (protoInclude != null)
                 {
-                    _sb.AppendIndentedLine($"// Calculate nested wrapper for {nextClassName}");
+                    _sb.AppendIndentedLine($"// Calculate nested wrapper for {nextClassName} (ProtoInclude first)");
 
                     // Add nested wrapper tag size
                     TagCodeHelper.AddTagSize(_sb, protoInclude.FieldId, WireType.Len, calcVar);
@@ -380,12 +374,17 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     _sb.AppendIndentedLine($"{calcVar}.AddByteLength({nestedCalcVar}.Length);");
                 }
             }
+
+            // Add this level's OWN fields size AFTER nested wrapper (not base fields)
+            _sb.AppendIndentedLine($"// Calculate {currentClassName}'s own fields size (after ProtoInclude)");
+            _sb.AppendIndentedLine($"SizeCalculators.Calculate{currentClassName}OwnFieldsSize(ref {calcVar}, instance);");
             // NOTE: Base class fields are NOT included here - they're written OUTSIDE the wrapper
         }
 
         /// <summary>
-        /// Recursively writes wrapper content (own fields + nested wrappers).
+        /// Recursively writes wrapper content (nested wrappers + own fields).
         /// NOTE: Base class fields are written OUTSIDE the wrapper (at parent message level).
+        /// ProtoInclude wrapper is written FIRST, then own fields.
         /// </summary>
         private void WriteWrapperContentRecursive(IReadOnlyList<string> chain, int levelIndex)
         {
@@ -395,11 +394,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var currentClassName = TypeNameHelper.GetClassName(currentTypeName);
             var currentType = _registry.GetByFullName(currentTypeName);
 
-            // Write this level's OWN fields ONLY (not base fields)
-            _sb.AppendIndentedLine($"// Write {currentClassName}'s own fields");
-            _sb.AppendIndentedLine($"Write{currentClassName}OwnFields(ref writer, instance);");
-
-            // If there's a next level, write nested wrapper
+            // If there's a next level, write nested wrapper first
             if (levelIndex + 1 < chain.Count)
             {
                 var nextTypeName = chain[levelIndex + 1];
@@ -408,7 +403,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
                 if (protoInclude != null)
                 {
-                    _sb.AppendIndentedLine($"// Write nested wrapper for {nextClassName}");
+                    _sb.AppendIndentedLine($"// Write nested wrapper for {nextClassName} (ProtoInclude first)");
 
                     // Calculate nested wrapper content size
                     var nestedCalcVar = $"nestedWrapperCalc{levelIndex}";
@@ -425,6 +420,10 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     WriteWrapperContentRecursive(chain, levelIndex + 1);
                 }
             }
+
+            // Write this level's OWN fields AFTER nested wrapper (not base fields)
+            _sb.AppendIndentedLine($"// Write {currentClassName}'s own fields (after ProtoInclude)");
+            _sb.AppendIndentedLine($"Write{currentClassName}OwnFields(ref writer, instance);");
             // NOTE: Base class fields are NOT written here - they're written OUTSIDE the wrapper
         }
 
@@ -569,7 +568,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine($"var {calcVar} = new global::GProtobuf.Core.WriteSizeCalculator();");
 
             // If this is the target type, calculate own fields
-            // Otherwise, calculate parent fields + nested wrapper
+            // Otherwise, calculate nested wrapper + own fields (ProtoInclude first!)
             if (currentIndex == targetIndex)
             {
                 // This is the innermost level - calculate own fields only
@@ -577,20 +576,10 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
             else
             {
-                // This is intermediate level - calculate own fields + nested wrapper
+                // This is intermediate level - calculate nested wrapper FIRST, then own fields
                 var currentType = _registry.GetByFullName(currentTypeName);
 
-                // Calculate current level's OWN fields (not inherited)
-                var ownMembers = _registry.GetOwnProtoMembers(currentTypeName);
-                if (ownMembers != null && ownMembers.Count > 0)
-                {
-                    foreach (var member in ownMembers)
-                    {
-                        GenerateFieldSizeCalculation(member, "instance", calcVar);
-                    }
-                }
-
-                // Add nested wrapper size
+                // Add nested wrapper size FIRST (ProtoInclude before own fields)
                 var nextTypeName = chain[currentIndex + 1];
                 var nextProtoInclude = currentType?.ProtoIncludes?.FirstOrDefault(p => p.Type == nextTypeName);
                 if (nextProtoInclude != null)
@@ -609,6 +598,16 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     _sb.AppendIndentedLine($"{calcVar}.WriteVarUInt32((uint){nestedCalcVar}.Length);");
                     _sb.AppendIndentedLine($"{calcVar}.AddByteLength({nestedCalcVar}.Length);");
                 }
+
+                // Calculate current level's OWN fields AFTER nested wrapper
+                var ownMembers = _registry.GetOwnProtoMembers(currentTypeName);
+                if (ownMembers != null && ownMembers.Count > 0)
+                {
+                    foreach (var member in ownMembers)
+                    {
+                        GenerateFieldSizeCalculation(member, "instance", calcVar);
+                    }
+                }
             }
             // NOTE: Ancestor fields are NOT included here - they're written OUTSIDE the wrapper
 
@@ -623,7 +622,10 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
             else
             {
-                // Write OWN fields (not inherited) + nested wrapper
+                // Write nested wrapper FIRST (ProtoInclude before own fields)
+                GenerateNestedWrappersForAsParent(chain, currentIndex + 1, targetIndex, ancestorIndex);
+
+                // Write OWN fields (not inherited) AFTER nested wrapper
                 var ownMembers = _registry.GetOwnProtoMembers(currentTypeName);
                 if (ownMembers != null && ownMembers.Count > 0)
                 {
@@ -632,9 +634,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                         GenerateFieldWrite(member, "instance");
                     }
                 }
-
-                // Recursively write nested wrapper
-                GenerateNestedWrappersForAsParent(chain, currentIndex + 1, targetIndex, ancestorIndex);
             }
             // NOTE: Ancestor fields are NOT written here - they're written OUTSIDE the wrapper by the caller
         }
@@ -642,6 +641,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// <summary>
         /// Recursively calculates size for nested wrappers.
         /// NOTE: Ancestor fields are NOT included in wrapper - they're calculated separately outside.
+        /// ProtoInclude wrapper is calculated FIRST, then own fields.
         /// </summary>
         private void GenerateNestedSizeCalculationForAsParent(
             IReadOnlyList<string> chain,
@@ -663,20 +663,10 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
             else
             {
-                // Intermediate level - OWN fields (not inherited) + nested wrapper
+                // Intermediate level - nested wrapper first, then OWN fields
                 var currentType = _registry.GetByFullName(currentTypeName);
 
-                // Calculate current level OWN fields (not inherited)
-                var ownMembers = _registry.GetOwnProtoMembers(currentTypeName);
-                if (ownMembers != null && ownMembers.Count > 0)
-                {
-                    foreach (var member in ownMembers)
-                    {
-                        GenerateFieldSizeCalculation(member, "instance", calcVar);
-                    }
-                }
-
-                // Add nested wrapper
+                // Add nested wrapper first
                 var nextTypeName = chain[currentIndex + 1];
                 var nextProtoInclude = currentType?.ProtoIncludes?.FirstOrDefault(p => p.Type == nextTypeName);
                 if (nextProtoInclude != null)
@@ -690,6 +680,16 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
                     _sb.AppendIndentedLine($"{calcVar}.WriteVarUInt32((uint){nestedCalcVar}.Length);");
                     _sb.AppendIndentedLine($"{calcVar}.AddByteLength({nestedCalcVar}.Length);");
+                }
+
+                // Calculate current level own fields after nested wrapper
+                var ownMembers = _registry.GetOwnProtoMembers(currentTypeName);
+                if (ownMembers != null && ownMembers.Count > 0)
+                {
+                    foreach (var member in ownMembers)
+                    {
+                        GenerateFieldSizeCalculation(member, "instance", calcVar);
+                    }
                 }
             }
             // NOTE: Ancestor fields are NOT included here - they're calculated separately outside the wrapper

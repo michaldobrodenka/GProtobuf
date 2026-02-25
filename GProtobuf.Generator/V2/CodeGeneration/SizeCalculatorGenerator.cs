@@ -114,9 +114,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 generator.GenerateSizeCalculator(virtualType);
             }
 
-            // Generate KeyValue methods that use MapEntry methods
-            var keyValueGenerator = new KeyValueClassGenerator(_sb, _virtualMapRegistry);
-            keyValueGenerator.GenerateKeyValueMethods("SizeCalculators");
         }
 
         /// <summary>
@@ -388,6 +385,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         /// <summary>
         /// Recursively calculates wrapper content size for the given level and all nested levels.
+        /// ProtoInclude wrapper is calculated FIRST, then own fields.
         /// </summary>
         private void CalculateWrapperContentSizeRecursive(IReadOnlyList<string> chain, int levelIndex, string calcVar)
         {
@@ -397,11 +395,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var currentClassName = TypeNameHelper.GetClassName(currentTypeName);
             var currentType = _registry.GetByFullName(currentTypeName);
 
-            // Add this level's OWN fields size
-            _sb.AppendIndentedLine($"// Add {currentClassName}'s own fields size");
-            _sb.AppendIndentedLine($"Calculate{currentClassName}OwnFieldsSize(ref {calcVar}, obj);");
-
-            // If there's a next level, add nested wrapper size
+            // If there's a next level, add nested wrapper size FIRST (ProtoInclude before own fields)
             if (levelIndex + 1 < chain.Count)
             {
                 var nextTypeName = chain[levelIndex + 1];
@@ -410,7 +404,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
                 if (protoInclude != null)
                 {
-                    _sb.AppendIndentedLine($"// Add nested wrapper for {nextClassName}");
+                    _sb.AppendIndentedLine($"// Add nested wrapper for {nextClassName} (ProtoInclude first)");
 
                     // Add nested wrapper tag size
                     TagCodeHelper.AddTagSize(_sb, protoInclude.FieldId, WireType.Len, calcVar);
@@ -427,6 +421,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     _sb.AppendIndentedLine($"{calcVar}.AddByteLength({nestedCalcVar}.Length);");
                 }
             }
+            _sb.AppendIndentedLine($"Calculate{currentClassName}OwnFieldsSize(ref {calcVar}, obj);");
         }
 
         /// <summary>
