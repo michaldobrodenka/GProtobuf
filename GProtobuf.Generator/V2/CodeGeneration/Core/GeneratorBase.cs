@@ -70,7 +70,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration.Core
         {
             var protoIncludeTypes = new HashSet<string>();
 
-            foreach (var registeredType in _registry.GetAllTypes())
+            foreach (var registeredType in _registry.GetByNamespace(_currentNamespace))
             {
                 if (registeredType.ProtoIncludes != null)
                 {
@@ -78,7 +78,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration.Core
                     {
                         if (!processedTypes.Contains(include.Type))
                         {
-                            protoIncludeTypes.Add(include.Type);
+                            var includeTypeNamespace = TypeNameHelper.GetNamespace(include.Type);
+                            if (includeTypeNamespace == _currentNamespace)
+                            {
+                                protoIncludeTypes.Add(include.Type);
+                            }
                         }
                     }
                 }
