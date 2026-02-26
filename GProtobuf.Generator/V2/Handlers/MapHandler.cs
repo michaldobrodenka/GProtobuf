@@ -495,12 +495,7 @@ namespace GProtobuf.Generator.V2.Handlers
             _sb.AppendIndentedLine($"foreach (var kvp in {sourceVar})");
             _sb.StartNewBlock();
 
-            // Skip null values for reference types (but not for non-nullable structs or enums)
-            if (NeedsNullCheck(member.MapValueType, member.MapValueIsEnum))
-            {
-                _sb.AppendIndentedLine("if (kvp.Value == null) continue;");
-            }
-
+    
             // Write tag
             TagCodeHelper.WriteTag(_sb, member.FieldId, WireType.Len);
 
@@ -524,30 +519,47 @@ namespace GProtobuf.Generator.V2.Handlers
                 _sb.AppendIndentedLine("var nestedCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
             }
 
+            bool valueNeedsNullCheck = NeedsNullCheck(valueType, member.MapValueIsEnum);
+
             _sb.AppendIndentedLine($"foreach (var kvp in {sourceVar})");
             _sb.StartNewBlock();
-
-            // Skip null values for reference types (but not for non-nullable structs or enums)
-            if (NeedsNullCheck(valueType, member.MapValueIsEnum))
-            {
-                _sb.AppendIndentedLine("if (kvp.Value == null) continue;");
-            }
 
             // Reset calculator for each entry
             _sb.AppendIndentedLine("entryCalc.Reset();");
 
-            // Calculate entry size
-            GenerateEntrySizeCalculation(member, "kvp.Key", "kvp.Value", "entryCalc");
+            // Calculate key size (always written)
+            GeneratePrimitiveSizeCalculation(member.MapKeyType, "kvp.Key", "entryCalc", member.MapKeyIsEnum, 1);
+
+            // Calculate value size only if value is not null (matching protobuf-net behavior)
+            if (valueNeedsNullCheck)
+            {
+                _sb.AppendIndentedLine("if (kvp.Value != null)");
+                _sb.StartNewBlock();
+            }
+            GenerateValueSizeCalculation(member.MapValueType, "kvp.Value", "entryCalc", member.MapValueIsEnum);
+            if (valueNeedsNullCheck)
+            {
+                _sb.EndBlock();
+            }
 
             // Write tag and length
             TagCodeHelper.WriteTag(_sb, member.FieldId, WireType.Len);
             _sb.AppendIndentedLine("writer.WriteVarUInt32((uint)entryCalc.Length);");
 
-            // Write key
+            // Write key (always written)
             GeneratePrimitiveWrite(keyType, "kvp.Key", member.MapKeyIsEnum, 1);
 
-            // Write value
+            // Write value only if not null (matching protobuf-net behavior)
+            if (valueNeedsNullCheck)
+            {
+                _sb.AppendIndentedLine("if (kvp.Value != null)");
+                _sb.StartNewBlock();
+            }
             GenerateValueWrite(valueType, "kvp.Value", member.MapValueIsEnum);
+            if (valueNeedsNullCheck)
+            {
+                _sb.EndBlock();
+            }
 
             _sb.EndBlock(); // foreach
         }
@@ -749,12 +761,7 @@ namespace GProtobuf.Generator.V2.Handlers
 
             _sb.AppendIndentedLine($"foreach (var kvp in {sourceVar})");
             _sb.StartNewBlock();
-
-            // Skip null values for reference types (but not for non-nullable structs or enums)
-            if (NeedsNullCheck(member.MapValueType, member.MapValueIsEnum))
-            {
-                _sb.AppendIndentedLine("if (kvp.Value == null) continue;");
-            }
+                     
 
             // Calculate size directly
             _sb.AppendIndentedLine("entryCalc.Reset();");
@@ -782,20 +789,28 @@ namespace GProtobuf.Generator.V2.Handlers
                 _sb.AppendIndentedLine("var nestedCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
             }
 
+            bool valueNeedsNullCheck = NeedsNullCheck(valueType, member.MapValueIsEnum);
+
             _sb.AppendIndentedLine($"foreach (var kvp in {sourceVar})");
             _sb.StartNewBlock();
-
-            // Skip null values for reference types (but not for non-nullable structs or enums)
-            if (NeedsNullCheck(valueType, member.MapValueIsEnum))
-            {
-                _sb.AppendIndentedLine("if (kvp.Value == null) continue;");
-            }
 
             // Reset calculator for each entry
             _sb.AppendIndentedLine("entryCalc.Reset();");
 
-            // Calculate entry size
-            GenerateEntrySizeCalculation(member, "kvp.Key", "kvp.Value", "entryCalc");
+            // Calculate key size (always)
+            GeneratePrimitiveSizeCalculation(member.MapKeyType, "kvp.Key", "entryCalc", member.MapKeyIsEnum, 1);
+
+            // Calculate value size only if not null (matching protobuf-net behavior)
+            if (valueNeedsNullCheck)
+            {
+                _sb.AppendIndentedLine("if (kvp.Value != null)");
+                _sb.StartNewBlock();
+            }
+            GenerateValueSizeCalculation(member.MapValueType, "kvp.Value", "entryCalc", member.MapValueIsEnum);
+            if (valueNeedsNullCheck)
+            {
+                _sb.EndBlock();
+            }
 
             // Add tag and length prefix size
             var (_, tagBytes) = TypeMapping.PrecomputeTagBytes(member.FieldId, WireType.Len);

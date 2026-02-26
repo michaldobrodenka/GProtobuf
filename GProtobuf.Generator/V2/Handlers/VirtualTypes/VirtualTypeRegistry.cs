@@ -259,6 +259,17 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             // Custom class/message type
             info.IsCustomType = true;
             info.ShortTypeName = TypeNameHelper.GetClassName(typeName);
+
+            // Check if it's a struct (value type) - structs can't be null
+            if (_typeRegistry != null)
+            {
+                var typeDef = _typeRegistry.GetByFullName(normalized);
+                if (typeDef != null && typeDef.IsStruct)
+                {
+                    info.IsStruct = true;
+                }
+            }
+
             return info;
         }
 
@@ -423,6 +434,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         public bool IsHashSet { get; set; }
         public bool IsDictionary { get; set; }
         public bool IsCustomType { get; set; }
+        public bool IsStruct { get; set; }
 
         // For collections
         public string CollectionElementType { get; set; }

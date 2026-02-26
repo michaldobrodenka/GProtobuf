@@ -776,11 +776,21 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             bool keyNeedsLengthCache = info.KeyTypeInfo.IsCustomType;
             bool valueNeedsLengthCache = info.ValueTypeInfo.IsCustomType;
 
+            // Check if value type is a reference type that can be null
+            // If so, we need to skip writing value field when value is null (matching protobuf-net behavior)
+            bool valueNeedsNullCheck = ValueNeedsNullCheck(info.ValueType, info.ValueTypeInfo, info.ValueIsEnum);
+
             // Declare length cache variables if needed
+            // For value types that need null check, initialize to 0 (will only be assigned if value != null)
             if (keyNeedsLengthCache)
                 _sb.AppendIndentedLine("int keyContentLength;");
             if (valueNeedsLengthCache)
-                _sb.AppendIndentedLine("int valueContentLength;");
+            {
+                if (valueNeedsNullCheck)
+                    _sb.AppendIndentedLine("int valueContentLength = 0;");
+                else
+                    _sb.AppendIndentedLine("int valueContentLength;");
+            }
 
             // Calculate entry size first
             _sb.AppendIndentedLine("var entryCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
@@ -790,8 +800,20 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 keyNeedsLengthCache ? "keyContentLength" : null);
 
             // Calculate value size (with length caching for custom types)
+            // For reference types, only calculate if value is not null
+            if (valueNeedsNullCheck)
+            {
+                _sb.AppendIndentedLine("if (value != null)");
+                _sb.StartNewBlock();
+            }
+
             GenerateFieldSizeCalculation("value", info.ValueType, info.ValueTypeInfo, info.ValueIsEnum, "entryCalc", 2,
                 valueNeedsLengthCache ? "valueContentLength" : null);
+
+            if (valueNeedsNullCheck)
+            {
+                _sb.EndBlock();
+            }
 
             _sb.AppendNewLine();
 
@@ -804,8 +826,20 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 keyNeedsLengthCache ? "keyContentLength" : null);
 
             // Write value (field 2) - use cached length if available
+            // For reference types, only write if value is not null
+            if (valueNeedsNullCheck)
+            {
+                _sb.AppendIndentedLine("if (value != null)");
+                _sb.StartNewBlock();
+            }
+
             GenerateFieldWrite("value", info.ValueType, info.ValueTypeInfo, info.ValueIsEnum, 2,
                 valueNeedsLengthCache ? "valueContentLength" : null);
+
+            if (valueNeedsNullCheck)
+            {
+                _sb.EndBlock();
+            }
 
             _sb.EndBlock(); // method
             _sb.AppendNewLine();
@@ -1202,10 +1236,24 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         private void GenerateDictionaryFieldWrite(string sourceVar, TypeAnalysisInfo typeInfo, int fieldId)
         {
             var mapEntryTypeName = typeInfo.MapEntryTypeName;
+            var keyType = typeInfo.DictionaryKeyType;
+            var valueType = typeInfo.DictionaryValueType;
             var (bytesString, _) = TypeMapping.PrecomputeTagBytes(fieldId, WireType.Len);
 
-            // NOTE: nestedDict variable already created in size calculation phase
-            // Just use it directly here
+            // Determine the correct dictionary type to instantiate (custom or standard)
+            string dictType;
+            if (TypeHelper.IsCustomDictionaryType(typeInfo.FullTypeName))
+            {
+                dictType = $"global::{typeInfo.FullTypeName}";
+            }
+            else
+            {
+                dictType = $"global::System.Collections.Generic.Dictionary<{keyType}, {valueType}>";
+            }
+
+            _sb.AppendIndentedLine("// INVARIANT: treat null as empty dictionary");
+            _sb.AppendIndentedLine($"var nestedDict = {sourceVar} ?? new {dictType}();");
+            _sb.AppendNewLine();
 
             // REPEATED format (standard protobuf): each entry gets its own field tag
             // Format: [tag][entry1_len][entry1][tag][entry2_len][entry2]...
@@ -1361,11 +1409,27 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             _sb.AppendIndentedLine($"public static void {methodName}(ref global::GProtobuf.Core.WriteSizeCalculator calculator, {keyType} key, {valueType} value)");
             _sb.StartNewBlock();
 
+            // Check if value type is a reference type that can be null
+            // If so, we need to skip calculating value size when value is null (matching protobuf-net behavior)
+            bool valueNeedsNullCheck = ValueNeedsNullCheck(info.ValueType, info.ValueTypeInfo, info.ValueIsEnum);
+
             // Calculate key size
             GenerateFieldSizeCalculation("key", info.KeyType, info.KeyTypeInfo, info.KeyIsEnum, "calculator", 1);
 
             // Calculate value size
+            // For reference types, only calculate if value is not null
+            if (valueNeedsNullCheck)
+            {
+                _sb.AppendIndentedLine("if (value != null)");
+                _sb.StartNewBlock();
+            }
+
             GenerateFieldSizeCalculation("value", info.ValueType, info.ValueTypeInfo, info.ValueIsEnum, "calculator", 2);
+
+            if (valueNeedsNullCheck)
+            {
+                _sb.EndBlock();
+            }
 
             _sb.EndBlock(); // method
             _sb.AppendNewLine();
@@ -1383,6 +1447,46 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         private static string GetNullableValueAccess(string sourceVar, string typeName)
         {
             return typeName.EndsWith("?") ? $"{sourceVar}.Value" : sourceVar;
+        }
+
+        /// <summary>
+        /// Checks if a map value type needs null checking in WriteMapEntry/CalculateMapEntrySize.
+        /// Returns true for reference types (string, custom classes, arrays, collections)
+        /// and nullable value types. Returns false for non-nullable value types and enums.
+        ///
+        /// When true, the generated code will:
+        /// - Not write the value field (field 2) when value is null
+        /// - Match protobuf-net behavior: entry contains key only, no value field
+        /// </summary>
+        private static bool ValueNeedsNullCheck(string typeName, TypeAnalysisInfo typeInfo, bool isEnum)
+        {
+            // Enums are value types, never need null check
+            if (isEnum)
+                return false;
+
+            // Nullable value types need null check
+            if (typeName.EndsWith("?"))
+                return true;
+
+            // Check if it's a string - strings are reference types that can be null
+            var normalized = TypeMapping.NormalizeTypeName(typeName);
+            if (normalized == "System.String")
+                return true;
+
+            // byte[] is a reference type that can be null
+            if (normalized == "System.Byte[]")
+                return true;
+
+            // Custom types (classes) need null check, but NOT structs
+            if (typeInfo != null && typeInfo.IsCustomType && !typeInfo.IsStruct)
+                return true;
+
+            // Collections and dictionaries are reference types
+            if (typeInfo != null && (typeInfo.IsCollection || typeInfo.IsDictionary || typeInfo.IsArray))
+                return true;
+
+            // Value types (int, double, etc.) don't need null check
+            return false;
         }
 
         private static string GetFullTypeName(string typeName, TypeAnalysisInfo typeInfo)
