@@ -288,7 +288,8 @@ namespace GProtobuf.Generator.V2.Handlers
             CollectionKind collectionKind,
             string collectionTypeName,
             string wireTypeVar = "wireType",
-            string readerVar = "reader")
+            string readerVar = "reader",
+            bool useStreamLimits = false)
         {
             var normalized = TypeMapping.NormalizeTypeName(elementTypeName);
             var shortType = TypeMapping.GetShortTypeName(elementTypeName);
@@ -325,8 +326,19 @@ namespace GProtobuf.Generator.V2.Handlers
             GenerateCollectionInitialization(sb, targetVar, shortType, collectionKind, collectionTypeName);
 
             sb.AppendIndentedLine($"int length = {readerVar}.ReadVarInt32();");
-            sb.AppendIndentedLine($"int endPos = {readerVar}.Position + length;");
-            sb.AppendIndentedLine($"while ({readerVar}.Position < endPos)");
+
+            if (useStreamLimits)
+            {
+                // StreamReader: Use PushLimit/PopLimit for proper limit handling
+                sb.AppendIndentedLine($"var packedOldLimit = {readerVar}.PushLimit(length);");
+                sb.AppendIndentedLine($"while (!{readerVar}.IsEnd)");
+            }
+            else
+            {
+                // SpanReader: Use Position + length for end detection
+                sb.AppendIndentedLine($"int endPos = {readerVar}.Position + length;");
+                sb.AppendIndentedLine($"while ({readerVar}.Position < endPos)");
+            }
             sb.StartNewBlock();
 
             if (isListLike)
@@ -340,6 +352,11 @@ namespace GProtobuf.Generator.V2.Handlers
             }
 
             sb.EndBlock();
+
+            if (useStreamLimits)
+            {
+                sb.AppendIndentedLine($"{readerVar}.PopLimit(packedOldLimit);");
+            }
 
             // Convert temp list to final collection type if needed (for Array/HashSet)
             if (!isListLike)

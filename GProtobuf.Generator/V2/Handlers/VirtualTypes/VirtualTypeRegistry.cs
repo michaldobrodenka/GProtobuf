@@ -11,6 +11,8 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
     {
         private readonly Dictionary<string, VirtualMapEntryInfo> _registeredTypes = new();
         private readonly List<VirtualMapEntryInfo> _orderedTypes = new();
+        private readonly Dictionary<string, VirtualCollectionInfo> _collectionTypes = new();
+        private readonly List<VirtualCollectionInfo> _orderedCollectionTypes = new();
         private readonly VirtualTupleTypeRegistry _tupleRegistry;
         private readonly TypeRegistry _typeRegistry;
         private readonly Microsoft.CodeAnalysis.Compilation _compilation;
@@ -89,10 +91,79 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         {
             _registeredTypes.Clear();
             _orderedTypes.Clear();
+            _collectionTypes.Clear();
+            _orderedCollectionTypes.Clear();
         }
 
         /// <summary>
-        /// Registers any nested dictionary types found in the value type.
+        /// Gets all registered collection types in order of registration.
+        /// </summary>
+        public IReadOnlyList<VirtualCollectionInfo> GetAllCollectionTypes() => _orderedCollectionTypes;
+
+        /// <summary>
+        /// Registers a collection type (List, HashSet, Dictionary) for virtual reader generation.
+        /// </summary>
+        public VirtualCollectionInfo RegisterCollectionType(string fullTypeName, TypeAnalysisInfo typeInfo)
+        {
+            var safeName = VirtualTypeNameGenerator.GetSafeTypeName(fullTypeName);
+
+            if (_collectionTypes.TryGetValue(safeName, out var existing))
+            {
+                return existing;
+            }
+
+            var info = new VirtualCollectionInfo
+            {
+                FullTypeName = fullTypeName,
+                SafeName = safeName
+            };
+
+            if (typeInfo.IsList)
+            {
+                info.Kind = CollectionKind.List;
+                info.ElementType = typeInfo.CollectionElementType;
+                info.ElementTypeInfo = typeInfo.CollectionElementTypeInfo ?? AnalyzeType(typeInfo.CollectionElementType);
+            }
+            else if (typeInfo.IsHashSet)
+            {
+                info.Kind = CollectionKind.HashSet;
+                info.ElementType = typeInfo.CollectionElementType;
+                info.ElementTypeInfo = typeInfo.CollectionElementTypeInfo ?? AnalyzeType(typeInfo.CollectionElementType);
+            }
+            else if (typeInfo.IsDictionary)
+            {
+                info.Kind = CollectionKind.Dictionary;
+                info.DictionaryKeyType = typeInfo.DictionaryKeyType;
+                info.DictionaryValueType = typeInfo.DictionaryValueType;
+                info.DictionaryKeyTypeInfo = AnalyzeType(typeInfo.DictionaryKeyType);
+                info.DictionaryValueTypeInfo = AnalyzeType(typeInfo.DictionaryValueType);
+            }
+            else if (typeInfo.IsArray)
+            {
+                info.Kind = CollectionKind.Array;
+                info.ElementType = typeInfo.CollectionElementType;
+                info.ElementTypeInfo = typeInfo.CollectionElementTypeInfo ?? AnalyzeType(typeInfo.CollectionElementType);
+            }
+            else if (typeInfo.IsCollection)
+            {
+                // Generic collection - treat as List
+                info.Kind = CollectionKind.List;
+                info.ElementType = typeInfo.CollectionElementType;
+                info.ElementTypeInfo = typeInfo.CollectionElementTypeInfo ?? AnalyzeType(typeInfo.CollectionElementType);
+            }
+            else
+            {
+                // Not a collection type
+                return null;
+            }
+
+            _collectionTypes[safeName] = info;
+            _orderedCollectionTypes.Add(info);
+            return info;
+        }
+
+        /// <summary>
+        /// Registers any nested dictionary and collection types found in the value type.
         /// </summary>
         private void RegisterNestedTypes(VirtualMapEntryInfo info)
         {
@@ -103,19 +174,27 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 _tupleRegistry.RegisterNestedTuples(info.ValueType);
             }
 
-            // If value is a dictionary, register it
+            // If value is a dictionary, register it as both a map entry and a collection type
             if (info.ValueTypeInfo.IsDictionary)
             {
                 RegisterMapEntry(
                     info.ValueTypeInfo.DictionaryKeyType,
                     info.ValueTypeInfo.DictionaryValueType);
+                // Also register as a collection type for virtual reader generation
+                RegisterCollectionType(info.ValueType, info.ValueTypeInfo);
             }
 
-            // If value is a collection of dictionaries, register the dictionary type
-            if (info.ValueTypeInfo.IsCollection && info.ValueTypeInfo.CollectionElementTypeInfo?.IsDictionary == true)
+            // If value is a collection (List, HashSet), register it as a collection type
+            if (info.ValueTypeInfo.IsCollection || info.ValueTypeInfo.IsList || info.ValueTypeInfo.IsHashSet)
             {
-                var elemInfo = info.ValueTypeInfo.CollectionElementTypeInfo;
-                RegisterMapEntry(elemInfo.DictionaryKeyType, elemInfo.DictionaryValueType);
+                RegisterCollectionType(info.ValueType, info.ValueTypeInfo);
+
+                // If collection element is a dictionary, register it
+                if (info.ValueTypeInfo.CollectionElementTypeInfo?.IsDictionary == true)
+                {
+                    var elemInfo = info.ValueTypeInfo.CollectionElementTypeInfo;
+                    RegisterMapEntry(elemInfo.DictionaryKeyType, elemInfo.DictionaryValueType);
+                }
             }
         }
 
@@ -412,6 +491,18 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         public string ValueEnumUnderlyingType { get; set; }
         public TypeAnalysisInfo KeyTypeInfo { get; set; }
         public TypeAnalysisInfo ValueTypeInfo { get; set; }
+
+        /// <summary>
+        /// Indicates whether this type has already been generated in some namespace.
+        /// Used to prevent duplicate generation when global registries are shared.
+        /// </summary>
+        public bool IsGenerated { get; set; }
+
+        /// <summary>
+        /// The namespace where this type was first generated.
+        /// Used for cross-namespace method calls.
+        /// </summary>
+        public string GeneratedInNamespace { get; set; }
     }
 
     /// <summary>
@@ -444,5 +535,30 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         public string DictionaryKeyType { get; set; }
         public string DictionaryValueType { get; set; }
         public string MapEntryTypeName { get; set; }
+    }
+
+    /// <summary>
+    /// Information about a virtual collection type (List, HashSet, Dictionary as nested types).
+    /// </summary>
+    internal class VirtualCollectionInfo
+    {
+        public string FullTypeName { get; set; }
+        public string SafeName { get; set; }
+        public CollectionKind Kind { get; set; }
+        public string ElementType { get; set; }
+        public TypeAnalysisInfo ElementTypeInfo { get; set; }
+        // For nested dictionaries
+        public string DictionaryKeyType { get; set; }
+        public string DictionaryValueType { get; set; }
+        public TypeAnalysisInfo DictionaryKeyTypeInfo { get; set; }
+        public TypeAnalysisInfo DictionaryValueTypeInfo { get; set; }
+    }
+
+    internal enum CollectionKind
+    {
+        List,
+        HashSet,
+        Dictionary,
+        Array
     }
 }

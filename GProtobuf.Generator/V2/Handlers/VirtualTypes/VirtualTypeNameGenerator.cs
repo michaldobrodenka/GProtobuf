@@ -124,6 +124,7 @@ namespace GProtobuf.Generator.V2
 
         /// <summary>
         /// Gets a short primitive type name for common types.
+        /// Uses lowercase names to match TypeNameHelper.SanitizePrimitiveName for consistency.
         /// </summary>
         private static string GetPrimitiveTypeName(string typeName)
         {
@@ -131,22 +132,23 @@ namespace GProtobuf.Generator.V2
 
             return normalized switch
             {
-                "System.Int32" => "Int32",
-                "System.Int64" => "Int64",
-                "System.Int16" => "Int16",
-                "System.UInt32" => "UInt32",
-                "System.UInt64" => "UInt64",
-                "System.UInt16" => "UInt16",
-                "System.Byte" => "Byte",
-                "System.SByte" => "SByte",
-                "System.Single" => "Single",
-                "System.Double" => "Double",
-                "System.Boolean" => "Boolean",
-                "System.String" => "String",
+                "System.Int32" => "int",
+                "System.Int64" => "long",
+                "System.Int16" => "short",
+                "System.UInt32" => "uint",
+                "System.UInt64" => "ulong",
+                "System.UInt16" => "ushort",
+                "System.Byte" => "byte",
+                "System.SByte" => "sbyte",
+                "System.Single" => "float",
+                "System.Double" => "double",
+                "System.Boolean" => "bool",
+                "System.String" => "string",
                 "System.Guid" => "Guid",
                 "System.DateTime" => "DateTime",
                 "System.TimeSpan" => "TimeSpan",
-                "System.Decimal" => "Decimal",
+                "System.Decimal" => "decimal",
+                "System.Char" => "char",
                 _ => null
             };
         }

@@ -12,18 +12,17 @@ namespace GProtobuf.Generator.V2.CodeGeneration
     /// Generates StreamReaders class with Read{ClassName} and Read{ClassName}Content methods.
     /// Handles deserialization from StreamReader to object instances.
     ///
-    /// DESIGN: StreamReaders methods delegate to SpanReaders internally.
-    /// StreamReader.CreateSubReader() returns SpanReader, allowing zero-copy nested parsing.
+    /// DESIGN: StreamReaders methods read directly from StreamReader without SpanReader delegation.
+    /// For nested messages, PushLimit/PopLimit is used for zero-allocation nested message reading.
     ///
     /// Pattern:
     /// - ReadXXX(ref StreamReader reader) - reads entire message from stream
     /// - ReadXXXContent(ref StreamReader reader) - reads message fields from stream
-    /// Both internally create SpanReader via CreateSubReader and delegate to SpanReaders.
+    /// - PopulateXXX(ref StreamReader reader, T instance) - populates existing instance
     /// </summary>
     internal class StreamReaderGenerator : GeneratorBase
     {
         private const string ReaderType = "global::GProtobuf.Core.StreamReader";
-        private const string SpanReaderType = "global::GProtobuf.Core.SpanReader";
         private const string ClassName = "StreamReaders";
 
         public StreamReaderGenerator(StringBuilderWithIndent sb, TypeRegistry registry)
@@ -118,7 +117,10 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// <summary>
         /// Generates complete StreamReaders class for all types.
         /// </summary>
-        public void GenerateAll(IEnumerable<TypeDefinition> types, string currentNamespace = null)
+        /// <param name="types">Types to generate readers for.</param>
+        /// <param name="currentNamespace">Current namespace being generated.</param>
+        /// <param name="skipVirtualTypes">If true, skip generating virtual map/tuple methods (they're in shared file).</param>
+        public void GenerateAll(IEnumerable<TypeDefinition> types, string currentNamespace = null, bool skipVirtualTypes = false)
         {
             _currentNamespace = currentNamespace ?? string.Empty;
 
@@ -146,8 +148,622 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 }
             }
 
+            // Generate virtual map/tuple methods only if not skipped (they're generated once in shared file)
+            if (!skipVirtualTypes)
+            {
+                // Generate virtual map entry readers for StreamReader
+                GenerateVirtualMapReaders();
+
+                // Generate virtual tuple readers for StreamReader
+                GenerateVirtualTupleReaders();
+
+                // Generate virtual collection readers for StreamReader (List<T>, HashSet<T>, Dictionary<K,V>)
+                GenerateVirtualCollectionReaders();
+            }
+
             _sb.EndBlock();
             _sb.AppendNewLine();
+        }
+
+        /// <summary>
+        /// Generates only the virtual map entry and tuple reader methods.
+        /// Used for generating the shared file that contains all virtual types.
+        /// </summary>
+        public void GenerateSharedVirtualTypesOnly()
+        {
+            _sb.AppendIndentedLine($"public static class {ClassName}");
+            _sb.StartNewBlock();
+
+            GenerateVirtualMapReaders();
+            GenerateVirtualTupleReaders();
+            GenerateVirtualCollectionReaders();
+
+            _sb.EndBlock();
+            _sb.AppendNewLine();
+        }
+
+        /// <summary>
+        /// Generates virtual map entry readers for StreamReader.
+        /// </summary>
+        private void GenerateVirtualMapReaders()
+        {
+            var virtualTypes = _virtualMapRegistry?.GetAllTypes();
+            if (virtualTypes == null || !virtualTypes.Any())
+                return;
+
+            _sb.AppendNewLine();
+            _sb.AppendIndentedLine("// Virtual Map Entry StreamReaders");
+            _sb.AppendNewLine();
+
+            var generator = new GProtobuf.Generator.V2.Handlers.VirtualTypes.VirtualMapEntryGenerator(_sb, _virtualMapRegistry, _registry);
+
+            foreach (var virtualType in virtualTypes)
+            {
+                try
+                {
+                    generator.GenerateStreamReader(virtualType);
+                }
+                catch (System.Exception ex)
+                {
+                    _sb.AppendIndentedLine($"// ERROR generating StreamReader for virtual type {virtualType.TypeName}: {ex.Message}");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Generates virtual tuple readers for StreamReader.
+        /// </summary>
+        private void GenerateVirtualTupleReaders()
+        {
+            var virtualTuples = _virtualTupleRegistry?.GetAllTypes();
+            if (virtualTuples == null || !virtualTuples.Any())
+                return;
+
+            _sb.AppendNewLine();
+            _sb.AppendIndentedLine("// Virtual Tuple StreamReaders");
+            _sb.AppendNewLine();
+
+            var generator = new GProtobuf.Generator.V2.Handlers.VirtualTypes.VirtualTupleGenerator(_sb, "Stream", _registry);
+
+            foreach (var tuple in virtualTuples)
+            {
+                try
+                {
+                    generator.GenerateStreamReader(tuple);
+                }
+                catch (System.Exception ex)
+                {
+                    _sb.AppendIndentedLine($"// ERROR generating StreamReader for tuple {tuple.SafeName}: {ex.Message}");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Generates virtual collection readers for StreamReader (List, HashSet, Dictionary as nested types).
+        /// </summary>
+        private void GenerateVirtualCollectionReaders()
+        {
+            var collectionTypes = _virtualMapRegistry?.GetAllCollectionTypes();
+            if (collectionTypes == null || !collectionTypes.Any())
+                return;
+
+            _sb.AppendNewLine();
+            _sb.AppendIndentedLine("// Virtual Collection StreamReaders");
+            _sb.AppendNewLine();
+
+            foreach (var collection in collectionTypes)
+            {
+                try
+                {
+                    GenerateCollectionReader(collection);
+                }
+                catch (System.Exception ex)
+                {
+                    _sb.AppendIndentedLine($"// ERROR generating StreamReader for collection {collection.SafeName}: {ex.Message}");
+                }
+            }
+        }
+
+        private void GenerateCollectionReader(GProtobuf.Generator.V2.Handlers.VirtualTypes.VirtualCollectionInfo collection)
+        {
+            switch (collection.Kind)
+            {
+                case GProtobuf.Generator.V2.Handlers.VirtualTypes.CollectionKind.List:
+                    GenerateListReader(collection);
+                    break;
+                case GProtobuf.Generator.V2.Handlers.VirtualTypes.CollectionKind.HashSet:
+                    GenerateHashSetReader(collection);
+                    break;
+                case GProtobuf.Generator.V2.Handlers.VirtualTypes.CollectionKind.Dictionary:
+                    GenerateDictionaryReader(collection);
+                    break;
+                case GProtobuf.Generator.V2.Handlers.VirtualTypes.CollectionKind.Array:
+                    GenerateArrayReader(collection);
+                    break;
+            }
+        }
+
+        private void GenerateListReader(GProtobuf.Generator.V2.Handlers.VirtualTypes.VirtualCollectionInfo collection)
+        {
+            var elementType = TypeMapping.GetShortTypeName(collection.ElementType);
+            var normalizedElementType = TypeMapping.NormalizeTypeName(collection.ElementType);
+
+            _sb.AppendIndentedLine($"public static global::System.Collections.Generic.List<{elementType}> Read{collection.SafeName}Content(ref {ReaderType} reader)");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine($"var result = new global::System.Collections.Generic.List<{elementType}>();");
+            _sb.AppendIndentedLine("while (!reader.IsEnd)");
+            _sb.StartNewBlock();
+
+            GenerateCollectionElementRead("result", collection.ElementType, collection.ElementTypeInfo, normalizedElementType);
+
+            _sb.EndBlock();
+            _sb.AppendIndentedLine("return result;");
+            _sb.EndBlock();
+            _sb.AppendNewLine();
+        }
+
+        private void GenerateHashSetReader(GProtobuf.Generator.V2.Handlers.VirtualTypes.VirtualCollectionInfo collection)
+        {
+            var elementType = TypeMapping.GetShortTypeName(collection.ElementType);
+            var normalizedElementType = TypeMapping.NormalizeTypeName(collection.ElementType);
+
+            // Determine the actual HashSet type to use based on FullTypeName
+            var (hashSetType, instantiationType) = GetHashSetTypes(collection.FullTypeName, elementType);
+
+            _sb.AppendIndentedLine($"public static {hashSetType} Read{collection.SafeName}Content(ref {ReaderType} reader)");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine($"var result = new {instantiationType}();");
+            _sb.AppendIndentedLine("while (!reader.IsEnd)");
+            _sb.StartNewBlock();
+
+            GenerateCollectionElementRead("result", collection.ElementType, collection.ElementTypeInfo, normalizedElementType);
+
+            _sb.EndBlock();
+            _sb.AppendIndentedLine("return result;");
+            _sb.EndBlock();
+            _sb.AppendNewLine();
+        }
+
+        private void GenerateArrayReader(GProtobuf.Generator.V2.Handlers.VirtualTypes.VirtualCollectionInfo collection)
+        {
+            var elementType = TypeMapping.GetShortTypeName(collection.ElementType);
+            var normalizedElementType = TypeMapping.NormalizeTypeName(collection.ElementType);
+
+            _sb.AppendIndentedLine($"public static {elementType}[] Read{collection.SafeName}Content(ref {ReaderType} reader)");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine($"var result = new global::System.Collections.Generic.List<{elementType}>();");
+            _sb.AppendIndentedLine("while (!reader.IsEnd)");
+            _sb.StartNewBlock();
+
+            GenerateCollectionElementRead("result", collection.ElementType, collection.ElementTypeInfo, normalizedElementType);
+
+            _sb.EndBlock();
+            _sb.AppendIndentedLine("return result.ToArray();");
+            _sb.EndBlock();
+            _sb.AppendNewLine();
+        }
+
+        private void GenerateDictionaryReader(GProtobuf.Generator.V2.Handlers.VirtualTypes.VirtualCollectionInfo collection)
+        {
+            var keyType = TypeMapping.GetShortTypeName(collection.DictionaryKeyType);
+            var valueType = TypeMapping.GetShortTypeName(collection.DictionaryValueType);
+
+            // Determine the actual dictionary type to use based on FullTypeName
+            var (dictionaryType, instantiationType) = GetDictionaryTypes(collection.FullTypeName, keyType, valueType);
+
+            _sb.AppendIndentedLine($"public static {dictionaryType} Read{collection.SafeName}Content(ref {ReaderType} reader)");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine($"var result = new {instantiationType}();");
+            _sb.AppendIndentedLine("while (!reader.IsEnd)");
+            _sb.StartNewBlock();
+
+            // Read map entry using PushLimit for zero-allocation nested message reading
+            _sb.AppendIndentedLine("reader.ReadWireTypeAndFieldId(out var entryWireType, out var entryFieldId);");
+            _sb.AppendIndentedLine("var entryLength = reader.ReadVarInt32();");
+            _sb.AppendIndentedLine("var entryOldLimit = reader.PushLimit(entryLength);");
+            _sb.AppendNewLine();
+
+            // Initialize key and value
+            var keyDefault = GetDefaultValue(collection.DictionaryKeyType, collection.DictionaryKeyTypeInfo);
+            var valueDefault = GetDefaultValue(collection.DictionaryValueType, collection.DictionaryValueTypeInfo);
+            _sb.AppendIndentedLine($"{keyType} key = {keyDefault};");
+            _sb.AppendIndentedLine($"{valueType} value = {valueDefault};");
+            _sb.AppendNewLine();
+
+            // Check if the value is a collection type (List, HashSet) which uses repeated field pattern
+            // Note: Arrays use packed format (single field 2), but List/HashSet have one field 2 per element
+            // IMPORTANT: Must exclude dictionary types first, since Contains-based checks would match nested types
+            var valueTypeInfo = collection.DictionaryValueTypeInfo;
+            bool isCollectionValue = valueTypeInfo != null &&
+                                     (valueTypeInfo.IsList || valueTypeInfo.IsHashSet) &&
+                                     !valueTypeInfo.IsDictionary;
+
+            // Read key and value fields
+            _sb.AppendIndentedLine("while (!reader.IsEnd)");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine("reader.ReadWireTypeAndFieldId(out var fieldWireType, out var fieldId);");
+            _sb.AppendIndentedLine("switch (fieldId)");
+            _sb.StartNewBlock();
+
+            // Key field (fieldId = 1)
+            _sb.AppendIndentedLine("case 1:");
+            _sb.IncreaseIndent();
+            GenerateDictionaryFieldRead("key", collection.DictionaryKeyType, collection.DictionaryKeyTypeInfo, "reader", "fieldWireType");
+            _sb.AppendIndentedLine("break;");
+            _sb.DecreaseIndent();
+
+            // Value field (fieldId = 2)
+            _sb.AppendIndentedLine("case 2:");
+            _sb.IncreaseIndent();
+            if (isCollectionValue)
+            {
+                // For collection values, each occurrence of case 2 adds ONE element
+                GenerateDictionaryRepeatedCollectionValueRead("value", collection.DictionaryValueType, valueTypeInfo, "reader", "fieldWireType");
+            }
+            else
+            {
+                GenerateDictionaryFieldRead("value", collection.DictionaryValueType, collection.DictionaryValueTypeInfo, "reader", "fieldWireType");
+            }
+            _sb.AppendIndentedLine("break;");
+            _sb.DecreaseIndent();
+
+            // Default
+            _sb.AppendIndentedLine("default:");
+            _sb.IncreaseIndent();
+            _sb.AppendIndentedLine("reader.SkipField(fieldWireType);");
+            _sb.AppendIndentedLine("break;");
+            _sb.DecreaseIndent();
+
+            _sb.EndBlock(); // switch
+            _sb.EndBlock(); // while reader
+
+            _sb.AppendIndentedLine("reader.PopLimit(entryOldLimit);");
+            _sb.AppendIndentedLine("result[key] = value;");
+
+            _sb.EndBlock(); // while reader
+            _sb.AppendIndentedLine("return result;");
+            _sb.EndBlock(); // method
+            _sb.AppendNewLine();
+        }
+
+        /// <summary>
+        /// Generates code to read ONE element of a collection value in a dictionary entry.
+        /// For List/HashSet dictionary values, each occurrence of field 2 contains one element (repeated field pattern).
+        /// </summary>
+        private void GenerateDictionaryRepeatedCollectionValueRead(string varName, string typeName, GProtobuf.Generator.V2.Handlers.VirtualTypes.TypeAnalysisInfo typeInfo, string readerVar, string wireTypeVar)
+        {
+            var elementType = typeInfo.CollectionElementType ?? "System.Object";
+            var elementTypeInfo = typeInfo.CollectionElementTypeInfo;
+            var normalizedElementType = TypeMapping.NormalizeTypeName(elementType);
+            var shortElementType = TypeMapping.GetShortTypeName(elementType);
+            bool isHashSet = typeInfo.IsHashSet;
+
+            // Determine collection creation type
+            string collectionCreationType;
+            if (isHashSet)
+            {
+                collectionCreationType = $"global::System.Collections.Generic.HashSet<{shortElementType}>";
+            }
+            else
+            {
+                collectionCreationType = $"global::System.Collections.Generic.List<{shortElementType}>";
+            }
+
+            // Initialize collection on first element
+            _sb.AppendIndentedLine($"if ({varName} == null) {varName} = new {collectionCreationType}();");
+
+            // Add single element based on element type
+            if (elementTypeInfo?.IsPrimitive == true || TypeMapping.IsSimpleType(normalizedElementType))
+            {
+                GenerateDictionaryRepeatedPrimitiveAdd(varName, normalizedElementType, readerVar, wireTypeVar);
+            }
+            else if (elementTypeInfo?.IsEnum == true || _registry?.IsEnum(elementType) == true)
+            {
+                // Enums can be packed, need wire type checking
+                GeneratePackableCollectionElementRead(varName, readerVar, wireTypeVar,
+                    $"{varName}.Add((global::{elementType}){readerVar}.ReadVarInt32());");
+            }
+            else
+            {
+                // Complex type - read with PushLimit
+                _sb.AppendIndentedLine("{");
+                _sb.IncreaseIndent();
+                _sb.AppendIndentedLine($"var elementLen = {readerVar}.ReadVarInt32();");
+                _sb.AppendIndentedLine($"var elementOldLimit = {readerVar}.PushLimit(elementLen);");
+
+                string className;
+                string nsPrefix;
+                if (IsLocalVirtualType(normalizedElementType))
+                {
+                    className = VirtualTypeNameGenerator.GetSafeTypeName(elementType);
+                    nsPrefix = "";
+                }
+                else
+                {
+                    className = TypeNameHelper.GetClassName(elementType);
+                    var typeNs = _registry?.GetNamespaceForType(elementType);
+                    nsPrefix = GeneratorHelpers.GetNamespacePrefix(typeNs, _currentNamespace);
+                }
+
+                bool isDerivedType = _registry?.IsDerivedType(elementType) ?? false;
+                var readMethodSuffix = isDerivedType ? "" : "Content";
+                _sb.AppendIndentedLine($"{varName}.Add({nsPrefix}StreamReaders.Read{className}{readMethodSuffix}(ref {readerVar}));");
+                _sb.AppendIndentedLine($"{readerVar}.PopLimit(elementOldLimit);");
+                _sb.DecreaseIndent();
+                _sb.AppendIndentedLine("}");
+            }
+        }
+
+        /// <summary>
+        /// Generates code to add primitive element(s) to a collection for repeated field reading.
+        /// Handles both packed (wireType=Len) and non-packed formats for packable primitive types.
+        /// </summary>
+        private void GenerateDictionaryRepeatedPrimitiveAdd(string varName, string normalizedElementType, string readerVar, string wireTypeVar)
+        {
+            var readExpr = PrimitiveTypeCodeGenerator.GetCollectionAddExpression(normalizedElementType, readerVar, wireTypeVar);
+            if (readExpr == null)
+            {
+                _sb.AppendIndentedLine($"// Unsupported primitive type for repeated field: {normalizedElementType}");
+                return;
+            }
+
+            var addStatement = $"{varName}.Add({readExpr});";
+
+            if (PrimitiveTypeCodeGenerator.IsPackable(normalizedElementType))
+            {
+                // Packable types need wire type checking for packed/non-packed format
+                GeneratePackableCollectionElementRead(varName, readerVar, wireTypeVar, addStatement);
+            }
+            else
+            {
+                // Non-packable types (string, Guid, etc.) - just output add line directly
+                _sb.AppendIndentedLine(addStatement);
+            }
+        }
+
+        /// <summary>
+        /// Gets the dictionary return type and instantiation type based on the original type name.
+        /// Supports ConcurrentDictionary and custom dictionary types.
+        /// </summary>
+        private (string returnType, string instantiationType) GetDictionaryTypes(string fullTypeName, string keyType, string valueType)
+        {
+            // Check for ConcurrentDictionary
+            if (fullTypeName.Contains("ConcurrentDictionary<"))
+            {
+                var type = $"global::System.Collections.Concurrent.ConcurrentDictionary<{keyType}, {valueType}>";
+                return (type, type);
+            }
+
+            // Check for custom dictionary types (like ListDictionary)
+            // These types usually have constructors compatible with Dictionary
+            if (!fullTypeName.StartsWith("System.Collections.Generic.Dictionary<") &&
+                !fullTypeName.StartsWith("global::System.Collections.Generic.Dictionary<"))
+            {
+                // Extract the custom dictionary type (e.g., "TapHome.Core.Lib.Model.ListDictionary<uint, DataType>")
+                var customType = TypeMapping.GetShortTypeName(fullTypeName);
+                return (customType, customType);
+            }
+
+            // Default to standard Dictionary
+            var dictType = $"global::System.Collections.Generic.Dictionary<{keyType}, {valueType}>";
+            return (dictType, dictType);
+        }
+
+        /// <summary>
+        /// Gets the HashSet return type and instantiation type based on the original type name.
+        /// Supports custom HashSet types like ValueLogTypeHashSet.
+        /// </summary>
+        private (string returnType, string instantiationType) GetHashSetTypes(string fullTypeName, string elementType)
+        {
+            // Check for custom HashSet types (not standard System.Collections.Generic.HashSet)
+            if (!fullTypeName.StartsWith("System.Collections.Generic.HashSet<") &&
+                !fullTypeName.StartsWith("global::System.Collections.Generic.HashSet<"))
+            {
+                // Extract the custom HashSet type (e.g., "TapHome.Core.Lib.Model.ValueLogTypeHashSet")
+                var customType = TypeMapping.GetShortTypeName(fullTypeName);
+                return (customType, customType);
+            }
+
+            // Default to standard HashSet
+            var hashSetType = $"global::System.Collections.Generic.HashSet<{elementType}>";
+            return (hashSetType, hashSetType);
+        }
+
+        private void GenerateCollectionElementRead(string targetCollection, string elementType, GProtobuf.Generator.V2.Handlers.VirtualTypes.TypeAnalysisInfo elementTypeInfo, string normalizedElementType)
+        {
+            // Read wire type and field id
+            _sb.AppendIndentedLine("reader.ReadWireTypeAndFieldId(out var wireType, out var fieldId);");
+
+            // Generate read based on element type
+            if (elementTypeInfo?.IsPrimitive == true || TypeMapping.IsSimpleType(normalizedElementType))
+            {
+                GeneratePrimitiveCollectionElementRead(targetCollection, normalizedElementType);
+            }
+            else if (elementTypeInfo?.IsEnum == true || _registry?.IsEnum(elementType) == true)
+            {
+                _sb.AppendIndentedLine($"{targetCollection}.Add((global::{elementType})reader.ReadVarInt32());");
+            }
+            else
+            {
+                // Complex type - read submessage using PushLimit for zero-allocation nested message reading
+                _sb.AppendIndentedLine("var itemLength = reader.ReadVarInt32();");
+                _sb.AppendIndentedLine("var itemOldLimit = reader.PushLimit(itemLength);");
+
+                // For virtual types (collections, dictionaries), use VirtualTypeNameGenerator for proper method names
+                string className;
+                if (IsLocalVirtualType(normalizedElementType))
+                {
+                    className = VirtualTypeNameGenerator.GetSafeTypeName(elementType);
+                }
+                else
+                {
+                    className = TypeNameHelper.GetClassName(elementType);
+                }
+
+                // Virtual types (tuples, collections) are generated locally, not in external namespaces
+                string nsPrefix;
+                if (IsLocalVirtualType(normalizedElementType))
+                {
+                    nsPrefix = "";
+                }
+                else
+                {
+                    var elementNs = _registry?.GetNamespaceForType(elementType);
+                    nsPrefix = GeneratorHelpers.GetNamespacePrefix(elementNs, _currentNamespace);
+                }
+
+                bool isDerivedType = _registry?.IsDerivedType(elementType) ?? false;
+                var readMethodSuffix = isDerivedType ? "" : "Content";
+                _sb.AppendIndentedLine($"{targetCollection}.Add({nsPrefix}StreamReaders.Read{className}{readMethodSuffix}(ref reader));");
+                _sb.AppendIndentedLine("reader.PopLimit(itemOldLimit);");
+            }
+        }
+
+        private void GeneratePrimitiveCollectionElementRead(string targetCollection, string normalizedElementType)
+        {
+            var readExpr = PrimitiveTypeCodeGenerator.GetCollectionAddExpression(normalizedElementType, "reader", "wireType");
+            if (readExpr != null)
+            {
+                _sb.AppendIndentedLine($"{targetCollection}.Add({readExpr});");
+            }
+            else
+            {
+                _sb.AppendIndentedLine($"// WARNING: Unsupported primitive collection element type: {normalizedElementType}");
+                _sb.AppendIndentedLine("reader.SkipField(wireType);");
+            }
+        }
+
+        private void GenerateDictionaryFieldRead(string targetVar, string typeName, GProtobuf.Generator.V2.Handlers.VirtualTypes.TypeAnalysisInfo typeInfo, string readerVar, string wireTypeVar)
+        {
+            var normalizedType = TypeMapping.NormalizeTypeName(typeName);
+
+            if (typeInfo?.IsPrimitive == true || TypeMapping.IsSimpleType(normalizedType))
+            {
+                GenerateDictionaryPrimitiveRead(targetVar, normalizedType, readerVar, wireTypeVar);
+            }
+            else if (typeInfo?.IsEnum == true || _registry?.IsEnum(typeName) == true)
+            {
+                _sb.AppendIndentedLine($"{targetVar} = (global::{typeName}){readerVar}.ReadVarInt32();");
+            }
+            else
+            {
+                // Complex type - use PushLimit for zero-allocation nested message reading
+                _sb.AppendIndentedLine("{");
+                _sb.IncreaseIndent();
+                _sb.AppendIndentedLine($"var {targetVar}Len = {readerVar}.ReadVarInt32();");
+                _sb.AppendIndentedLine($"var {targetVar}OldLimit = {readerVar}.PushLimit({targetVar}Len);");
+
+                // For virtual types (collections, dictionaries), use VirtualTypeNameGenerator for proper method names
+                // For regular types, use TypeNameHelper.GetClassName
+                string className;
+                if (IsLocalVirtualType(normalizedType))
+                {
+                    className = VirtualTypeNameGenerator.GetSafeTypeName(typeName);
+                }
+                else
+                {
+                    className = TypeNameHelper.GetClassName(typeName);
+                }
+
+                // Virtual types (tuples, collections) are generated locally, not in external namespaces
+                string nsPrefix;
+                if (IsLocalVirtualType(normalizedType))
+                {
+                    nsPrefix = "";
+                }
+                else
+                {
+                    var typeNs = _registry?.GetNamespaceForType(typeName);
+                    nsPrefix = GeneratorHelpers.GetNamespacePrefix(typeNs, _currentNamespace);
+                }
+
+                bool isDerivedType = _registry?.IsDerivedType(typeName) ?? false;
+                var readMethodSuffix = isDerivedType ? "" : "Content";
+                _sb.AppendIndentedLine($"{targetVar} = {nsPrefix}StreamReaders.Read{className}{readMethodSuffix}(ref {readerVar});");
+                _sb.AppendIndentedLine($"{readerVar}.PopLimit({targetVar}OldLimit);");
+
+                _sb.DecreaseIndent();
+                _sb.AppendIndentedLine("}");
+            }
+        }
+
+        /// <summary>
+        /// Checks if a type is a local virtual type (tuple or collection) that is generated
+        /// in the local StreamReaders class rather than an external namespace.
+        /// </summary>
+        private static bool IsLocalVirtualType(string typeName)
+        {
+            if (string.IsNullOrEmpty(typeName))
+                return false;
+
+            // Tuples are always local virtual types
+            if (TupleHandler.IsTupleType(typeName))
+                return true;
+
+            // System collections (List, HashSet, Dictionary) used as nested types are local virtual types
+            if (typeName.StartsWith("System.Collections.Generic.List<") ||
+                typeName.StartsWith("System.Collections.Generic.HashSet<") ||
+                typeName.StartsWith("System.Collections.Generic.Dictionary<") ||
+                typeName.StartsWith("System.Collections.Concurrent.ConcurrentDictionary<"))
+                return true;
+
+            // Custom dictionary types (like ListDictionary) containing "Dictionary<" are also local virtual types
+            if (typeName.Contains("Dictionary<"))
+                return true;
+
+            // Custom HashSet types (like ValueLogTypeHashSet) containing "HashSet" but not in System namespace
+            // are also local virtual types if they're registered as collection types
+            if (typeName.Contains("HashSet"))
+                return true;
+
+            // Arrays (except byte[]) are handled as virtual types
+            if (typeName.EndsWith("[]") && typeName != "System.Byte[]")
+                return true;
+
+            return false;
+        }
+
+        private void GenerateDictionaryPrimitiveRead(string targetVar, string normalizedType, string readerVar, string wireTypeVar)
+        {
+            // Special case for byte[] - keep original inline pattern for consistency
+            if (normalizedType == "System.Byte[]")
+            {
+                _sb.AppendIndentedLine("{");
+                _sb.IncreaseIndent();
+                _sb.AppendIndentedLine($"var {targetVar}Len = {readerVar}.ReadVarInt32();");
+                _sb.AppendIndentedLine($"{targetVar} = {readerVar}.GetSlice({targetVar}Len).ToArray();");
+                _sb.DecreaseIndent();
+                _sb.AppendIndentedLine("}");
+                return;
+            }
+
+            var assignment = PrimitiveTypeCodeGenerator.GetAssignmentStatement(normalizedType, targetVar, readerVar, wireTypeVar);
+            if (assignment != null)
+            {
+                _sb.AppendIndentedLine(assignment);
+            }
+            else
+            {
+                _sb.AppendIndentedLine($"// WARNING: Unsupported dictionary field type: {normalizedType}");
+                _sb.AppendIndentedLine($"{readerVar}.SkipField({wireTypeVar});");
+            }
+        }
+
+        private string GetDefaultValue(string typeName, GProtobuf.Generator.V2.Handlers.VirtualTypes.TypeAnalysisInfo typeInfo)
+        {
+            var normalizedType = TypeMapping.NormalizeTypeName(typeName);
+
+            if (typeInfo?.IsString == true || normalizedType == "System.String")
+                return "null";
+
+            if (typeInfo?.IsPrimitive == true || TypeMapping.IsSimpleType(normalizedType))
+                return "default";
+
+            if (typeInfo?.IsEnum == true || _registry?.IsEnum(typeName) == true)
+                return "default";
+
+            // Complex type
+            return "default";
         }
 
         #region Read Method
@@ -177,7 +793,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
             else
             {
-                // Has inheritance - delegate to SpanReaders after reading full message
+                // Has inheritance - handle via ReadContent which processes all field IDs
                 GenerateReadMethodWithInheritance(type, className, nsPrefix);
             }
 
@@ -187,22 +803,355 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateReadMethodWithInheritance(TypeDefinition type, string className, string nsPrefix)
         {
+            // Check if this is ProtoInclude-based inheritance or flat inheritance
             bool hasProtoInclude = type.ProtoIncludes != null && type.ProtoIncludes.Count > 0;
             bool isProtoIncludeDerived = _registry.IsDerivedType(type.FullName);
+            bool isFlatInheritance = _registry.HasFlatInheritance(type.FullName);
 
-            if (isProtoIncludeDerived || hasProtoInclude)
+            if (isProtoIncludeDerived)
             {
-                // Complex inheritance - read remaining data and delegate to SpanReaders
-                // SpanReaders handles ProtoInclude fields and base class fields correctly
-                _sb.AppendIndentedLine("// Inheritance requires reading all content to determine actual type");
-                _sb.AppendIndentedLine("var remainingData = reader.ReadRemainingBytes();");
-                _sb.AppendIndentedLine($"var spanReader = new {SpanReaderType}(remainingData);");
-                _sb.AppendIndentedLine($"return {nsPrefix}SpanReaders.Read{className}(ref spanReader);");
+                // For ProtoInclude derived types, generate code that handles the full inheritance chain
+                // using PushLimit/PopLimit for zero-allocation nested message reading
+                GenerateReadMethodForDerived(type, className);
+            }
+            else if (hasProtoInclude)
+            {
+                // Base type with ProtoIncludes - delegate to ReadContent which has ProtoInclude cases
+                _sb.AppendIndentedLine($"return Read{className}Content(ref reader);");
+            }
+            else if (isFlatInheritance)
+            {
+                // Flat inheritance (no ProtoInclude) - just read fields
+                _sb.AppendIndentedLine($"return Read{className}Content(ref reader);");
             }
             else
             {
+                // Default - delegate to ReadContent
                 _sb.AppendIndentedLine($"return Read{className}Content(ref reader);");
             }
+        }
+
+        /// <summary>
+        /// Generates Read method for derived type that handles the full inheritance chain.
+        /// Reads all ancestor fields and navigates through nested ProtoInclude wrappers
+        /// using PushLimit/PopLimit for zero-allocation streaming.
+        /// </summary>
+        private void GenerateReadMethodForDerived(TypeDefinition type, string className)
+        {
+            // Create instance of the derived type
+            GenerateObjectCreation(type, "result");
+            _sb.AppendNewLine();
+
+            // Get inheritance chain: [Root, ..., Parent, This]
+            var chain = _registry.GetInheritanceChain(type.FullName);
+
+            // Collect all fields needing temp lists from the entire inheritance chain
+            var fieldsNeedingTempList = new List<ProtoMemberAttribute>();
+            foreach (var typeName in chain)
+            {
+                var typeInChain = _registry.GetByFullName(typeName);
+                if (typeInChain?.ProtoMembers != null)
+                {
+                    var tempListFields = typeInChain.ProtoMembers
+                        .Where(m => m.IsCollection && (
+                            m.CollectionKind == CollectionKind.Array ||
+                            (m.CollectionKind == CollectionKind.InterfaceCollection && m.Type != null &&
+                             TypeMapping.NormalizeTypeName(m.Type).StartsWith("System.Collections.Generic.IEnumerable<") &&
+                             !m.Type.Contains("ICollection") &&
+                             !m.Type.Contains("IList"))
+                        ))
+                        .ToList();
+
+                    fieldsNeedingTempList.AddRange(tempListFields);
+                }
+            }
+
+            // Declare temp lists for all collection fields from inheritance chain
+            if (fieldsNeedingTempList.Count > 0)
+            {
+                foreach (var member in fieldsNeedingTempList)
+                {
+                    var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType);
+                    _sb.AppendIndentedLine($"global::System.Collections.Generic.List<{elementType}> _tempList_{member.Name} = null;");
+                }
+                _sb.AppendNewLine();
+            }
+
+            // Generate nested reading for each level using PushLimit/PopLimit
+            GenerateNestedReading(chain, 0, "reader");
+
+            // Convert temp lists to arrays or assign to IEnumerable properties
+            if (fieldsNeedingTempList.Count > 0)
+            {
+                _sb.AppendNewLine();
+                foreach (var member in fieldsNeedingTempList)
+                {
+                    _sb.AppendIndentedLine($"if (_tempList_{member.Name} != null)");
+                    _sb.StartNewBlock();
+
+                    if (member.CollectionKind == CollectionKind.Array)
+                    {
+                        // Arrays need ToArray() conversion
+                        _sb.AppendIndentedLine($"result.{member.Name} = _tempList_{member.Name}.ToArray();");
+                    }
+                    else
+                    {
+                        // IEnumerable can be assigned List directly (List implements IEnumerable)
+                        _sb.AppendIndentedLine($"result.{member.Name} = _tempList_{member.Name};");
+                    }
+
+                    _sb.EndBlock();
+                }
+            }
+
+            _sb.AppendIndentedLine("return result;");
+        }
+
+        /// <summary>
+        /// Recursively generates code to read fields at a specific level of the inheritance chain.
+        /// Uses PushLimit/PopLimit for zero-allocation nested message reading.
+        /// </summary>
+        private void GenerateNestedReading(IReadOnlyList<string> chain, int levelIndex, string readerVar)
+        {
+            if (levelIndex >= chain.Count)
+                return;
+
+            var currentTypeName = chain[levelIndex];
+            var currentType = _registry.GetByFullName(currentTypeName);
+            if (currentType == null)
+                return;
+
+            var wireTypeVar = levelIndex == 0 ? "wireType" : $"wireType{levelIndex}";
+            var fieldIdVar = levelIndex == 0 ? "fieldId" : $"fieldId{levelIndex}";
+
+            _sb.AppendIndentedLine($"while (!{readerVar}.IsEnd)");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine($"{readerVar}.ReadWireTypeAndFieldId(out var {wireTypeVar}, out var {fieldIdVar});");
+            _sb.AppendNewLine();
+
+            _sb.AppendIndentedLine($"switch ({fieldIdVar})");
+            _sb.StartNewBlock();
+
+            if (levelIndex + 1 < chain.Count)
+            {
+                var nextTypeName = chain[levelIndex + 1];
+                var protoInclude = GeneratorHelpers.FindProtoInclude(currentType, nextTypeName);
+
+                if (protoInclude != null)
+                {
+                    GenerateNestedProtoIncludeCase(protoInclude, chain, levelIndex + 1, readerVar);
+                }
+            }
+
+            if (currentType.ProtoMembers != null)
+            {
+                foreach (var member in currentType.ProtoMembers)
+                {
+                    GenerateFieldReadCaseForDerived(member, wireTypeVar, readerVar);
+                }
+            }
+
+            // Default - skip unknown fields
+            _sb.AppendIndentedLine("default:");
+            _sb.IncreaseIndent();
+            _sb.AppendIndentedLine($"{readerVar}.SkipField({wireTypeVar});");
+            _sb.AppendIndentedLine("break;");
+            _sb.DecreaseIndent();
+
+            _sb.EndBlock(); // switch
+            _sb.EndBlock(); // while
+        }
+
+        /// <summary>
+        /// Generates switch case for ProtoInclude that enters nested level.
+        /// Uses PushLimit/PopLimit for zero-allocation nested message reading.
+        /// </summary>
+        private void GenerateNestedProtoIncludeCase(ProtoIncludeAttribute include, IReadOnlyList<string> chain, int nextLevelIndex, string currentReaderVar)
+        {
+            _sb.AppendIndentedLine($"case {include.FieldId}: {{");
+            _sb.IncreaseIndent();
+
+            // Read length and push limit (zero-allocation pattern)
+            _sb.AppendIndentedLine($"var length{nextLevelIndex} = {currentReaderVar}.ReadVarInt32();");
+            _sb.AppendIndentedLine($"var oldLimit{nextLevelIndex} = {currentReaderVar}.PushLimit(length{nextLevelIndex});");
+
+            // Recursively generate reading for next level using same reader
+            GenerateNestedReading(chain, nextLevelIndex, currentReaderVar);
+
+            // Pop limit after reading nested content
+            _sb.AppendIndentedLine($"{currentReaderVar}.PopLimit(oldLimit{nextLevelIndex});");
+
+            _sb.AppendIndentedLine("break;");
+            _sb.DecreaseIndent();
+            _sb.AppendIndentedLine("}");
+        }
+
+        /// <summary>
+        /// Generates switch case for reading a field into 'result' for derived types.
+        /// </summary>
+        private void GenerateFieldReadCaseForDerived(ProtoMemberAttribute member, string wireTypeVar, string readerVar)
+        {
+            bool needsBraces = member.IsMap || member.IsCollection ||
+                              (!member.IsEnum && !_primitiveHandler.CanHandle(member.Type));
+
+            if (needsBraces)
+            {
+                _sb.AppendIndentedLine($"case {member.FieldId}: {{");
+                _sb.IncreaseIndent();
+            }
+            else
+            {
+                _sb.AppendIndentedLine($"case {member.FieldId}:");
+                _sb.IncreaseIndent();
+            }
+
+            // Wire type validation
+            GenerateWireTypeValidation(member, wireTypeVar, readerVar);
+
+            if (member.IsMap)
+            {
+                var mapHandler = new MapHandler(_sb, _virtualMapRegistry, "StreamReaders", _registry);
+                mapHandler.GenerateRead(member, $"result.{member.Name}", readerVar);
+            }
+            else if (member.IsCollection)
+            {
+                GenerateCollectionFieldReadBodyForDerived(member, wireTypeVar, readerVar);
+            }
+            else if (member.IsEnum)
+            {
+                // Use fully qualified type name for enums to avoid namespace issues
+                _sb.AppendIndentedLine($"result.{member.Name} = (global::{member.Type}){readerVar}.ReadVarInt32();");
+            }
+            else if (TupleHandler.IsTupleType(member.Type))
+            {
+                _tupleHandler.GenerateTupleRead($"result.{member.Name}", member.Type, readerVar);
+            }
+            else if (_primitiveHandler.CanHandle(member.Type))
+            {
+                _primitiveHandler.GenerateRead(_sb, $"result.{member.Name}", member.Type, member.DataFormat, readerVar, wireTypeVar);
+            }
+            else if (member.IsProtoVarint)
+            {
+                // ProtoVarint type - read varint and construct using the constructor
+                ProtoVarintTypeSupport.GenerateRead(_sb, member, $"result.{member.Name}", readerVar);
+            }
+            else if (TypeMapping.IsUnsupportedType(member.Type))
+            {
+                // Unsupported type - skip field with warning comment
+                _sb.AppendIndentedLine($"// WARNING: Field '{member.Name}' with type '{member.Type}' is unsupported and will be skipped");
+                _sb.AppendIndentedLine($"{readerVar}.SkipField({wireTypeVar});");
+            }
+            else
+            {
+                GenerateComplexTypeReadBodyForDerived(member, readerVar);
+            }
+
+            _sb.AppendIndentedLine("break;");
+
+            if (needsBraces)
+            {
+                _sb.DecreaseIndent();
+                _sb.AppendIndentedLine("}");
+            }
+            else
+            {
+                _sb.DecreaseIndent();
+            }
+        }
+
+        /// <summary>
+        /// Generates collection field reading for derived types using PushLimit.
+        /// </summary>
+        private void GenerateCollectionFieldReadBodyForDerived(ProtoMemberAttribute member, string wireTypeVar, string readerVar)
+        {
+            if (member.CollectionElementType == null)
+            {
+                throw new System.Exception($"CollectionElementType is null for collection member '{member.Name}' of type '{member.Type}'");
+            }
+
+            // Check if element type is enum (enums use packed encoding like primitives)
+            var normalizedType = TypeMapping.NormalizeTypeName(member.CollectionElementType);
+            bool isEnumCollection = _registry != null && (_registry.IsEnum(member.CollectionElementType) || _registry.IsEnum(normalizedType));
+
+            if (_primitiveHandler.CanHandleCollection(member.CollectionElementType) || isEnumCollection)
+            {
+                // Reader must accept both PACKED (for IsPacked=true) and UNPACKED (default) for backward compatibility
+                bool shouldBePacked = member.IsPacked;
+
+                if (shouldBePacked)
+                {
+                    _primitiveHandler.GenerateDualModePackedArrayRead(
+                        _sb,
+                        $"result.{member.Name}",
+                        member.CollectionElementType,
+                        member.DataFormat,
+                        member.CollectionKind,
+                        member.Type,
+                        wireTypeVar,
+                        readerVar,
+                        useStreamLimits: true);
+                }
+                else
+                {
+                    var fieldIdVar = wireTypeVar.Replace("wireType", "fieldId");
+                    _primitiveHandler.GenerateNonPackedArrayRead(
+                        _sb,
+                        $"result.{member.Name}",
+                        member.CollectionElementType,
+                        member.DataFormat,
+                        member.FieldId,
+                        member.CollectionKind,
+                        member.Type,
+                        readerVar,
+                        wireTypeVar,
+                        fieldIdVar);
+                }
+            }
+            else if (TupleHandler.IsTupleType(member.CollectionElementType))
+            {
+                // Tuple collection - generate inline
+                _tupleHandler.GenerateTupleCollectionRead(
+                    $"result.{member.Name}",
+                    member.CollectionElementType,
+                    member.FieldId,
+                    member.CollectionKind,
+                    member.Type,
+                    readerVar);
+            }
+            else
+            {
+                // Complex type collection
+                var elementClassName = TypeNameHelper.GetClassName(member.CollectionElementType);
+                _collectionHandler.GenerateComplexCollectionRead(
+                    $"result.{member.Name}",
+                    member.CollectionElementType,
+                    elementClassName,
+                    member.CollectionKind,
+                    member.Type,
+                    readerVar);
+            }
+        }
+
+        /// <summary>
+        /// Generates complex type field reading for derived types using PushLimit.
+        /// </summary>
+        private void GenerateComplexTypeReadBodyForDerived(ProtoMemberAttribute member, string readerVar)
+        {
+            var typeName = TypeNameHelper.GetClassName(member.Type);
+            var typeNamespace = _registry.GetNamespaceForType(member.Type);
+            var nsPrefix = GeneratorHelpers.GetNamespacePrefix(typeNamespace, _currentNamespace);
+
+            // Read length and use PushLimit for zero-allocation nested reading
+            _sb.AppendIndentedLine($"var length = {readerVar}.ReadVarInt32();");
+            _sb.AppendIndentedLine($"var oldLimit = {readerVar}.PushLimit(length);");
+
+            // For derived types (with ProtoInclude parent), use Read{typeName} to handle ProtoInclude wrapper
+            // For non-derived types, use Read{typeName}Content for direct field reading
+            bool isDerivedType = _registry?.IsDerivedType(member.Type) ?? false;
+            var readMethodSuffix = isDerivedType ? "" : "Content";
+            _sb.AppendIndentedLine($"result.{member.Name} = {nsPrefix}StreamReaders.Read{typeName}{readMethodSuffix}(ref {readerVar});");
+
+            _sb.AppendIndentedLine($"{readerVar}.PopLimit(oldLimit);");
         }
 
         #endregion
@@ -470,9 +1419,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     }
                     else
                     {
-                        // Complex type - read via SpanReader
+                        // Complex type - use PushLimit for zero-allocation nested message reading
                         _sb.AppendIndentedLine("var nestedLength = reader.ReadVarInt32();");
-                        _sb.AppendIndentedLine("var nestedReader = reader.CreateSubReader(nestedLength);");
+                        _sb.AppendIndentedLine("var nestedOldLimit = reader.PushLimit(nestedLength);");
 
                         var simpleName = Helpers.TypeNameHelper.GetClassName(member.Type);
                         var typeNs = _registry?.GetNamespaceForType(member.Type) ?? string.Empty;
@@ -481,7 +1430,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                         // For derived types (with ProtoInclude parent), use Read{typeName} to handle ProtoInclude wrapper
                         bool isDerivedType = _registry?.IsDerivedType(member.Type) ?? false;
                         var readMethodSuffix = isDerivedType ? "" : "Content";
-                        _sb.AppendIndentedLine($"{targetVariable} = {typeNsPrefix}SpanReaders.Read{simpleName}{readMethodSuffix}(ref nestedReader);");
+                        _sb.AppendIndentedLine($"{targetVariable} = {typeNsPrefix}StreamReaders.Read{simpleName}{readMethodSuffix}(ref reader);");
+                        _sb.AppendIndentedLine("reader.PopLimit(nestedOldLimit);");
                     }
                     break;
             }
@@ -581,6 +1531,45 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         #endregion
 
+        #region Wire Type Validation
+
+        private bool ShouldGenerateWireTypeValidation(ProtoMemberAttribute member)
+        {
+            // Collections with dual-mode (packed/unpacked) support handle wire type internally
+            if (member.IsCollection)
+            {
+                // Only primitive collections with IsPacked=true use dual-mode
+                // (default UNPACKED uses non-packed reader which validates wire type itself)
+                bool isDualMode = member.IsPacked;
+                return !isDualMode;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Generates wire type validation check.
+        /// Wire type validation REMOVED for performance (fail-fast approach).
+        /// Read methods now align with Populate methods behavior.
+        /// Malformed data will throw exception in ReadXXX methods.
+        /// </summary>
+        private void GenerateWireTypeValidation(ProtoMemberAttribute member, string wireTypeVar = "wireType", string readerVar = "reader")
+        {
+            // Wire type validation removed for performance
+            // Read methods now use fail-fast approach (same as Populate methods)
+            // Malformed data will throw exception in ReadXXX methods instead of graceful skip
+
+            // Skip validation for collections with dual-mode support
+            if (!ShouldGenerateWireTypeValidation(member))
+                return;
+
+            // Wire type check and skip logic REMOVED
+            // Aligns Read behavior with Populate behavior (consistency)
+            // Trade-off: Malformed data throws exception instead of silent skip
+        }
+
+        #endregion
+
         #region Field Generation
 
         private void GenerateFieldReadCase(ProtoMemberAttribute member, string nsPrefix)
@@ -648,7 +1637,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GeneratePrimitiveFieldReadBody(ProtoMemberAttribute member)
         {
-            // Use StreamReaders extension methods which mirror SpanReaders
+            // Use StreamReaders extension methods for type-aware reading
             var typeName = TypeMapping.NormalizeTypeName(member.Type);
             var dataFormat = member.DataFormat;
             bool isZigZag = dataFormat == DataFormat.ZigZag;
@@ -784,381 +1773,10 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateMapFieldReadBody(ProtoMemberAttribute member, string nsPrefix)
         {
-            // Read map entry as nested message, delegate to SpanReaders
-            _sb.AppendIndentedLine("var mapLength = reader.ReadVarInt32();");
-            _sb.AppendIndentedLine("var mapReader = reader.CreateSubReader(mapLength);");
-
-            // Get map key/value types
-            var keyType = TypeMapping.GetShortTypeName(member.MapKeyType);
-            var valueType = TypeMapping.GetShortTypeName(member.MapValueType);
-
-            // Check if target is List<KeyValuePair> vs Dictionary
-            bool isKeyValuePairCollection = TypeHelper.IsKeyValuePairCollection(member.Type);
-            var dictCreationType = TypeHelper.GetDictionaryCreationType(member.Type, member.MapKeyType, member.MapValueType);
-
-            _sb.AppendIndentedLine($"if (result.{member.Name} == null)");
-            _sb.StartNewBlock();
-            _sb.AppendIndentedLine($"result.{member.Name} = new {dictCreationType}();");
-            _sb.EndBlock();
-
-            // Generate inline map entry reading using SpanReader
-            // String uses ""
-            var keyDefault = GetDefaultValueForType(keyType);
-            var valueDefault = GetDefaultValueForType(valueType);
-            _sb.AppendIndentedLine($"{keyType} key = {keyDefault};");
-            _sb.AppendIndentedLine($"{valueType} value = {valueDefault};");
-
-            _sb.AppendIndentedLine("while (!mapReader.IsEnd)");
-            _sb.StartNewBlock();
-            _sb.AppendIndentedLine("mapReader.ReadWireTypeAndFieldId(out var entryWireType, out var entryFieldId);");
-            _sb.AppendIndentedLine("switch (entryFieldId)");
-            _sb.StartNewBlock();
-
-            // Field 1 = Key
-            _sb.AppendIndentedLine("case 1:");
-            _sb.IncreaseIndent();
-            GenerateMapKeyOrValueRead("key", member.MapKeyType, member.MapKeyEnumUnderlyingType, "mapReader", "entryWireType");
-            _sb.AppendIndentedLine("break;");
-            _sb.DecreaseIndent();
-
-            // Field 2 = Value
-            _sb.AppendIndentedLine("case 2:");
-            _sb.IncreaseIndent();
-            GenerateMapKeyOrValueRead("value", member.MapValueType, member.MapValueEnumUnderlyingType, "mapReader", "entryWireType", nsPrefix);
-            _sb.AppendIndentedLine("break;");
-            _sb.DecreaseIndent();
-
-            _sb.AppendIndentedLine("default:");
-            _sb.IncreaseIndent();
-            _sb.AppendIndentedLine("mapReader.SkipField(entryWireType);");
-            _sb.AppendIndentedLine("break;");
-            _sb.DecreaseIndent();
-
-            _sb.EndBlock();
-            _sb.EndBlock();
-
-            // Add entry to collection
-            if (isKeyValuePairCollection)
-            {
-                _sb.AppendIndentedLine($"result.{member.Name}.Add(new global::System.Collections.Generic.KeyValuePair<{member.MapKeyType}, {member.MapValueType}>(key, value));");
-            }
-            else
-            {
-                _sb.AppendIndentedLine($"result.{member.Name}[key] = value;");
-            }
-        }
-
-        private void GenerateMapKeyOrValueRead(string varName, string typeName, string enumUnderlyingType, string readerVar, string wireTypeVar, string nsPrefix = "")
-        {
-            var normalizedType = TypeMapping.NormalizeTypeName(typeName);
-
-            // Check if it's an enum
-            if (!string.IsNullOrEmpty(enumUnderlyingType) || _registry.IsEnum(typeName) || _registry.IsEnum(normalizedType))
-            {
-                _sb.AppendIndentedLine($"{varName} = (global::{typeName}){readerVar}.ReadVarInt32();");
-                return;
-            }
-
-            // Check for array types
-            if (typeName.EndsWith("[]"))
-            {
-                GenerateMapArrayValueRead(varName, typeName, readerVar);
-                return;
-            }
-
-            // Check for nested Dictionary types BEFORE List/Collection
-            // (because IsListType matches any string containing "List<")
-            if (TypeHelper.IsDictionaryType(typeName))
-            {
-                GenerateMapNestedDictionaryValueRead(varName, typeName, readerVar);
-                return;
-            }
-
-            // Check for List/Collection types (including custom collections like ValueLogTypeHashSet)
-            if (TypeHelper.IsListType(typeName) || TypeHelper.IsHashSetType(typeName) ||
-                TypeHelper.IsCustomHashSetType(typeName) || TypeHelper.IsCustomListType(typeName))
-            {
-                GenerateMapCollectionValueRead(varName, typeName, readerVar);
-                return;
-            }
-
-            // Check for Tuple types - use current namespace's SpanReaders
-            if (typeName.StartsWith("System.Tuple<") || typeName.StartsWith("System.ValueTuple<") ||
-                typeName.StartsWith("(") || normalizedType.Contains("Tuple<"))
-            {
-                GenerateMapTupleValueRead(varName, typeName, readerVar);
-                return;
-            }
-
-            switch (normalizedType)
-            {
-                case "System.Int32":
-                    _sb.AppendIndentedLine($"{varName} = {readerVar}.ReadVarInt32();");
-                    break;
-                case "System.UInt32":
-                    _sb.AppendIndentedLine($"{varName} = {readerVar}.ReadVarUInt32();");
-                    break;
-                case "System.Int64":
-                    _sb.AppendIndentedLine($"{varName} = {readerVar}.ReadVarInt64();");
-                    break;
-                case "System.UInt64":
-                    _sb.AppendIndentedLine($"{varName} = {readerVar}.ReadVarUInt64();");
-                    break;
-                case "System.Int16":
-                    _sb.AppendIndentedLine($"{varName} = (short){readerVar}.ReadVarInt32();");
-                    break;
-                case "System.UInt16":
-                    _sb.AppendIndentedLine($"{varName} = (ushort){readerVar}.ReadVarUInt32();");
-                    break;
-                case "System.Byte":
-                    _sb.AppendIndentedLine($"{varName} = (byte){readerVar}.ReadVarUInt32();");
-                    break;
-                case "System.SByte":
-                    _sb.AppendIndentedLine($"{varName} = (sbyte){readerVar}.ReadVarInt32();");
-                    break;
-                case "System.Char":
-                    _sb.AppendIndentedLine($"{varName} = (char){readerVar}.ReadVarUInt32();");
-                    break;
-                case "System.String":
-                    _sb.AppendIndentedLine($"{varName} = global::GProtobuf.Core.SpanReaders.ReadString(ref {readerVar}, {wireTypeVar});");
-                    break;
-                case "System.Boolean":
-                    _sb.AppendIndentedLine($"{varName} = {readerVar}.ReadVarInt32() != 0;");
-                    break;
-                case "System.Double":
-                    _sb.AppendIndentedLine($"{varName} = {readerVar}.ReadFixedDouble();");
-                    break;
-                case "System.Single":
-                    _sb.AppendIndentedLine($"{varName} = {readerVar}.ReadFixedFloat();");
-                    break;
-                case "System.Byte[]":
-                    _sb.AppendIndentedLine("{");
-                    _sb.IncreaseIndent();
-                    _sb.AppendIndentedLine($"var {varName}Len = {readerVar}.ReadVarInt32();");
-                    _sb.AppendIndentedLine($"{varName} = {readerVar}.GetSlice({varName}Len).ToArray();");
-                    _sb.DecreaseIndent();
-                    _sb.AppendIndentedLine("}");
-                    break;
-                case "System.Guid":
-                    _sb.AppendIndentedLine($"{varName} = global::GProtobuf.Core.SpanReaders.ReadGuid(ref {readerVar}, {wireTypeVar});");
-                    break;
-                case "System.DateTime":
-                    _sb.AppendIndentedLine($"{varName} = global::GProtobuf.Core.SpanReaders.ReadDateTime(ref {readerVar}, {wireTypeVar});");
-                    break;
-                case "System.TimeSpan":
-                    _sb.AppendIndentedLine($"{varName} = global::GProtobuf.Core.SpanReaders.ReadTimeSpan(ref {readerVar}, {wireTypeVar});");
-                    break;
-                default:
-                    // Complex type - use SpanReaders with unique variable names
-                    GenerateMapComplexTypeValueRead(varName, typeName, readerVar);
-                    break;
-            }
-        }
-
-        private void GenerateMapArrayValueRead(string varName, string typeName, string readerVar)
-        {
-            var elementType = typeName.Substring(0, typeName.Length - 2);
-            var normalizedElementType = TypeMapping.NormalizeTypeName(elementType);
-            var shortElementType = TypeMapping.GetShortTypeName(elementType);
-
-            _sb.AppendIndentedLine("{");
-            _sb.IncreaseIndent();
-
-            // Try to use optimized packed array read
-            var packedReadExpr = TypeMapping.GetPackedArrayReadExpression(elementType, DataFormat.Default, readerVar);
-            if (packedReadExpr != null)
-            {
-                _sb.AppendIndentedLine($"{varName} = {packedReadExpr};");
-            }
-            else
-            {
-                // Fallback for types without optimized packed read
-                _sb.AppendIndentedLine($"var {varName}Len = {readerVar}.ReadVarInt32();");
-                _sb.AppendIndentedLine($"var {varName}End = {readerVar}.Position + {varName}Len;");
-                _sb.AppendIndentedLine($"var {varName}List = new global::System.Collections.Generic.List<{shortElementType}>();");
-                _sb.AppendIndentedLine($"while ({readerVar}.Position < {varName}End)");
-                _sb.StartNewBlock();
-
-                var elementReadExpr = TypeMapping.GetElementReadExpression(elementType, DataFormat.Default, readerVar);
-                if (elementReadExpr != null)
-                {
-                    _sb.AppendIndentedLine($"{varName}List.Add({elementReadExpr});");
-                }
-                else if (normalizedElementType == "System.String")
-                {
-                    _sb.AppendIndentedLine($"{varName}List.Add(global::GProtobuf.Core.SpanReaders.ReadString(ref {readerVar}, global::GProtobuf.Core.WireType.Len));");
-                }
-                else
-                {
-                    _sb.AppendIndentedLine($"// Unsupported array element type: {elementType}");
-                }
-
-                _sb.EndBlock();
-                _sb.AppendIndentedLine($"{varName} = {varName}List.ToArray();");
-            }
-
-            _sb.DecreaseIndent();
-            _sb.AppendIndentedLine("}");
-        }
-
-        private void GenerateMapCollectionValueRead(string varName, string typeName, string readerVar)
-        {
-            // Check for custom collections without generic parameter (e.g., ValueLogTypeHashSet)
-            // These implement ICollection<T> but don't have <T> in type name
-            bool isCustomNonGenericCollection = (TypeHelper.IsCustomHashSetType(typeName) || TypeHelper.IsCustomListType(typeName)) &&
-                                                 !typeName.Contains("<");
-            if (isCustomNonGenericCollection)
-            {
-                // Custom non-generic collections cannot be parsed from type name alone
-                // They need metadata from ICollection<T> interface which is not available here
-                // Generate a skip with warning
-                _sb.AppendIndentedLine("{");
-                _sb.IncreaseIndent();
-                _sb.AppendIndentedLine($"// WARNING: Custom collection type '{typeName}' without generic parameter cannot be deserialized as Map key/value");
-                _sb.AppendIndentedLine($"// Consider using standard HashSet<T> or adding ProtoContract to '{typeName}'");
-                _sb.AppendIndentedLine($"var {varName}Len = {readerVar}.ReadVarInt32();");
-                _sb.AppendIndentedLine($"_ = {readerVar}.GetSlice({varName}Len); // Skip bytes");
-                _sb.AppendIndentedLine($"{varName} = new global::{typeName}();");
-                _sb.DecreaseIndent();
-                _sb.AppendIndentedLine("}");
-                return;
-            }
-
-            var elementType = TypeHelper.GetCollectionElementType(typeName);
-            var normalizedElementType = TypeMapping.NormalizeTypeName(elementType);
-            var shortElementType = TypeMapping.GetShortTypeName(elementType);
-            bool isHashSet = TypeHelper.IsHashSetType(typeName);
-            bool isCustomCollection = TypeHelper.IsCustomHashSetType(typeName) || TypeHelper.IsCustomListType(typeName);
-
-            _sb.AppendIndentedLine("{");
-            _sb.IncreaseIndent();
-
-            // Try to use optimized packed array read, then convert to collection
-            var packedReadExpr = TypeMapping.GetPackedArrayReadExpression(elementType, DataFormat.Default, readerVar);
-            if (packedReadExpr != null && !isCustomCollection)
-            {
-                if (isHashSet)
-                {
-                    _sb.AppendIndentedLine($"{varName} = new global::System.Collections.Generic.HashSet<{shortElementType}>({packedReadExpr});");
-                }
-                else
-                {
-                    _sb.AppendIndentedLine($"{varName} = new global::System.Collections.Generic.List<{shortElementType}>({packedReadExpr});");
-                }
-            }
-            else
-            {
-                // Fallback for types without optimized packed read
-                _sb.AppendIndentedLine($"var {varName}Len = {readerVar}.ReadVarInt32();");
-                _sb.AppendIndentedLine($"var {varName}End = {readerVar}.Position + {varName}Len;");
-
-                // Determine collection creation type
-                string collectionCreationType;
-                if (isCustomCollection)
-                {
-                    collectionCreationType = $"global::{typeName}";
-                }
-                else if (isHashSet)
-                {
-                    collectionCreationType = $"global::System.Collections.Generic.HashSet<{shortElementType}>";
-                }
-                else
-                {
-                    collectionCreationType = $"global::System.Collections.Generic.List<{shortElementType}>";
-                }
-                _sb.AppendIndentedLine($"var {varName}Collection = new {collectionCreationType}();");
-
-                _sb.AppendIndentedLine($"while ({readerVar}.Position < {varName}End)");
-                _sb.StartNewBlock();
-
-                var elementReadExpr = TypeMapping.GetElementReadExpression(elementType, DataFormat.Default, readerVar);
-                if (elementReadExpr != null)
-                {
-                    _sb.AppendIndentedLine($"{varName}Collection.Add({elementReadExpr});");
-                }
-                else if (normalizedElementType == "System.String")
-                {
-                    _sb.AppendIndentedLine($"{varName}Collection.Add(global::GProtobuf.Core.SpanReaders.ReadString(ref {readerVar}, global::GProtobuf.Core.WireType.Len));");
-                }
-                else
-                {
-                    _sb.AppendIndentedLine($"// Unsupported collection element type: {elementType}");
-                }
-
-                _sb.EndBlock();
-                _sb.AppendIndentedLine($"{varName} = {varName}Collection;");
-            }
-
-            _sb.DecreaseIndent();
-            _sb.AppendIndentedLine("}");
-        }
-
-        private void GenerateMapNestedDictionaryValueRead(string varName, string typeName, string readerVar)
-        {
-            // For nested dictionaries, delegate to the generated KeyValue reader via SpanReaders
-            var (dictKeyType, dictValueType) = TypeHelper.ParseDictionaryTypes(typeName);
-            var mapEntryTypeName = VirtualTypeNameGenerator.GetMapEntryTypeName(dictKeyType, dictValueType);
-
-            _sb.AppendIndentedLine("{");
-            _sb.IncreaseIndent();
-            _sb.AppendIndentedLine($"var {varName}Len = {readerVar}.ReadVarInt32();");
-            _sb.AppendIndentedLine($"var {varName}Reader = new global::GProtobuf.Core.SpanReader({readerVar}.GetSlice({varName}Len));");
-            _sb.AppendIndentedLine($"var {varName}Entry = SpanReaders.Read{mapEntryTypeName}(ref {varName}Reader);");
-            _sb.AppendIndentedLine($"if ({varName}Entry.success)");
-            _sb.StartNewBlock();
-
-            // Use original dictionary type if it's a custom type (ConcurrentDictionary, ListDictionary, etc.)
-            string dictCreationType;
-            if (TypeHelper.IsCustomDictionaryType(typeName))
-            {
-                dictCreationType = $"global::{typeName}";
-            }
-            else
-            {
-                var keyType = TypeMapping.GetShortTypeName(dictKeyType);
-                var valueType = TypeMapping.GetShortTypeName(dictValueType);
-                dictCreationType = $"global::System.Collections.Generic.Dictionary<{keyType}, {valueType}>";
-            }
-            _sb.AppendIndentedLine($"{varName} = new {dictCreationType}();");
-            _sb.AppendIndentedLine($"{varName}[{varName}Entry.key] = {varName}Entry.value;");
-            _sb.EndBlock();
-            _sb.DecreaseIndent();
-            _sb.AppendIndentedLine("}");
-        }
-
-        private void GenerateMapComplexTypeValueRead(string varName, string typeName, string readerVar)
-        {
-            var className = TypeNameHelper.GetClassName(typeName);
-            var typeNs = _registry.GetNamespaceForType(typeName);
-            var typeNsPrefix = GeneratorHelpers.GetNamespacePrefix(typeNs, _currentNamespace);
-
-            _sb.AppendIndentedLine("{");
-            _sb.IncreaseIndent();
-            _sb.AppendIndentedLine($"var {varName}Len = {readerVar}.ReadVarInt32();");
-            _sb.AppendIndentedLine($"var {varName}Reader = new global::GProtobuf.Core.SpanReader({readerVar}.GetSlice({varName}Len));");
-
-            // For derived types (with ProtoInclude parent), use Read{typeName} to handle ProtoInclude wrapper
-            bool isDerivedType = _registry?.IsDerivedType(typeName) ?? false;
-            var readMethodSuffix = isDerivedType ? "" : "Content";
-            _sb.AppendIndentedLine($"{varName} = {typeNsPrefix}SpanReaders.Read{className}{readMethodSuffix}(ref {varName}Reader);");
-            _sb.DecreaseIndent();
-            _sb.AppendIndentedLine("}");
-        }
-
-        private void GenerateMapTupleValueRead(string varName, string typeName, string readerVar)
-        {
-            // For tuple types, use the TupleHandler via current namespace's SpanReaders
-            // Generate: Read{TupleSafeName}Content(ref reader)
-            var tupleSafeName = VirtualTypeNameGenerator.GetSafeTypeName(typeName);
-
-            _sb.AppendIndentedLine("{");
-            _sb.IncreaseIndent();
-            _sb.AppendIndentedLine($"var {varName}Len = {readerVar}.ReadVarInt32();");
-            _sb.AppendIndentedLine($"var {varName}Reader = new global::GProtobuf.Core.SpanReader({readerVar}.GetSlice({varName}Len));");
-            // Use current namespace's SpanReaders for tuple reading
-            _sb.AppendIndentedLine($"{varName} = SpanReaders.Read{tupleSafeName}Content(ref {varName}Reader);");
-            _sb.DecreaseIndent();
-            _sb.AppendIndentedLine("}");
+            // Use MapHandler to generate consistent helper method calls (matching Populate methods pattern)
+            // This reuses the existing ReadMapEntry_* helper methods instead of inlining ~80 lines per field
+            var mapHandler = new MapHandler(_sb, _virtualMapRegistry, "StreamReaders", _registry);
+            mapHandler.GenerateRead(member, $"result.{member.Name}", "reader");
         }
 
         private void GenerateCollectionFieldReadBody(ProtoMemberAttribute member, string nsPrefix)
@@ -1466,28 +2084,24 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             // Handle special types (DateTime, Guid, TimeSpan, byte[]) that have predefined readers in GProtobuf.Core
             // These don't have generated ReadXxxContent methods
-            switch (normalizedElementType)
+            if (normalizedElementType == "System.DateTime" || normalizedElementType == "System.TimeSpan" ||
+                normalizedElementType == "System.Byte[]" || normalizedElementType == "System.Guid")
             {
-                case "System.DateTime":
-                    _sb.AppendIndentedLine($"{targetCollection}.Add(global::GProtobuf.Core.StreamReaders.ReadDateTime(ref reader, global::GProtobuf.Core.WireType.Len));");
-                    return;
-                case "System.TimeSpan":
-                    _sb.AppendIndentedLine($"{targetCollection}.Add(global::GProtobuf.Core.StreamReaders.ReadTimeSpan(ref reader, global::GProtobuf.Core.WireType.Len));");
-                    return;
-                case "System.Byte[]":
-                    _sb.AppendIndentedLine($"{targetCollection}.Add(global::GProtobuf.Core.StreamReaders.ReadByteArray(ref reader));");
-                    return;
+                var readExpr = PrimitiveTypeCodeGenerator.GetCollectionAddExpression(normalizedElementType, "reader", "global::GProtobuf.Core.WireType.Len");
+                _sb.AppendIndentedLine($"{targetCollection}.Add({readExpr});");
+                return;
             }
 
-            // Read nested message via CreateSubReader -> SpanReader
+            // Read nested message using PushLimit for zero-allocation nested message reading
             _sb.AppendIndentedLine("var itemLength = reader.ReadVarInt32();");
-            _sb.AppendIndentedLine("var itemReader = reader.CreateSubReader(itemLength);");
+            _sb.AppendIndentedLine("var itemOldLimit = reader.PushLimit(itemLength);");
 
-            // Handle tuple types - use current namespace's SpanReaders (not System.Serialization)
+            // Handle tuple types - use current namespace's StreamReaders
             if (TupleHandler.IsTupleType(member.CollectionElementType))
             {
                 var tupleSafeName = VirtualTypeNameGenerator.GetSafeTypeName(member.CollectionElementType);
-                _sb.AppendIndentedLine($"{targetCollection}.Add(SpanReaders.Read{tupleSafeName}Content(ref itemReader));");
+                _sb.AppendIndentedLine($"{targetCollection}.Add(StreamReaders.Read{tupleSafeName}Content(ref reader));");
+                _sb.AppendIndentedLine("reader.PopLimit(itemOldLimit);");
                 return;
             }
 
@@ -1497,26 +2111,28 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // For derived types (with ProtoInclude parent), use Read{typeName} to handle ProtoInclude wrapper
             bool isDerivedType = _registry?.IsDerivedType(member.CollectionElementType) ?? false;
             var readMethodSuffix = isDerivedType ? "" : "Content";
-            _sb.AppendIndentedLine($"{targetCollection}.Add({elementNsPrefix}SpanReaders.Read{elementClassName}{readMethodSuffix}(ref itemReader));");
+            _sb.AppendIndentedLine($"{targetCollection}.Add({elementNsPrefix}StreamReaders.Read{elementClassName}{readMethodSuffix}(ref reader));");
+            _sb.AppendIndentedLine("reader.PopLimit(itemOldLimit);");
         }
 
         private void GenerateTupleFieldReadBody(ProtoMemberAttribute member, string nsPrefix)
         {
-            // For tuples, read length, create sub-reader, and call SpanReaders directly
-            // (Don't use TupleHandler.GenerateTupleRead as it adds another level of length reading)
+            // For tuples, use PushLimit for zero-allocation nested message reading
             var itemTypes = TupleHandler.ParseTupleTypes(member.Type);
             var tupleInfo = _virtualTupleRegistry.Register(member.Type, itemTypes);
 
             _sb.AppendIndentedLine("var tupleLength = reader.ReadVarInt32();");
-            _sb.AppendIndentedLine("var tupleReader = reader.CreateSubReader(tupleLength);");
-            _sb.AppendIndentedLine($"result.{member.Name} = SpanReaders.Read{tupleInfo.SafeName}Content(ref tupleReader);");
+            _sb.AppendIndentedLine("var tupleOldLimit = reader.PushLimit(tupleLength);");
+            _sb.AppendIndentedLine($"result.{member.Name} = StreamReaders.Read{tupleInfo.SafeName}Content(ref reader);");
+            _sb.AppendIndentedLine("reader.PopLimit(tupleOldLimit);");
         }
 
         private void GenerateComplexTypeReadBody(ProtoMemberAttribute member, string nsPrefix)
         {
+            // Use PushLimit for zero-allocation nested message reading
             var typeName = TypeNameHelper.GetClassName(member.Type);
             _sb.AppendIndentedLine("var length = reader.ReadVarInt32();");
-            _sb.AppendIndentedLine("var nestedReader = reader.CreateSubReader(length);");
+            _sb.AppendIndentedLine("var oldLimit = reader.PushLimit(length);");
 
             var typeNamespace = _registry.GetNamespaceForType(member.Type);
             var typeNsPrefix = GeneratorHelpers.GetNamespacePrefix(typeNamespace, _currentNamespace);
@@ -1525,8 +2141,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             bool isDerivedType = _registry?.IsDerivedType(member.Type) ?? false;
             var readMethodSuffix = isDerivedType ? "" : "Content";
 
-            // Use SpanReaders for nested content (CreateSubReader returns SpanReader)
-            _sb.AppendIndentedLine($"result.{member.Name} = {typeNsPrefix}SpanReaders.Read{typeName}{readMethodSuffix}(ref nestedReader);");
+            // Use StreamReaders for nested content
+            _sb.AppendIndentedLine($"result.{member.Name} = {typeNsPrefix}StreamReaders.Read{typeName}{readMethodSuffix}(ref reader);");
+            _sb.AppendIndentedLine("reader.PopLimit(oldLimit);");
         }
 
         private void GenerateProtoIncludeReadCase(TypeDefinition parentType, ProtoIncludeAttribute include, string nsPrefix)
@@ -1538,11 +2155,15 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine($"case {include.FieldId}: {{");
             _sb.IncreaseIndent();
 
+            // Use PushLimit for zero-allocation nested message reading
             _sb.AppendIndentedLine("var length = reader.ReadVarInt32();");
-            _sb.AppendIndentedLine("var nestedReader = reader.CreateSubReader(length);");
+            _sb.AppendIndentedLine("var oldLimit = reader.PushLimit(length);");
 
-            // Use SpanReaders for derived content reading
-            _sb.AppendIndentedLine($"result = {derivedNsPrefix}SpanReaders.Read{derivedClassName}Content(ref nestedReader);");
+            // Use StreamReaders for derived content reading
+            _sb.AppendIndentedLine($"result = {derivedNsPrefix}StreamReaders.Read{derivedClassName}Content(ref reader);");
+
+            // Pop limit after reading derived content
+            _sb.AppendIndentedLine("reader.PopLimit(oldLimit);");
 
             // Continue to read any remaining fields after the ProtoInclude wrapper
             _sb.AppendIndentedLine("continue;");
@@ -1557,7 +2178,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         /// <summary>
         /// Generates Populate{ClassName}(ref StreamReader reader, T instance) method.
-        /// Delegates to SpanReaders.Populate by reading all remaining bytes.
+        /// Reads fields directly from StreamReader without delegation.
         /// </summary>
         private void GeneratePopulateMethod(TypeDefinition type)
         {
@@ -1566,6 +2187,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 return;
 
             var className = TypeNameHelper.GetClassName(type.FullName);
+            var nsPrefix = GeneratorHelpers.GetNamespacePrefix(_registry.GetNamespaceForType(type.FullName), _currentNamespace);
 
             // Check if this is a readonly struct with readonly fields
             bool isReadonlyStruct = false;
@@ -1607,15 +2229,1430 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 return;
             }
 
-            // Populate implementation - delegate to SpanReaders by reading remaining data
-            // Read all remaining data into buffer and use SpanReaders.Populate
-            _sb.AppendIndentedLine("// Read remaining data and delegate to SpanReaders.Populate");
-            _sb.AppendIndentedLine("var remainingData = reader.ReadRemainingBytes();");
-            _sb.AppendIndentedLine("var spanReader = new SpanReader(remainingData);");
-            _sb.AppendIndentedLine($"SpanReaders.Populate{className}(ref spanReader, instance);");
+            // Generate inline field reading
+            GeneratePopulateMethodBody(type, nsPrefix);
 
             _sb.EndBlock();
             _sb.AppendNewLine();
+        }
+
+        /// <summary>
+        /// Generates the body of Populate method with inline field reading.
+        /// </summary>
+        private void GeneratePopulateMethodBody(TypeDefinition type, string nsPrefix)
+        {
+            // For array and IEnumerable fields, declare temp lists before the while loop
+            var tempListMembers = type.ProtoMembers?.Where(m => NeedsTempList(m.Type)).ToList() ?? new List<ProtoMemberAttribute>();
+            foreach (var member in tempListMembers)
+            {
+                var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType ?? GetArrayElementType(member.Type));
+                _sb.AppendIndentedLine($"global::System.Collections.Generic.List<{elementType}> _tempList_{member.Name} = null;");
+            }
+            if (tempListMembers.Count > 0)
+            {
+                _sb.AppendNewLine();
+            }
+
+            // Use 'instance' instead of 'result' for Populate methods
+            _sb.AppendIndentedLine("while (!reader.IsEnd)");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine("reader.ReadWireTypeAndFieldId(out var wireType, out var fieldId);");
+            _sb.AppendNewLine();
+
+            if (type.ProtoMembers != null && type.ProtoMembers.Count > 0)
+            {
+                _sb.AppendIndentedLine("switch (fieldId)");
+                _sb.StartNewBlock();
+
+                foreach (var member in type.ProtoMembers)
+                {
+                    GeneratePopulateFieldReadCase(member, nsPrefix);
+                }
+
+                _sb.AppendIndentedLine("default:");
+                _sb.IncreaseIndent();
+                _sb.AppendIndentedLine("reader.SkipField(wireType);");
+                _sb.AppendIndentedLine("break;");
+                _sb.DecreaseIndent();
+
+                _sb.EndBlock();
+            }
+            else
+            {
+                _sb.AppendIndentedLine("reader.SkipField(wireType);");
+            }
+
+            _sb.EndBlock();
+
+            // After the while loop, assign temp lists to fields
+            foreach (var member in tempListMembers)
+            {
+                _sb.AppendIndentedLine($"if (_tempList_{member.Name} != null)");
+                _sb.StartNewBlock();
+                if (IsArrayType(member.Type))
+                {
+                    _sb.AppendIndentedLine($"instance.{member.Name} = _tempList_{member.Name}.ToArray();");
+                }
+                else
+                {
+                    // IEnumerable - assign the list directly (it implements IEnumerable<T>)
+                    _sb.AppendIndentedLine($"instance.{member.Name} = _tempList_{member.Name};");
+                }
+                _sb.EndBlock();
+            }
+        }
+
+        private bool IsArrayType(string typeName)
+        {
+            return typeName != null && typeName.EndsWith("[]") && !typeName.Equals("System.Byte[]");
+        }
+
+        private bool IsIEnumerableType(string typeName)
+        {
+            if (typeName == null) return false;
+            var normalized = TypeMapping.NormalizeTypeName(typeName);
+            return normalized.StartsWith("System.Collections.Generic.IEnumerable<") &&
+                   !typeName.Contains("ICollection") &&
+                   !typeName.Contains("IList");
+        }
+
+        private bool NeedsTempList(string typeName)
+        {
+            return IsArrayType(typeName) || IsIEnumerableType(typeName);
+        }
+
+        private string GetArrayElementType(string arrayTypeName)
+        {
+            if (arrayTypeName == null || !arrayTypeName.EndsWith("[]"))
+                return arrayTypeName;
+            return arrayTypeName.Substring(0, arrayTypeName.Length - 2);
+        }
+
+        /// <summary>
+        /// Generates field read case for Populate method (uses 'instance' instead of 'result').
+        /// </summary>
+        private void GeneratePopulateFieldReadCase(ProtoMemberAttribute member, string nsPrefix)
+        {
+            var category = GeneratorHelpers.GetFieldCategory(member, _primitiveHandler);
+
+            bool needsBraces = category == FieldCategory.Map ||
+                              category == FieldCategory.Collection ||
+                              category == FieldCategory.ComplexType ||
+                              category == FieldCategory.Tuple ||
+                              category == FieldCategory.ProtoVarint;
+
+            if (needsBraces)
+            {
+                _sb.AppendIndentedLine($"case {member.FieldId}: {{");
+                _sb.IncreaseIndent();
+            }
+            else
+            {
+                _sb.AppendIndentedLine($"case {member.FieldId}:");
+                _sb.IncreaseIndent();
+            }
+
+            switch (category)
+            {
+                case FieldCategory.Map:
+                    GeneratePopulateMapFieldReadBody(member, nsPrefix);
+                    break;
+                case FieldCategory.Collection:
+                    GeneratePopulateCollectionFieldReadBody(member, nsPrefix);
+                    break;
+                case FieldCategory.Enum:
+                    _sb.AppendIndentedLine($"instance.{member.Name} = (global::{member.Type})reader.ReadVarInt32();");
+                    break;
+                case FieldCategory.Tuple:
+                    GeneratePopulateTupleFieldReadBody(member, nsPrefix);
+                    break;
+                case FieldCategory.Primitive:
+                    GeneratePopulatePrimitiveFieldReadBody(member);
+                    break;
+                case FieldCategory.ProtoVarint:
+                    ProtoVarintTypeSupport.GenerateRead(_sb, member, $"instance.{member.Name}", "reader");
+                    break;
+                case FieldCategory.Unsupported:
+                    _sb.AppendIndentedLine($"// WARNING: Field '{member.Name}' with type '{member.Type}' is unsupported");
+                    _sb.AppendIndentedLine("reader.SkipField(wireType);");
+                    break;
+                case FieldCategory.ComplexType:
+                    GeneratePopulateComplexTypeReadBody(member, nsPrefix);
+                    break;
+            }
+
+            _sb.AppendIndentedLine("break;");
+
+            if (needsBraces)
+            {
+                _sb.DecreaseIndent();
+                _sb.AppendIndentedLine("}");
+            }
+            else
+            {
+                _sb.DecreaseIndent();
+            }
+        }
+
+        private void GeneratePopulatePrimitiveFieldReadBody(ProtoMemberAttribute member)
+        {
+            var typeName = TypeMapping.NormalizeTypeName(member.Type);
+            var dataFormat = member.DataFormat;
+            bool isZigZag = dataFormat == DataFormat.ZigZag;
+
+            switch (typeName)
+            {
+                case "System.Int32":
+                    if (dataFormat == DataFormat.FixedSize)
+                        _sb.AppendIndentedLine($"instance.{member.Name} = reader.ReadFixedInt32();");
+                    else
+                        _sb.AppendIndentedLine($"instance.{member.Name} = global::GProtobuf.Core.StreamReaders.ReadInt32(ref reader, wireType, {isZigZag.ToString().ToLower()});");
+                    break;
+                case "System.UInt32":
+                    if (dataFormat == DataFormat.FixedSize)
+                        _sb.AppendIndentedLine($"instance.{member.Name} = reader.ReadFixedUInt32();");
+                    else
+                        _sb.AppendIndentedLine($"instance.{member.Name} = global::GProtobuf.Core.StreamReaders.ReadUInt32(ref reader, wireType);");
+                    break;
+                case "System.Int64":
+                    if (dataFormat == DataFormat.FixedSize)
+                        _sb.AppendIndentedLine($"instance.{member.Name} = reader.ReadFixedInt64();");
+                    else
+                        _sb.AppendIndentedLine($"instance.{member.Name} = global::GProtobuf.Core.StreamReaders.ReadInt64(ref reader, wireType, {isZigZag.ToString().ToLower()});");
+                    break;
+                case "System.UInt64":
+                    if (dataFormat == DataFormat.FixedSize)
+                        _sb.AppendIndentedLine($"instance.{member.Name} = reader.ReadFixedUInt64();");
+                    else
+                        _sb.AppendIndentedLine($"instance.{member.Name} = global::GProtobuf.Core.StreamReaders.ReadUInt64(ref reader, wireType);");
+                    break;
+                case "System.Int16":
+                    _sb.AppendIndentedLine($"instance.{member.Name} = global::GProtobuf.Core.StreamReaders.ReadInt16(ref reader, wireType, {isZigZag.ToString().ToLower()});");
+                    break;
+                case "System.UInt16":
+                    _sb.AppendIndentedLine($"instance.{member.Name} = global::GProtobuf.Core.StreamReaders.ReadUInt16(ref reader, wireType);");
+                    break;
+                case "System.Byte":
+                    _sb.AppendIndentedLine($"instance.{member.Name} = global::GProtobuf.Core.StreamReaders.ReadByte(ref reader, wireType);");
+                    break;
+                case "System.SByte":
+                    _sb.AppendIndentedLine($"instance.{member.Name} = global::GProtobuf.Core.StreamReaders.ReadSByte(ref reader, wireType, {isZigZag.ToString().ToLower()});");
+                    break;
+                case "System.Double":
+                    _sb.AppendIndentedLine($"instance.{member.Name} = global::GProtobuf.Core.StreamReaders.ReadDouble(ref reader, wireType);");
+                    break;
+                case "System.Single":
+                    _sb.AppendIndentedLine($"instance.{member.Name} = global::GProtobuf.Core.StreamReaders.ReadFloat(ref reader, wireType);");
+                    break;
+                case "System.Boolean":
+                    _sb.AppendIndentedLine($"instance.{member.Name} = global::GProtobuf.Core.StreamReaders.ReadBool(ref reader, wireType);");
+                    break;
+                case "System.Char":
+                    _sb.AppendIndentedLine($"instance.{member.Name} = (char)reader.ReadVarUInt32();");
+                    break;
+                case "System.String":
+                    _sb.AppendIndentedLine($"instance.{member.Name} = global::GProtobuf.Core.StreamReaders.ReadString(ref reader, wireType);");
+                    break;
+                case "System.Byte[]":
+                    _sb.AppendIndentedLine($"instance.{member.Name} = global::GProtobuf.Core.StreamReaders.ReadByteArray(ref reader);");
+                    break;
+                case "System.Guid":
+                    _sb.AppendIndentedLine($"instance.{member.Name} = global::GProtobuf.Core.StreamReaders.ReadGuid(ref reader, wireType);");
+                    break;
+                case "System.DateTime":
+                    _sb.AppendIndentedLine($"instance.{member.Name} = global::GProtobuf.Core.StreamReaders.ReadDateTime(ref reader, wireType);");
+                    break;
+                case "System.TimeSpan":
+                    _sb.AppendIndentedLine($"instance.{member.Name} = global::GProtobuf.Core.StreamReaders.ReadTimeSpan(ref reader, wireType);");
+                    break;
+                default:
+                    if (typeName.StartsWith("System.Nullable<"))
+                    {
+                        var innerType = typeName.Substring("System.Nullable<".Length, typeName.Length - "System.Nullable<".Length - 1);
+                        GeneratePopulatePrimitiveFieldReadBodyForType(member, innerType);
+                    }
+                    else
+                    {
+                        _sb.AppendIndentedLine($"// WARNING: Unknown primitive type '{typeName}'");
+                        _sb.AppendIndentedLine("reader.SkipField(wireType);");
+                    }
+                    break;
+            }
+        }
+
+        private void GeneratePopulatePrimitiveFieldReadBodyForType(ProtoMemberAttribute member, string innerType)
+        {
+            var normalizedInnerType = TypeMapping.NormalizeTypeName(innerType);
+            var dataFormat = member.DataFormat;
+            bool isZigZag = dataFormat == DataFormat.ZigZag;
+
+            switch (normalizedInnerType)
+            {
+                case "System.Int32":
+                    _sb.AppendIndentedLine($"instance.{member.Name} = global::GProtobuf.Core.StreamReaders.ReadInt32(ref reader, wireType, {isZigZag.ToString().ToLower()});");
+                    break;
+                case "System.UInt32":
+                    _sb.AppendIndentedLine($"instance.{member.Name} = global::GProtobuf.Core.StreamReaders.ReadUInt32(ref reader, wireType);");
+                    break;
+                case "System.Int64":
+                    _sb.AppendIndentedLine($"instance.{member.Name} = global::GProtobuf.Core.StreamReaders.ReadInt64(ref reader, wireType, {isZigZag.ToString().ToLower()});");
+                    break;
+                case "System.UInt64":
+                    _sb.AppendIndentedLine($"instance.{member.Name} = global::GProtobuf.Core.StreamReaders.ReadUInt64(ref reader, wireType);");
+                    break;
+                case "System.Double":
+                    _sb.AppendIndentedLine($"instance.{member.Name} = global::GProtobuf.Core.StreamReaders.ReadDouble(ref reader, wireType);");
+                    break;
+                case "System.Single":
+                    _sb.AppendIndentedLine($"instance.{member.Name} = global::GProtobuf.Core.StreamReaders.ReadFloat(ref reader, wireType);");
+                    break;
+                case "System.Boolean":
+                    _sb.AppendIndentedLine($"instance.{member.Name} = global::GProtobuf.Core.StreamReaders.ReadBool(ref reader, wireType);");
+                    break;
+                case "System.Char":
+                    _sb.AppendIndentedLine($"instance.{member.Name} = (char)reader.ReadVarUInt32();");
+                    break;
+                case "System.Guid":
+                    _sb.AppendIndentedLine($"instance.{member.Name} = global::GProtobuf.Core.StreamReaders.ReadGuid(ref reader, wireType);");
+                    break;
+                case "System.DateTime":
+                    _sb.AppendIndentedLine($"instance.{member.Name} = global::GProtobuf.Core.StreamReaders.ReadDateTime(ref reader, wireType);");
+                    break;
+                case "System.TimeSpan":
+                    _sb.AppendIndentedLine($"instance.{member.Name} = global::GProtobuf.Core.StreamReaders.ReadTimeSpan(ref reader, wireType);");
+                    break;
+                default:
+                    _sb.AppendIndentedLine($"// WARNING: Unknown nullable inner type '{normalizedInnerType}'");
+                    _sb.AppendIndentedLine("reader.SkipField(wireType);");
+                    break;
+            }
+        }
+
+        private void GeneratePopulateComplexTypeReadBody(ProtoMemberAttribute member, string nsPrefix)
+        {
+            // Use PushLimit for zero-allocation nested message reading
+            var typeName = TypeNameHelper.GetClassName(member.Type);
+            _sb.AppendIndentedLine("var length = reader.ReadVarInt32();");
+            _sb.AppendIndentedLine("var oldLimit = reader.PushLimit(length);");
+
+            var typeNamespace = _registry.GetNamespaceForType(member.Type);
+            var typeNsPrefix = GeneratorHelpers.GetNamespacePrefix(typeNamespace, _currentNamespace);
+
+            // Check if type is part of any inheritance hierarchy (either as base with ProtoInclude or as derived)
+            bool isPartOfHierarchy = _registry?.IsPartOfHierarchy(member.Type) ?? false;
+
+            if (isPartOfHierarchy)
+            {
+                // For types with inheritance (ProtoInclude), we need to read the discriminator
+                // to determine the actual type, so we must use Read method.
+                // If the field appears multiple times, last value wins (as per protobuf spec for oneof-like semantics)
+                _sb.AppendIndentedLine($"instance.{member.Name} = {typeNsPrefix}StreamReaders.Read{typeName}(ref reader);");
+            }
+            else
+            {
+                // Per protobuf spec: When the same embedded message field appears multiple times,
+                // the contents should be MERGED (not overwritten).
+                // Create instance only if null, then populate to merge fields.
+                // Strip nullable marker (?) when creating instance - can't instantiate nullable types directly
+                var instanceType = member.Type.TrimEnd('?');
+
+                // Check if the type is a struct (value type) - structs cannot be compared to null
+                var memberTypeInfo = _registry?.GetByFullName(instanceType);
+                bool isStruct = memberTypeInfo?.IsStruct ?? false;
+
+                if (!isStruct)
+                {
+                    // Only generate null check for reference types (classes)
+                    _sb.AppendIndentedLine($"if (instance.{member.Name} == null)");
+                    _sb.StartNewBlock();
+                    _sb.AppendIndentedLine($"instance.{member.Name} = new global::{instanceType}();");
+                    _sb.EndBlock();
+                }
+                else
+                {
+                    // For structs, always create a new instance (no null check needed)
+                    _sb.AppendIndentedLine($"instance.{member.Name} = new global::{instanceType}();");
+                }
+                // For nullable value types, use .Value to get the underlying value
+                var propertyAccess = member.IsNullable ? $"instance.{member.Name}.Value" : $"instance.{member.Name}";
+                _sb.AppendIndentedLine($"{typeNsPrefix}StreamReaders.Populate{typeName}(ref reader, {propertyAccess});");
+            }
+
+            _sb.AppendIndentedLine("reader.PopLimit(oldLimit);");
+        }
+
+        private void GeneratePopulateTupleFieldReadBody(ProtoMemberAttribute member, string nsPrefix)
+        {
+            // Use PushLimit for zero-allocation nested message reading
+            var itemTypes = TupleHandler.ParseTupleTypes(member.Type);
+            var tupleInfo = _virtualTupleRegistry.Register(member.Type, itemTypes);
+
+            _sb.AppendIndentedLine("var tupleLength = reader.ReadVarInt32();");
+            _sb.AppendIndentedLine("var tupleOldLimit = reader.PushLimit(tupleLength);");
+            _sb.AppendIndentedLine($"instance.{member.Name} = StreamReaders.Read{tupleInfo.SafeName}Content(ref reader);");
+            _sb.AppendIndentedLine("reader.PopLimit(tupleOldLimit);");
+        }
+
+        private void GeneratePopulateMapFieldReadBody(ProtoMemberAttribute member, string nsPrefix)
+        {
+            // Use PushLimit for zero-allocation nested message reading
+            _sb.AppendIndentedLine("var mapLength = reader.ReadVarInt32();");
+            _sb.AppendIndentedLine("var mapOldLimit = reader.PushLimit(mapLength);");
+
+            var keyType = TypeMapping.GetShortTypeName(member.MapKeyType);
+            var valueType = TypeMapping.GetShortTypeName(member.MapValueType);
+
+            bool isKeyValuePairCollection = TypeHelper.IsKeyValuePairCollection(member.Type);
+            var dictCreationType = TypeHelper.GetDictionaryCreationType(member.Type, member.MapKeyType, member.MapValueType);
+
+            _sb.AppendIndentedLine($"if (instance.{member.Name} == null)");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine($"instance.{member.Name} = new {dictCreationType}();");
+            _sb.EndBlock();
+
+            var keyDefault = GetDefaultValueForType(keyType, member.MapKeyType);
+            var valueDefault = GetDefaultValueForType(valueType, member.MapValueType);
+            _sb.AppendIndentedLine($"{keyType} key = {keyDefault};");
+            _sb.AppendIndentedLine($"{valueType} value = {valueDefault};");
+
+            // Check if the value uses repeated field pattern
+            // - List/HashSet: each case 2 adds ONE element
+            // - Nested dictionaries: each case 2 reads ONE inner map entry
+            // - Arrays: can be packed (single field 2) or non-packed (repeated field 2)
+            // IMPORTANT: Must check dictionary first since type name checks use Contains
+            bool isNestedDictionary = TypeHelper.IsDictionaryType(member.MapValueType);
+            // Exclude ProtoContract types (they should be treated as messages, not repeated collections)
+            bool isProtoContractType = _registry?.GetByFullName(member.MapValueType) != null;
+            bool isCollectionValue = !isNestedDictionary &&
+                                     !isProtoContractType &&
+                                     (TypeHelper.IsListType(member.MapValueType) ||
+                                      TypeHelper.IsHashSetType(member.MapValueType) ||
+                                      TypeHelper.IsCustomHashSetType(member.MapValueType) ||
+                                      TypeHelper.IsCustomListType(member.MapValueType));
+            bool isArrayValue = member.MapValueType.EndsWith("[]");
+
+            // For arrays, pre-declare temp list to accumulate elements (handles both packed and non-packed)
+            string arrayElementType = null;
+            string shortArrayElementType = null;
+            if (isArrayValue)
+            {
+                arrayElementType = member.MapValueType.Substring(0, member.MapValueType.Length - 2);
+                shortArrayElementType = TypeMapping.GetShortTypeName(arrayElementType);
+                _sb.AppendIndentedLine($"global::System.Collections.Generic.List<{shortArrayElementType}> _tempList_value = null;");
+            }
+
+            _sb.AppendIndentedLine("while (!reader.IsEnd)");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine("reader.ReadWireTypeAndFieldId(out var entryWireType, out var entryFieldId);");
+            _sb.AppendIndentedLine("switch (entryFieldId)");
+            _sb.StartNewBlock();
+
+            _sb.AppendIndentedLine("case 1:");
+            _sb.IncreaseIndent();
+            GeneratePopulateMapKeyOrValueRead("key", member.MapKeyType, member.MapKeyEnumUnderlyingType, "reader", "entryWireType");
+            _sb.AppendIndentedLine("break;");
+            _sb.DecreaseIndent();
+
+            _sb.AppendIndentedLine("case 2:");
+            _sb.IncreaseIndent();
+            if (isCollectionValue)
+            {
+                // For collection values, each occurrence of case 2 adds ONE element
+                GeneratePopulateMapRepeatedCollectionValueRead("value", member.MapValueType, "reader", "entryWireType");
+            }
+            else if (isNestedDictionary)
+            {
+                // For nested dictionaries, each occurrence of case 2 reads ONE inner map entry
+                GeneratePopulateMapNestedDictRepeatedValueRead("value", member.MapValueType, "reader", "entryWireType");
+            }
+            else if (isArrayValue)
+            {
+                // For arrays, handle both packed and non-packed formats
+                GeneratePopulateMapArrayValueReadWithWireType("_tempList_value", arrayElementType, shortArrayElementType, "reader", "entryWireType");
+            }
+            else
+            {
+                GeneratePopulateMapKeyOrValueRead("value", member.MapValueType, member.MapValueEnumUnderlyingType, "reader", "entryWireType", nsPrefix);
+            }
+            _sb.AppendIndentedLine("break;");
+            _sb.DecreaseIndent();
+
+            _sb.AppendIndentedLine("default:");
+            _sb.IncreaseIndent();
+            _sb.AppendIndentedLine("reader.SkipField(entryWireType);");
+            _sb.AppendIndentedLine("break;");
+            _sb.DecreaseIndent();
+
+            _sb.EndBlock();
+            _sb.EndBlock();
+
+            _sb.AppendIndentedLine("reader.PopLimit(mapOldLimit);");
+
+            // For arrays, convert temp list to array after entry loop
+            if (isArrayValue)
+            {
+                _sb.AppendIndentedLine("if (_tempList_value != null)");
+                _sb.StartNewBlock();
+                _sb.AppendIndentedLine("value = _tempList_value.ToArray();");
+                _sb.EndBlock();
+                _sb.AppendIndentedLine("else");
+                _sb.StartNewBlock();
+                _sb.AppendIndentedLine($"value = global::System.Array.Empty<{shortArrayElementType}>();");
+                _sb.EndBlock();
+            }
+
+            if (isKeyValuePairCollection)
+            {
+                _sb.AppendIndentedLine($"instance.{member.Name}.Add(new global::System.Collections.Generic.KeyValuePair<{member.MapKeyType}, {member.MapValueType}>(key, value));");
+            }
+            else
+            {
+                _sb.AppendIndentedLine($"instance.{member.Name}[key] = value;");
+            }
+        }
+
+        /// <summary>
+        /// Generates code to read ONE element of a collection value in a map entry.
+        /// For List/HashSet map values, each occurrence of field 2 contains one element (repeated field pattern).
+        /// </summary>
+        private void GeneratePopulateMapRepeatedCollectionValueRead(string varName, string typeName, string readerVar, string wireTypeVar)
+        {
+            var elementType = TypeHelper.GetCollectionElementType(typeName);
+            var normalizedElementType = TypeMapping.NormalizeTypeName(elementType);
+            var shortElementType = TypeMapping.GetShortTypeName(elementType);
+            bool isHashSet = TypeHelper.IsHashSetType(typeName);
+            bool isCustomHashSet = TypeHelper.IsCustomHashSetType(typeName);
+
+            // Determine collection creation type
+            string collectionCreationType;
+            if (isCustomHashSet)
+            {
+                collectionCreationType = $"global::{typeName}";
+            }
+            else if (isHashSet)
+            {
+                collectionCreationType = $"global::System.Collections.Generic.HashSet<{shortElementType}>";
+            }
+            else if (TypeHelper.IsCustomListType(typeName))
+            {
+                collectionCreationType = $"global::{typeName}";
+            }
+            else
+            {
+                collectionCreationType = $"global::System.Collections.Generic.List<{shortElementType}>";
+            }
+
+            // Initialize collection on first element
+            _sb.AppendIndentedLine($"if ({varName} == null) {varName} = new {collectionCreationType}();");
+
+            // Add element(s) based on element type
+            // Try primitive type helper first
+            var readExpr = PrimitiveTypeCodeGenerator.GetCollectionAddExpression(normalizedElementType, readerVar, wireTypeVar);
+            if (readExpr != null)
+            {
+                var addStatement = $"{varName}.Add({readExpr});";
+                if (PrimitiveTypeCodeGenerator.IsPackable(normalizedElementType))
+                {
+                    // Packable primitives need wire type checking for packed vs non-packed format
+                    GeneratePackableCollectionElementRead(varName, readerVar, wireTypeVar, addStatement);
+                }
+                else
+                {
+                    // Non-packable types (string, Guid, etc.) - just output add line directly
+                    _sb.AppendIndentedLine(addStatement);
+                }
+                return;
+            }
+
+            // Check for enum types - enums can be packed
+            if (_registry != null && (_registry.IsEnum(elementType) || _registry.IsEnum(normalizedElementType)))
+            {
+                GeneratePackableCollectionElementRead(varName, readerVar, wireTypeVar,
+                    $"{varName}.Add((global::{elementType}){readerVar}.ReadVarInt32());");
+                return;
+            }
+
+            // Complex type - read with PushLimit (not packable)
+            _sb.AppendIndentedLine("{");
+            _sb.IncreaseIndent();
+            _sb.AppendIndentedLine($"var elementLen = {readerVar}.ReadVarInt32();");
+            _sb.AppendIndentedLine($"var elementOldLimit = {readerVar}.PushLimit(elementLen);");
+            var className = TypeNameHelper.GetClassName(elementType);
+            var typeNs = _registry?.GetNamespaceForType(elementType);
+            var typeNsPrefix = GeneratorHelpers.GetNamespacePrefix(typeNs, _currentNamespace);
+            bool isDerivedType = _registry?.IsDerivedType(elementType) ?? false;
+            var readMethodSuffix = isDerivedType ? "" : "Content";
+            _sb.AppendIndentedLine($"{varName}.Add({typeNsPrefix}StreamReaders.Read{className}{readMethodSuffix}(ref {readerVar}));");
+            _sb.AppendIndentedLine($"{readerVar}.PopLimit(elementOldLimit);");
+            _sb.DecreaseIndent();
+            _sb.AppendIndentedLine("}");
+        }
+
+        /// <summary>
+        /// Generates code to read a packable varint collection element with wire type checking.
+        /// If wireType == Len (packed), reads all elements from a length-prefixed blob.
+        /// Otherwise, reads a single element.
+        /// </summary>
+        private void GeneratePackableCollectionElementRead(string varName, string readerVar, string wireTypeVar, string singleElementReadCode)
+        {
+            _sb.AppendIndentedLine($"if ({wireTypeVar} == global::GProtobuf.Core.WireType.Len)");
+            _sb.StartNewBlock();
+            // Packed format - read all elements from length-prefixed blob
+            _sb.AppendIndentedLine($"var packedLen = {readerVar}.ReadVarInt32();");
+            _sb.AppendIndentedLine($"var packedOldLimit = {readerVar}.PushLimit(packedLen);");
+            _sb.AppendIndentedLine($"while (!{readerVar}.IsEnd)");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine(singleElementReadCode);
+            _sb.EndBlock();
+            _sb.AppendIndentedLine($"{readerVar}.PopLimit(packedOldLimit);");
+            _sb.EndBlock();
+            _sb.AppendIndentedLine("else");
+            _sb.StartNewBlock();
+            // Non-packed format - single element
+            _sb.AppendIndentedLine(singleElementReadCode);
+            _sb.EndBlock();
+        }
+
+        /// <summary>
+        /// Generates code to read ONE entry of a nested dictionary value in a map entry.
+        /// For nested dictionary map values, each occurrence of field 2 contains one inner map entry (repeated field pattern).
+        /// </summary>
+        private void GeneratePopulateMapNestedDictRepeatedValueRead(string varName, string typeName, string readerVar, string wireTypeVar)
+        {
+            // Extract inner key/value types from the nested dictionary
+            var (innerKeyType, innerValueType) = TypeHelper.ParseDictionaryTypes(typeName);
+            var shortInnerKeyType = TypeMapping.GetShortTypeName(innerKeyType);
+            var shortInnerValueType = TypeMapping.GetShortTypeName(innerValueType);
+            var normalizedInnerKeyType = TypeMapping.NormalizeTypeName(innerKeyType);
+            var normalizedInnerValueType = TypeMapping.NormalizeTypeName(innerValueType);
+
+            // Check if inner value is a collection (uses repeated field pattern)
+            // Note: Exclude dictionary types first, since they might contain collection type names in their generic args
+            bool isInnerValueCollection = !TypeHelper.IsDictionaryType(innerValueType) &&
+                (TypeHelper.IsListType(innerValueType) || TypeHelper.IsHashSetType(innerValueType));
+
+            // Determine dictionary creation type
+            string dictCreationType;
+            if (typeName.Contains("ConcurrentDictionary<"))
+            {
+                dictCreationType = $"global::System.Collections.Concurrent.ConcurrentDictionary<{shortInnerKeyType}, {shortInnerValueType}>";
+            }
+            else if (TypeHelper.IsCustomDictionaryType(typeName))
+            {
+                // Custom dictionary types like ListDictionary - use the full type name
+                dictCreationType = $"global::{typeName}";
+            }
+            else
+            {
+                dictCreationType = $"global::System.Collections.Generic.Dictionary<{shortInnerKeyType}, {shortInnerValueType}>";
+            }
+
+            // Initialize nested dictionary on first entry
+            _sb.AppendIndentedLine($"if ({varName} == null) {varName} = new {dictCreationType}();");
+
+            // Each case 2 occurrence reads ONE inner map entry: length + (key field, value field)
+            _sb.AppendIndentedLine("{");
+            _sb.IncreaseIndent();
+
+            _sb.AppendIndentedLine($"var innerEntryLen = {readerVar}.ReadVarInt32();");
+            _sb.AppendIndentedLine($"var innerEntryOldLimit = {readerVar}.PushLimit(innerEntryLen);");
+            _sb.AppendNewLine();
+
+            // Initialize inner key/value with defaults
+            var innerKeyDefault = GetDefaultValueForType(shortInnerKeyType, innerKeyType);
+            var innerValueDefault = GetDefaultValueForType(shortInnerValueType, innerValueType);
+            _sb.AppendIndentedLine($"{shortInnerKeyType} innerKey = {innerKeyDefault};");
+            _sb.AppendIndentedLine($"{shortInnerValueType} innerValue = {innerValueDefault};");
+            _sb.AppendNewLine();
+
+            // Read inner key and value fields
+            _sb.AppendIndentedLine($"while (!{readerVar}.IsEnd)");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine($"{readerVar}.ReadWireTypeAndFieldId(out var innerWireType, out var innerFieldId);");
+            _sb.AppendIndentedLine("switch (innerFieldId)");
+            _sb.StartNewBlock();
+
+            // Inner key (field 1)
+            _sb.AppendIndentedLine("case 1:");
+            _sb.IncreaseIndent();
+            GenerateNestedDictInnerFieldRead("innerKey", innerKeyType, normalizedInnerKeyType, readerVar, "innerWireType");
+            _sb.AppendIndentedLine("break;");
+            _sb.DecreaseIndent();
+
+            // Inner value (field 2)
+            _sb.AppendIndentedLine("case 2:");
+            _sb.IncreaseIndent();
+            if (isInnerValueCollection)
+            {
+                // For collection inner values, use the repeated field pattern
+                GeneratePopulateMapRepeatedCollectionValueRead("innerValue", innerValueType, readerVar, "innerWireType");
+            }
+            else
+            {
+                GenerateNestedDictInnerFieldRead("innerValue", innerValueType, normalizedInnerValueType, readerVar, "innerWireType");
+            }
+            _sb.AppendIndentedLine("break;");
+            _sb.DecreaseIndent();
+
+            // Default
+            _sb.AppendIndentedLine("default:");
+            _sb.IncreaseIndent();
+            _sb.AppendIndentedLine($"{readerVar}.SkipField(innerWireType);");
+            _sb.AppendIndentedLine("break;");
+            _sb.DecreaseIndent();
+
+            _sb.EndBlock(); // switch
+            _sb.EndBlock(); // while
+
+            _sb.AppendIndentedLine($"{readerVar}.PopLimit(innerEntryOldLimit);");
+            _sb.AppendIndentedLine($"{varName}[innerKey] = innerValue;");
+
+            _sb.DecreaseIndent();
+            _sb.AppendIndentedLine("}");
+        }
+
+        /// <summary>
+        /// Generates code to read an inner key or value field within a nested dictionary entry.
+        /// </summary>
+        private void GenerateNestedDictInnerFieldRead(string varName, string typeName, string normalizedType, string readerVar, string wireTypeVar)
+        {
+            // Check for enum types first
+            if (_registry != null && (_registry.IsEnum(typeName) || _registry.IsEnum(normalizedType)))
+            {
+                _sb.AppendIndentedLine($"{varName} = (global::{typeName}){readerVar}.ReadVarInt32();");
+                return;
+            }
+
+            // Try primitive type helper first
+            var primitiveAssignment = PrimitiveTypeCodeGenerator.GetAssignmentStatement(normalizedType, varName, readerVar, wireTypeVar);
+            if (primitiveAssignment != null)
+            {
+                _sb.AppendIndentedLine(primitiveAssignment);
+                return;
+            }
+
+            // Complex type - read with PushLimit
+            _sb.AppendIndentedLine("{");
+            _sb.IncreaseIndent();
+
+            // Generate unique variable names based on varName to avoid conflicts in nested scopes
+            var uniquePrefix = varName.Replace(".", "_").Replace("[", "_").Replace("]", "_");
+            var innerLenVar = $"{uniquePrefix}_innerLen";
+            var innerOldLimitVar = $"{uniquePrefix}_innerOldLimit";
+
+            _sb.AppendIndentedLine($"var {innerLenVar} = {readerVar}.ReadVarInt32();");
+            _sb.AppendIndentedLine($"var {innerOldLimitVar} = {readerVar}.PushLimit({innerLenVar});");
+
+            // Check if this is a dictionary type - needs special handling for nested dictionary values
+            if (TypeHelper.IsDictionaryType(typeName))
+            {
+                // For nested dictionary values in map entries, this PushLimit contains ONE ENTRY only
+                // We need to read key (field 1) and value (field 2) inline instead of calling ReadContent
+                var (dictKeyType, dictValueType) = TypeHelper.ParseDictionaryTypes(typeName);
+                var shortDictKeyType = TypeMapping.GetShortTypeName(dictKeyType);
+                var shortDictValueType = TypeMapping.GetShortTypeName(dictValueType);
+                var normalizedDictKeyType = TypeMapping.NormalizeTypeName(dictKeyType);
+                var normalizedDictValueType = TypeMapping.NormalizeTypeName(dictValueType);
+
+                // Initialize dictionary if null
+                string dictCreationType;
+                if (typeName.Contains("ConcurrentDictionary<"))
+                {
+                    dictCreationType = $"global::System.Collections.Concurrent.ConcurrentDictionary<{shortDictKeyType}, {shortDictValueType}>";
+                }
+                else if (TypeHelper.IsCustomDictionaryType(typeName))
+                {
+                    // Custom dictionary types like ListDictionary - use the full type name
+                    dictCreationType = $"global::{typeName}";
+                }
+                else
+                {
+                    dictCreationType = $"global::System.Collections.Generic.Dictionary<{shortDictKeyType}, {shortDictValueType}>";
+                }
+                _sb.AppendIndentedLine($"{varName} ??= new {dictCreationType}();");
+
+                // Read one entry's key and value fields
+                var entryKeyDefault = GetDefaultValueForType(shortDictKeyType, dictKeyType);
+                var entryValueDefault = GetDefaultValueForType(shortDictValueType, dictValueType);
+                var entryKeyVar = $"{uniquePrefix}EntryKey";
+                var entryValueVar = $"{uniquePrefix}EntryValue";
+                var entryFieldWireTypeVar = $"{uniquePrefix}FieldWireType";
+                var entryFieldIdVar = $"{uniquePrefix}FieldId";
+                _sb.AppendIndentedLine($"{shortDictKeyType} {entryKeyVar} = {entryKeyDefault};");
+                _sb.AppendIndentedLine($"{shortDictValueType} {entryValueVar} = {entryValueDefault};");
+
+                _sb.AppendIndentedLine($"while (!{readerVar}.IsEnd)");
+                _sb.StartNewBlock();
+                _sb.AppendIndentedLine($"{readerVar}.ReadWireTypeAndFieldId(out var {entryFieldWireTypeVar}, out var {entryFieldIdVar});");
+                _sb.AppendIndentedLine($"switch ({entryFieldIdVar})");
+                _sb.StartNewBlock();
+
+                // Entry key (field 1)
+                _sb.AppendIndentedLine("case 1:");
+                _sb.IncreaseIndent();
+                GenerateNestedDictInnerFieldRead(entryKeyVar, dictKeyType, normalizedDictKeyType, readerVar, entryFieldWireTypeVar);
+                _sb.AppendIndentedLine("break;");
+                _sb.DecreaseIndent();
+
+                // Entry value (field 2)
+                _sb.AppendIndentedLine("case 2:");
+                _sb.IncreaseIndent();
+                // Check if value is a collection type for proper handling
+                if (!TypeHelper.IsDictionaryType(dictValueType) &&
+                    (TypeHelper.IsListType(dictValueType) || TypeHelper.IsHashSetType(dictValueType)))
+                {
+                    GeneratePopulateMapRepeatedCollectionValueRead(entryValueVar, dictValueType, readerVar, entryFieldWireTypeVar);
+                }
+                else
+                {
+                    GenerateNestedDictInnerFieldRead(entryValueVar, dictValueType, normalizedDictValueType, readerVar, entryFieldWireTypeVar);
+                }
+                _sb.AppendIndentedLine("break;");
+                _sb.DecreaseIndent();
+
+                // Default
+                _sb.AppendIndentedLine("default:");
+                _sb.IncreaseIndent();
+                _sb.AppendIndentedLine($"{readerVar}.SkipField({entryFieldWireTypeVar});");
+                _sb.AppendIndentedLine("break;");
+                _sb.DecreaseIndent();
+
+                _sb.EndBlock(); // switch
+                _sb.EndBlock(); // while
+
+                _sb.AppendIndentedLine($"{readerVar}.PopLimit({innerOldLimitVar});");
+                _sb.AppendIndentedLine($"{varName}[{entryKeyVar}] = {entryValueVar};");
+            }
+            else
+            {
+                // Non-dictionary complex types - use ReadContent as before
+                var className = TypeNameHelper.GetClassName(typeName);
+
+                // For virtual types (collections, dictionaries), use the element/value type's namespace
+                // because virtual type readers are generated in the element's namespace
+                string typeNs;
+                if (TypeHelper.IsListType(typeName) || TypeHelper.IsHashSetType(typeName))
+                {
+                    var elementType = TypeHelper.GetCollectionElementType(typeName);
+                    typeNs = GetNonSystemNamespace(elementType);
+                }
+                else
+                {
+                    typeNs = _registry?.GetNamespaceForType(typeName);
+                }
+                var typeNsPrefix = GeneratorHelpers.GetNamespacePrefix(typeNs, _currentNamespace);
+                bool isDerivedType = _registry?.IsDerivedType(typeName) ?? false;
+                var readMethodSuffix = isDerivedType ? "" : "Content";
+                _sb.AppendIndentedLine($"{varName} = {typeNsPrefix}StreamReaders.Read{className}{readMethodSuffix}(ref {readerVar});");
+                _sb.AppendIndentedLine($"{readerVar}.PopLimit({innerOldLimitVar});");
+            }
+            _sb.DecreaseIndent();
+            _sb.AppendIndentedLine("}");
+        }
+
+        /// <summary>
+        /// Gets the namespace for a type, but returns null if it's a system namespace (e.g., System.Collections.Generic).
+        /// Virtual type readers for primitive-only types are generated in the current namespace, not system namespaces.
+        /// </summary>
+        private string GetNonSystemNamespace(string typeName)
+        {
+            var ns = _registry?.GetNamespaceForType(typeName);
+            // If namespace starts with "System.", it's a system type - use current namespace instead
+            if (!string.IsNullOrEmpty(ns) && ns.StartsWith("System."))
+            {
+                // Try to find a registered (non-system) type within the generic arguments
+                if (TypeHelper.IsDictionaryType(typeName))
+                {
+                    var (keyType, valueType) = TypeHelper.ParseDictionaryTypes(typeName);
+                    var keyNs = GetNonSystemNamespace(keyType);
+                    if (!string.IsNullOrEmpty(keyNs) && !keyNs.StartsWith("System."))
+                        return keyNs;
+                    return GetNonSystemNamespace(valueType);
+                }
+                else if (TypeHelper.IsListType(typeName) || TypeHelper.IsHashSetType(typeName))
+                {
+                    var elementType = TypeHelper.GetCollectionElementType(typeName);
+                    return GetNonSystemNamespace(elementType);
+                }
+                return null; // Fall back to current namespace
+            }
+            return ns;
+        }
+
+        private void GeneratePopulateMapKeyOrValueRead(string varName, string typeName, string enumUnderlyingType, string readerVar, string wireTypeVar, string nsPrefix = "")
+        {
+            var normalizedType = TypeMapping.NormalizeTypeName(typeName);
+
+            if (!string.IsNullOrEmpty(enumUnderlyingType) || _registry.IsEnum(typeName) || _registry.IsEnum(normalizedType))
+            {
+                _sb.AppendIndentedLine($"{varName} = (global::{typeName}){readerVar}.ReadVarInt32();");
+                return;
+            }
+
+            // Special handling for byte[] - use inline GetSlice pattern
+            if (normalizedType == "System.Byte[]")
+            {
+                _sb.AppendIndentedLine("{");
+                _sb.IncreaseIndent();
+                _sb.AppendIndentedLine($"var {varName}Len = {readerVar}.ReadVarInt32();");
+                _sb.AppendIndentedLine($"{varName} = {readerVar}.GetSlice({varName}Len).ToArray();");
+                _sb.DecreaseIndent();
+                _sb.AppendIndentedLine("}");
+                return;
+            }
+
+            // Try primitive type helper
+            var primitiveAssignment = PrimitiveTypeCodeGenerator.GetAssignmentStatement(normalizedType, varName, readerVar, wireTypeVar);
+            if (primitiveAssignment != null)
+            {
+                _sb.AppendIndentedLine(primitiveAssignment);
+                return;
+            }
+
+            // Complex type handling:
+            // Check for array types first
+            if (typeName.EndsWith("[]"))
+            {
+                GeneratePopulateMapArrayValueRead(varName, typeName, readerVar);
+                return;
+            }
+            // Check for nested Dictionary types
+            if (TypeHelper.IsDictionaryType(typeName))
+            {
+                GeneratePopulateMapNestedDictionaryValueRead(varName, typeName, readerVar);
+                return;
+            }
+            // Check for List/Collection types
+            if (TypeHelper.IsListType(typeName) || TypeHelper.IsHashSetType(typeName) ||
+                TypeHelper.IsCustomHashSetType(typeName) || TypeHelper.IsCustomListType(typeName))
+            {
+                GeneratePopulateMapCollectionValueRead(varName, typeName, readerVar);
+                return;
+            }
+            // Check for Tuple types
+            if (typeName.StartsWith("System.Tuple<") || typeName.StartsWith("System.ValueTuple<") ||
+                typeName.StartsWith("(") || normalizedType.Contains("Tuple<"))
+            {
+                GeneratePopulateMapTupleValueRead(varName, typeName, readerVar);
+                return;
+            }
+
+            // Complex type - use PushLimit for zero-allocation nested message reading
+            var className = TypeNameHelper.GetClassName(typeName);
+            var typeNs = _registry.GetNamespaceForType(typeName);
+            var typeNsPrefix = GeneratorHelpers.GetNamespacePrefix(typeNs, _currentNamespace);
+
+            _sb.AppendIndentedLine("{");
+            _sb.IncreaseIndent();
+            _sb.AppendIndentedLine($"var {varName}Len = {readerVar}.ReadVarInt32();");
+            _sb.AppendIndentedLine($"var {varName}OldLimit = {readerVar}.PushLimit({varName}Len);");
+
+            bool isDerivedType = _registry?.IsDerivedType(typeName) ?? false;
+            var readMethodSuffix = isDerivedType ? "" : "Content";
+            _sb.AppendIndentedLine($"{varName} = {typeNsPrefix}StreamReaders.Read{className}{readMethodSuffix}(ref {readerVar});");
+            _sb.AppendIndentedLine($"{readerVar}.PopLimit({varName}OldLimit);");
+            _sb.DecreaseIndent();
+            _sb.AppendIndentedLine("}");
+        }
+
+        private void GeneratePopulateMapArrayValueRead(string varName, string typeName, string readerVar)
+        {
+            // Use PushLimit for zero-allocation nested message reading
+            var elementType = typeName.Substring(0, typeName.Length - 2);
+            var shortElementType = TypeMapping.GetShortTypeName(elementType);
+            var normalizedElementType = TypeMapping.NormalizeTypeName(elementType);
+
+            _sb.AppendIndentedLine("{");
+            _sb.IncreaseIndent();
+            _sb.AppendIndentedLine($"var {varName}Len = {readerVar}.ReadVarInt32();");
+            _sb.AppendIndentedLine($"var {varName}OldLimit = {readerVar}.PushLimit({varName}Len);");
+            _sb.AppendIndentedLine($"var {varName}List = new global::System.Collections.Generic.List<{shortElementType}>();");
+            _sb.AppendIndentedLine($"while (!{readerVar}.IsEnd)");
+            _sb.StartNewBlock();
+
+            // Generate inline primitive read for StreamReader using helper
+            var readExpr = PrimitiveTypeCodeGenerator.GetCollectionAddExpression(normalizedElementType, readerVar);
+            if (readExpr != null)
+            {
+                _sb.AppendIndentedLine($"{varName}List.Add({readExpr});");
+            }
+            else
+            {
+                _sb.AppendIndentedLine($"// Unsupported array element type: {elementType}");
+            }
+
+            _sb.EndBlock();
+            _sb.AppendIndentedLine($"{readerVar}.PopLimit({varName}OldLimit);");
+            _sb.AppendIndentedLine($"{varName} = {varName}List.ToArray();");
+            _sb.DecreaseIndent();
+            _sb.AppendIndentedLine("}");
+        }
+
+        /// <summary>
+        /// Generates code to read array elements in a map entry, handling both packed and non-packed formats.
+        /// </summary>
+        private void GeneratePopulateMapArrayValueReadWithWireType(string tempListVar, string elementType, string shortElementType, string readerVar, string wireTypeVar)
+        {
+            var normalizedElementType = TypeMapping.NormalizeTypeName(elementType);
+
+            _sb.AppendIndentedLine($"{tempListVar} ??= new global::System.Collections.Generic.List<{shortElementType}>();");
+            _sb.AppendIndentedLine($"if ({wireTypeVar} == global::GProtobuf.Core.WireType.Len)");
+            _sb.StartNewBlock();
+            // Packed format - read all elements from length-prefixed blob
+            _sb.AppendIndentedLine($"var packedLen = {readerVar}.ReadVarInt32();");
+            _sb.AppendIndentedLine($"var packedOldLimit = {readerVar}.PushLimit(packedLen);");
+            _sb.AppendIndentedLine($"while (!{readerVar}.IsEnd)");
+            _sb.StartNewBlock();
+            GenerateArrayElementRead(tempListVar, normalizedElementType, readerVar);
+            _sb.EndBlock();
+            _sb.AppendIndentedLine($"{readerVar}.PopLimit(packedOldLimit);");
+            _sb.EndBlock();
+            _sb.AppendIndentedLine("else");
+            _sb.StartNewBlock();
+            // Non-packed format - single element per case 2
+            GenerateArrayElementRead(tempListVar, normalizedElementType, readerVar);
+            _sb.EndBlock();
+        }
+
+        /// <summary>
+        /// Generates code to read and add a single array element to the temp list.
+        /// </summary>
+        private void GenerateArrayElementRead(string tempListVar, string normalizedElementType, string readerVar)
+        {
+            var readExpr = PrimitiveTypeCodeGenerator.GetCollectionAddExpression(normalizedElementType, readerVar);
+            if (readExpr != null)
+            {
+                _sb.AppendIndentedLine($"{tempListVar}.Add({readExpr});");
+            }
+            else
+            {
+                _sb.AppendIndentedLine($"// Unsupported array element type: {normalizedElementType}");
+            }
+        }
+
+        private void GeneratePopulateMapNestedDictionaryValueRead(string varName, string typeName, string readerVar)
+        {
+            // For nested dictionary values in map entries, we need to read ONE ENTRY at a time
+            // Each field 2 occurrence at the map entry level contains a single entry of the nested dictionary
+            // Wire format: [entryLength][field1:key][field2:value]
+
+            var typeInfo = _virtualMapRegistry?.AnalyzeType(typeName);
+            if (typeInfo == null || !typeInfo.IsDictionary)
+            {
+                // Fallback to old behavior if we can't analyze the type
+                var safeName = VirtualTypeNameGenerator.GetSafeTypeName(typeName);
+                _sb.AppendIndentedLine("{");
+                _sb.IncreaseIndent();
+                _sb.AppendIndentedLine($"var {varName}Len = {readerVar}.ReadVarInt32();");
+                _sb.AppendIndentedLine($"var {varName}OldLimit = {readerVar}.PushLimit({varName}Len);");
+                _sb.AppendIndentedLine($"{varName} = StreamReaders.Read{safeName}Content(ref {readerVar});");
+                _sb.AppendIndentedLine($"{readerVar}.PopLimit({varName}OldLimit);");
+                _sb.DecreaseIndent();
+                _sb.AppendIndentedLine("}");
+                return;
+            }
+
+            var innerKeyType = typeInfo.DictionaryKeyType ?? "System.Object";
+            var innerValueType = typeInfo.DictionaryValueType ?? "System.Object";
+
+            var shortKeyType = TypeMapping.GetShortTypeName(innerKeyType);
+            var shortValueType = TypeMapping.GetShortTypeName(innerValueType);
+
+            // Initialize dictionary if null
+            var fullTypeName = typeInfo.FullTypeName ?? "";
+            _sb.AppendIndentedLine("{");
+            _sb.IncreaseIndent();
+
+            if (fullTypeName.Contains("ConcurrentDictionary"))
+            {
+                _sb.AppendIndentedLine($"{varName} ??= new global::System.Collections.Concurrent.ConcurrentDictionary<{shortKeyType}, {shortValueType}>();");
+            }
+            else if (TypeHelper.IsCustomDictionaryType(fullTypeName))
+            {
+                // Custom dictionary types like ListDictionary - use the full type name
+                _sb.AppendIndentedLine($"{varName} ??= new global::{fullTypeName}();");
+            }
+            else
+            {
+                _sb.AppendIndentedLine($"{varName} ??= new global::System.Collections.Generic.Dictionary<{shortKeyType}, {shortValueType}>();");
+            }
+
+            // Read entry length and push limit
+            var fieldPrefix = varName.Replace(".", "_").Replace("[", "_").Replace("]", "_");
+            _sb.AppendIndentedLine($"var {fieldPrefix}Length = {readerVar}.ReadVarInt32();");
+            _sb.AppendIndentedLine($"var {fieldPrefix}OldLimit = {readerVar}.PushLimit({fieldPrefix}Length);");
+
+            // Declare key/value variables
+            var keyVar = $"{fieldPrefix}Key";
+            var valueVar = $"{fieldPrefix}Value";
+            _sb.AppendIndentedLine($"{shortKeyType} {keyVar} = default;");
+            _sb.AppendIndentedLine($"{shortValueType} {valueVar} = default;");
+
+            // While loop to read entry fields
+            _sb.AppendIndentedLine($"while (!{readerVar}.IsEnd)");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine($"{readerVar}.ReadWireTypeAndFieldId(out var {fieldPrefix}InnerWireType, out var {fieldPrefix}InnerFieldId);");
+            _sb.AppendIndentedLine($"switch ({fieldPrefix}InnerFieldId)");
+            _sb.StartNewBlock();
+
+            // Case 1: Key
+            _sb.AppendIndentedLine("case 1:");
+            _sb.IncreaseIndent();
+            GeneratePopulateMapKeyOrValueRead(keyVar, innerKeyType, null, readerVar, $"{fieldPrefix}InnerWireType");
+            _sb.AppendIndentedLine("break;");
+            _sb.DecreaseIndent();
+
+            // Case 2: Value
+            _sb.AppendIndentedLine("case 2:");
+            _sb.IncreaseIndent();
+            GeneratePopulateMapKeyOrValueRead(valueVar, innerValueType, null, readerVar, $"{fieldPrefix}InnerWireType");
+            _sb.AppendIndentedLine("break;");
+            _sb.DecreaseIndent();
+
+            // Default: skip unknown fields
+            _sb.AppendIndentedLine("default:");
+            _sb.IncreaseIndent();
+            _sb.AppendIndentedLine($"{readerVar}.SkipField({fieldPrefix}InnerWireType);");
+            _sb.AppendIndentedLine("break;");
+            _sb.DecreaseIndent();
+
+            _sb.EndBlock(); // switch
+            _sb.EndBlock(); // while
+
+            // Pop limit and add to dictionary
+            _sb.AppendIndentedLine($"{readerVar}.PopLimit({fieldPrefix}OldLimit);");
+            _sb.AppendIndentedLine($"{varName}[{keyVar}] = {valueVar};");
+
+            _sb.DecreaseIndent();
+            _sb.AppendIndentedLine("}");
+        }
+
+        private void GeneratePopulateMapCollectionValueRead(string varName, string typeName, string readerVar)
+        {
+            // Use PushLimit for zero-allocation nested message reading
+            var safeName = VirtualTypeNameGenerator.GetSafeTypeName(typeName);
+            _sb.AppendIndentedLine("{");
+            _sb.IncreaseIndent();
+            _sb.AppendIndentedLine($"var {varName}Len = {readerVar}.ReadVarInt32();");
+            _sb.AppendIndentedLine($"var {varName}OldLimit = {readerVar}.PushLimit({varName}Len);");
+            _sb.AppendIndentedLine($"{varName} = StreamReaders.Read{safeName}Content(ref {readerVar});");
+            _sb.AppendIndentedLine($"{readerVar}.PopLimit({varName}OldLimit);");
+            _sb.DecreaseIndent();
+            _sb.AppendIndentedLine("}");
+        }
+
+        private void GeneratePopulateMapTupleValueRead(string varName, string typeName, string readerVar)
+        {
+            // Use PushLimit for zero-allocation nested message reading
+            var safeName = VirtualTypeNameGenerator.GetSafeTypeName(typeName);
+            _sb.AppendIndentedLine("{");
+            _sb.IncreaseIndent();
+            _sb.AppendIndentedLine($"var {varName}Len = {readerVar}.ReadVarInt32();");
+            _sb.AppendIndentedLine($"var {varName}OldLimit = {readerVar}.PushLimit({varName}Len);");
+            _sb.AppendIndentedLine($"{varName} = StreamReaders.Read{safeName}Content(ref {readerVar});");
+            _sb.AppendIndentedLine($"{readerVar}.PopLimit({varName}OldLimit);");
+            _sb.DecreaseIndent();
+            _sb.AppendIndentedLine("}");
+        }
+
+        private void GeneratePopulateCollectionFieldReadBody(ProtoMemberAttribute member, string nsPrefix)
+        {
+            var normalizedType = TypeMapping.NormalizeTypeName(member.CollectionElementType);
+            bool isEnumCollection = _registry != null && (_registry.IsEnum(member.CollectionElementType) || _registry.IsEnum(normalizedType));
+            bool isPrimitiveCollection = _primitiveHandler.CanHandleCollection(member.CollectionElementType) || isEnumCollection;
+
+            if (isPrimitiveCollection)
+            {
+                GeneratePopulatePrimitiveCollectionRead(member, isEnumCollection);
+            }
+            else
+            {
+                GeneratePopulateComplexCollectionRead(member, nsPrefix);
+            }
+        }
+
+        private void GeneratePopulatePrimitiveCollectionRead(ProtoMemberAttribute member, bool isEnumCollection)
+        {
+            var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType);
+            var normalizedElementType = TypeMapping.NormalizeTypeName(member.CollectionElementType);
+            var normalizedMemberType = TypeMapping.NormalizeTypeName(member.Type);
+
+            // Check if this needs a temp list (array or IEnumerable)
+            bool needsTempListForType = NeedsTempList(member.Type);
+
+            // For arrays and IEnumerable, use temp list; for other collections, use instance directly
+            string targetCollection;
+            if (needsTempListForType)
+            {
+                targetCollection = $"_tempList_{member.Name}";
+                _sb.AppendIndentedLine($"if ({targetCollection} == null)");
+                _sb.StartNewBlock();
+                _sb.AppendIndentedLine($"{targetCollection} = new global::System.Collections.Generic.List<{elementType}>();");
+                _sb.EndBlock();
+            }
+            else
+            {
+                targetCollection = $"instance.{member.Name}";
+                bool isInterfaceCollection = normalizedMemberType.Contains("IList<") || normalizedMemberType.Contains("ICollection<");
+                bool isCustomCollection = !isInterfaceCollection && (TypeHelper.IsCustomHashSetType(normalizedMemberType) || TypeHelper.IsCustomListType(normalizedMemberType));
+
+                string collectionTypeName;
+                if (isCustomCollection)
+                {
+                    collectionTypeName = $"global::{member.Type}";
+                }
+                else
+                {
+                    bool isHashSet = TypeHelper.IsHashSetType(normalizedMemberType);
+                    collectionTypeName = isHashSet
+                        ? $"global::System.Collections.Generic.HashSet<{elementType}>"
+                        : $"global::System.Collections.Generic.List<{elementType}>";
+                }
+
+                _sb.AppendIndentedLine($"if ({targetCollection} == null)");
+                _sb.StartNewBlock();
+                _sb.AppendIndentedLine($"{targetCollection} = new {collectionTypeName}();");
+                _sb.EndBlock();
+            }
+
+            bool isPackable = IsPackableElementType(normalizedElementType) || isEnumCollection;
+
+            if (isPackable)
+            {
+                _sb.AppendIndentedLine("if (wireType == global::GProtobuf.Core.WireType.Len)");
+                _sb.StartNewBlock();
+
+                // Use PushLimit for zero-allocation packed array reading
+                _sb.AppendIndentedLine("var packedLength = reader.ReadVarInt32();");
+                _sb.AppendIndentedLine("var packedOldLimit = reader.PushLimit(packedLength);");
+                _sb.AppendIndentedLine("while (!reader.IsEnd)");
+                _sb.StartNewBlock();
+
+                if (isEnumCollection)
+                {
+                    _sb.AppendIndentedLine($"{targetCollection}.Add((global::{member.CollectionElementType})reader.ReadVarInt32());");
+                }
+                else
+                {
+                    GeneratePopulatePackedElementRead(targetCollection, normalizedElementType, member.DataFormat, "reader");
+                }
+
+                _sb.EndBlock();
+                _sb.AppendIndentedLine("reader.PopLimit(packedOldLimit);");
+                _sb.EndBlock();
+
+                _sb.AppendIndentedLine("else");
+                _sb.StartNewBlock();
+
+                if (isEnumCollection)
+                {
+                    _sb.AppendIndentedLine($"{targetCollection}.Add((global::{member.CollectionElementType})reader.ReadVarInt32());");
+                }
+                else
+                {
+                    GeneratePopulateSingleElementRead(targetCollection, normalizedElementType, member.DataFormat);
+                }
+
+                _sb.EndBlock();
+            }
+            else
+            {
+                GeneratePopulateSingleElementRead(targetCollection, normalizedElementType, member.DataFormat);
+            }
+        }
+
+        private void GeneratePopulatePackedElementRead(string targetCollection, string elementType, DataFormat dataFormat, string readerVar)
+        {
+            bool isZigZag = dataFormat == DataFormat.ZigZag;
+            bool isFixedSize = dataFormat == DataFormat.FixedSize;
+
+            switch (elementType)
+            {
+                case "System.Int32":
+                    if (isFixedSize)
+                        _sb.AppendIndentedLine($"{targetCollection}.Add({readerVar}.ReadFixedInt32());");
+                    else if (isZigZag)
+                        _sb.AppendIndentedLine($"{targetCollection}.Add({readerVar}.ReadZigZagVarInt32());");
+                    else
+                        _sb.AppendIndentedLine($"{targetCollection}.Add({readerVar}.ReadVarInt32());");
+                    break;
+                case "System.UInt32":
+                    if (isFixedSize)
+                        _sb.AppendIndentedLine($"{targetCollection}.Add({readerVar}.ReadFixedUInt32());");
+                    else
+                        _sb.AppendIndentedLine($"{targetCollection}.Add({readerVar}.ReadVarUInt32());");
+                    break;
+                case "System.Int64":
+                    if (isFixedSize)
+                        _sb.AppendIndentedLine($"{targetCollection}.Add({readerVar}.ReadFixedInt64());");
+                    else if (isZigZag)
+                        _sb.AppendIndentedLine($"{targetCollection}.Add({readerVar}.ReadZigZagVarInt64());");
+                    else
+                        _sb.AppendIndentedLine($"{targetCollection}.Add({readerVar}.ReadVarInt64());");
+                    break;
+                case "System.UInt64":
+                    if (isFixedSize)
+                        _sb.AppendIndentedLine($"{targetCollection}.Add({readerVar}.ReadFixedUInt64());");
+                    else
+                        _sb.AppendIndentedLine($"{targetCollection}.Add({readerVar}.ReadVarUInt64());");
+                    break;
+                case "System.Double":
+                    _sb.AppendIndentedLine($"{targetCollection}.Add({readerVar}.ReadFixedDouble());");
+                    break;
+                case "System.Single":
+                    _sb.AppendIndentedLine($"{targetCollection}.Add({readerVar}.ReadFixedFloat());");
+                    break;
+                case "System.Boolean":
+                    _sb.AppendIndentedLine($"{targetCollection}.Add({readerVar}.ReadVarInt32() != 0);");
+                    break;
+                default:
+                    _sb.AppendIndentedLine($"// WARNING: Unsupported packed element type: {elementType}");
+                    break;
+            }
+        }
+
+        private void GeneratePopulateSingleElementRead(string targetCollection, string elementType, DataFormat dataFormat)
+        {
+            bool isZigZag = dataFormat == DataFormat.ZigZag;
+            bool isFixedSize = dataFormat == DataFormat.FixedSize;
+
+            switch (elementType)
+            {
+                case "System.Int32":
+                    if (isFixedSize)
+                        _sb.AppendIndentedLine($"{targetCollection}.Add(reader.ReadFixedInt32());");
+                    else if (isZigZag)
+                        _sb.AppendIndentedLine($"{targetCollection}.Add(reader.ReadZigZagVarInt32());");
+                    else
+                        _sb.AppendIndentedLine($"{targetCollection}.Add(reader.ReadVarInt32());");
+                    break;
+                case "System.UInt32":
+                    if (isFixedSize)
+                        _sb.AppendIndentedLine($"{targetCollection}.Add(reader.ReadFixedUInt32());");
+                    else
+                        _sb.AppendIndentedLine($"{targetCollection}.Add(reader.ReadVarUInt32());");
+                    break;
+                case "System.Int64":
+                    if (isFixedSize)
+                        _sb.AppendIndentedLine($"{targetCollection}.Add(reader.ReadFixedInt64());");
+                    else if (isZigZag)
+                        _sb.AppendIndentedLine($"{targetCollection}.Add(reader.ReadZigZagVarInt64());");
+                    else
+                        _sb.AppendIndentedLine($"{targetCollection}.Add(reader.ReadVarInt64());");
+                    break;
+                case "System.UInt64":
+                    if (isFixedSize)
+                        _sb.AppendIndentedLine($"{targetCollection}.Add(reader.ReadFixedUInt64());");
+                    else
+                        _sb.AppendIndentedLine($"{targetCollection}.Add(reader.ReadVarUInt64());");
+                    break;
+                case "System.Double":
+                    _sb.AppendIndentedLine($"{targetCollection}.Add(reader.ReadFixedDouble());");
+                    break;
+                case "System.Single":
+                    _sb.AppendIndentedLine($"{targetCollection}.Add(reader.ReadFixedFloat());");
+                    break;
+                case "System.Boolean":
+                    _sb.AppendIndentedLine($"{targetCollection}.Add(reader.ReadVarInt32() != 0);");
+                    break;
+                case "System.String":
+                    _sb.AppendIndentedLine($"{targetCollection}.Add(global::GProtobuf.Core.StreamReaders.ReadString(ref reader, wireType));");
+                    break;
+                case "System.Byte[]":
+                    _sb.AppendIndentedLine($"{targetCollection}.Add(global::GProtobuf.Core.StreamReaders.ReadByteArray(ref reader));");
+                    break;
+                case "System.Guid":
+                    _sb.AppendIndentedLine($"{targetCollection}.Add(global::GProtobuf.Core.StreamReaders.ReadGuid(ref reader, wireType));");
+                    break;
+                case "System.TimeSpan":
+                    _sb.AppendIndentedLine($"{targetCollection}.Add(global::GProtobuf.Core.StreamReaders.ReadTimeSpan(ref reader, wireType));");
+                    break;
+                case "System.DateTime":
+                    _sb.AppendIndentedLine($"{targetCollection}.Add(global::GProtobuf.Core.StreamReaders.ReadDateTime(ref reader, wireType));");
+                    break;
+                default:
+                    _sb.AppendIndentedLine($"// WARNING: Unsupported single element type: {elementType}");
+                    break;
+            }
+        }
+
+        private void GeneratePopulateComplexCollectionRead(ProtoMemberAttribute member, string nsPrefix)
+        {
+            var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType);
+            var elementClassName = TypeNameHelper.GetClassName(member.CollectionElementType);
+            var normalizedElementType = TypeMapping.NormalizeTypeName(member.CollectionElementType);
+            var normalizedMemberType = TypeMapping.NormalizeTypeName(member.Type);
+
+            // Check if this needs a temp list (array or IEnumerable)
+            bool needsTempListForType = NeedsTempList(member.Type);
+
+            // For arrays and IEnumerable, use temp list; for other collections, use instance directly
+            string targetCollection;
+            if (needsTempListForType)
+            {
+                targetCollection = $"_tempList_{member.Name}";
+                _sb.AppendIndentedLine($"if ({targetCollection} == null)");
+                _sb.StartNewBlock();
+                _sb.AppendIndentedLine($"{targetCollection} = new global::System.Collections.Generic.List<{elementType}>();");
+                _sb.EndBlock();
+            }
+            else
+            {
+                targetCollection = $"instance.{member.Name}";
+                bool isInterfaceCollection = normalizedMemberType.Contains("IList<") || normalizedMemberType.Contains("ICollection<");
+                bool isCustomCollection = !isInterfaceCollection && (TypeHelper.IsCustomHashSetType(normalizedMemberType) || TypeHelper.IsCustomListType(normalizedMemberType));
+
+                string collectionTypeName;
+                if (isCustomCollection)
+                {
+                    collectionTypeName = $"global::{member.Type}";
+                }
+                else
+                {
+                    bool isHashSet = TypeHelper.IsHashSetType(normalizedMemberType);
+                    collectionTypeName = isHashSet
+                        ? $"global::System.Collections.Generic.HashSet<{elementType}>"
+                        : $"global::System.Collections.Generic.List<{elementType}>";
+                }
+
+                _sb.AppendIndentedLine($"if ({targetCollection} == null)");
+                _sb.StartNewBlock();
+                _sb.AppendIndentedLine($"{targetCollection} = new {collectionTypeName}();");
+                _sb.EndBlock();
+            }
+
+            switch (normalizedElementType)
+            {
+                case "System.DateTime":
+                    _sb.AppendIndentedLine($"{targetCollection}.Add(global::GProtobuf.Core.StreamReaders.ReadDateTime(ref reader, global::GProtobuf.Core.WireType.Len));");
+                    return;
+                case "System.TimeSpan":
+                    _sb.AppendIndentedLine($"{targetCollection}.Add(global::GProtobuf.Core.StreamReaders.ReadTimeSpan(ref reader, global::GProtobuf.Core.WireType.Len));");
+                    return;
+                case "System.Byte[]":
+                    _sb.AppendIndentedLine($"{targetCollection}.Add(global::GProtobuf.Core.StreamReaders.ReadByteArray(ref reader));");
+                    return;
+            }
+
+            // Use PushLimit for zero-allocation nested message reading
+            _sb.AppendIndentedLine("var itemLength = reader.ReadVarInt32();");
+            _sb.AppendIndentedLine("var itemOldLimit = reader.PushLimit(itemLength);");
+
+            if (TupleHandler.IsTupleType(member.CollectionElementType))
+            {
+                var tupleSafeName = VirtualTypeNameGenerator.GetSafeTypeName(member.CollectionElementType);
+                _sb.AppendIndentedLine($"{targetCollection}.Add(StreamReaders.Read{tupleSafeName}Content(ref reader));");
+                _sb.AppendIndentedLine("reader.PopLimit(itemOldLimit);");
+                return;
+            }
+
+            var elementNs = _registry.GetNamespaceForType(member.CollectionElementType);
+            var elementNsPrefix = GeneratorHelpers.GetNamespacePrefix(elementNs, _currentNamespace);
+
+            bool isDerivedType = _registry?.IsDerivedType(member.CollectionElementType) ?? false;
+            var readMethodSuffix = isDerivedType ? "" : "Content";
+            _sb.AppendIndentedLine($"{targetCollection}.Add({elementNsPrefix}StreamReaders.Read{elementClassName}{readMethodSuffix}(ref reader));");
+            _sb.AppendIndentedLine("reader.PopLimit(itemOldLimit);");
         }
 
         #endregion
@@ -1642,14 +3679,63 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         /// <summary>
         /// Returns the appropriate default value for a type.
+        /// For collection types (List, HashSet, Dictionary), returns a proper initializer
+        /// to ensure empty collections are not null.
         /// </summary>
-        private static string GetDefaultValueForType(string typeName)
+        /// <param name="shortTypeName">The short type name (used for variable declaration)</param>
+        /// <param name="originalTypeName">The original full type name (used for collection detection)</param>
+        private static string GetDefaultValueForType(string shortTypeName, string originalTypeName = null)
         {
-            var normalized = TypeMapping.NormalizeTypeName(typeName);
+            var normalized = TypeMapping.NormalizeTypeName(shortTypeName);
             if (normalized == "System.String" || normalized == "string")
             {
                 return "\"\"";
             }
+
+            // Use original type name for collection detection if provided
+            var typeToCheck = originalTypeName ?? shortTypeName;
+
+            // Check for collection types - these should be initialized to empty, not null
+            // IMPORTANT: Check dictionary first since other checks might match dictionary type names
+            if (TypeHelper.IsDictionaryType(typeToCheck))
+            {
+                var (keyType, valueType) = TypeHelper.ParseDictionaryTypes(typeToCheck);
+                var shortKeyType = TypeMapping.GetShortTypeName(keyType);
+                var shortValueType = TypeMapping.GetShortTypeName(valueType);
+                if (typeToCheck.Contains("ConcurrentDictionary<"))
+                {
+                    return $"new global::System.Collections.Concurrent.ConcurrentDictionary<{shortKeyType}, {shortValueType}>()";
+                }
+                if (TypeHelper.IsCustomDictionaryType(typeToCheck))
+                {
+                    // Custom dictionary types like ListDictionary - use the full type name
+                    return $"new global::{typeToCheck}()";
+                }
+                return $"new global::System.Collections.Generic.Dictionary<{shortKeyType}, {shortValueType}>()";
+            }
+
+            if (TypeHelper.IsHashSetType(typeToCheck) || TypeHelper.IsCustomHashSetType(typeToCheck))
+            {
+                var elementType = TypeHelper.GetCollectionElementType(typeToCheck);
+                var shortElementType = TypeMapping.GetShortTypeName(elementType);
+                if (TypeHelper.IsCustomHashSetType(typeToCheck))
+                {
+                    return $"new global::{typeToCheck}()";
+                }
+                return $"new global::System.Collections.Generic.HashSet<{shortElementType}>()";
+            }
+
+            if (TypeHelper.IsListType(typeToCheck) || TypeHelper.IsCustomListType(typeToCheck))
+            {
+                var elementType = TypeHelper.GetCollectionElementType(typeToCheck);
+                var shortElementType = TypeMapping.GetShortTypeName(elementType);
+                if (TypeHelper.IsCustomListType(typeToCheck))
+                {
+                    return $"new global::{typeToCheck}()";
+                }
+                return $"new global::System.Collections.Generic.List<{shortElementType}>()";
+            }
+
             return "default";
         }
 

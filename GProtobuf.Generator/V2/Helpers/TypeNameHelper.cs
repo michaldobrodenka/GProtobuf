@@ -146,6 +146,34 @@ namespace GProtobuf.Generator.V2.Helpers
             if (string.IsNullOrEmpty(typeName))
                 return typeName;
 
+            // Strip full namespace prefix (e.g., System.Collections.Generic.HashSet -> HashSet)
+            // Find the simple name by using GetSimpleTypeName which handles generics correctly
+            if (typeName.Contains(".") && !typeName.StartsWith("<"))
+            {
+                // Get just the simple type name (without namespace) but preserve generic args
+                var genericIdx = typeName.IndexOf('<');
+                if (genericIdx > 0)
+                {
+                    // Extract namespace part (before the generic type name)
+                    var beforeGeneric = typeName.Substring(0, genericIdx);
+                    var lastDot = beforeGeneric.LastIndexOf('.');
+                    if (lastDot >= 0)
+                    {
+                        var simpleTypeName = beforeGeneric.Substring(lastDot + 1);
+                        typeName = simpleTypeName + typeName.Substring(genericIdx);
+                    }
+                }
+                else
+                {
+                    // Non-generic, just get simple name
+                    var lastDot = typeName.LastIndexOf('.');
+                    if (lastDot >= 0)
+                    {
+                        typeName = typeName.Substring(lastDot + 1);
+                    }
+                }
+            }
+
             // Handle arrays
             if (typeName.EndsWith("[]"))
             {

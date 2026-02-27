@@ -86,7 +86,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     processedTypes.Add(protoIncludeTypeName);
                 }
             }
-
             // Generate virtual map entry size calculators
             GenerateVirtualMapEntrySizeCalculators();
 

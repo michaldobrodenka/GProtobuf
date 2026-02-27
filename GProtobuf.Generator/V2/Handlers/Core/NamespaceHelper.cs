@@ -64,6 +64,17 @@ namespace GProtobuf.Generator.V2.Handlers.Core
         }
 
         /// <summary>
+        /// Gets the fully qualified StreamReaders class reference for a custom type.
+        /// </summary>
+        /// <param name="fullTypeName">The full type name</param>
+        /// <param name="registry">Optional TypeRegistry for accurate nested type namespace resolution</param>
+        /// <returns>The fully qualified StreamReaders class name</returns>
+        public static string GetStreamReadersClass(string fullTypeName, TypeRegistry registry = null)
+        {
+            return $"{GetSerializationNamespace(fullTypeName, registry)}.StreamReaders";
+        }
+
+        /// <summary>
         /// Gets the fully qualified SizeCalculators class reference for a custom type.
         /// </summary>
         /// <param name="fullTypeName">The full type name</param>

@@ -12,481 +12,231 @@ namespace GProtobuf.Core
 {
     /// <summary>
     /// Extension methods for SpanReader providing type-aware deserialization.
-    /// Handles wire type validation and format conversions for protobuf primitive types.
+    /// Mirrors StreamReaders API for consistency.
     /// </summary>
-    /// <remarks>
-    /// <para><b>Design Philosophy:</b></para>
-    /// - Wire type validation: Throws InvalidOperationException for unexpected wire types
-    /// - Type coercion: Supports multiple wire types where protobuf spec allows (e.g., double can read Fixed64b or Fixed32b)
-    /// - DataFormat support: Handles Default, FixedSize, and ZigZag encodings
-    /// - Level200 compliance: BCL types (Guid, DateTime, TimeSpan) use nested message format
-    ///
-    /// <para><b>Performance Notes:</b></para>
-    /// - Extension methods: Zero overhead, inlined by JIT
-    /// - Stack allocation: BCL types use stackalloc for zero heap allocations
-    /// - UTF-8 decoding: String reading delegates to Encoding.UTF8.GetString (optimized in .NET)
-    /// </remarks>
     public static class SpanReaders
     {
-        /// <summary>
-        /// Reads a double value, supporting multiple wire type coercions.
-        /// </summary>
-        /// <param name="reader">SpanReader instance.</param>
-        /// <param name="wireType">Wire type of the field.</param>
-        /// <returns>Double value.</returns>
-        /// <remarks>
-        /// Supported wire types:
-        /// - Fixed64b: Native double encoding (8 bytes)
-        /// - Fixed32b: Float to double promotion (4 bytes)
-        /// - VarInt: Integer to double coercion (lossy for large values)
-        /// </remarks>
-        /// <exception cref="InvalidOperationException">If wire type is unsupported.</exception>
-        public static double ReadDouble(this ref SpanReader reader, WireType wireType)
-        {
-            if (wireType == WireType.Fixed64b)
-            {
-                return reader.ReadFixedDouble();
-            }
-            else if (wireType == WireType.Fixed32b)
-            {
-                return reader.ReadFixedFloat();
-            }
-            else if (wireType == WireType.VarInt)
-            {
-                return reader.ReadVarInt32();
-            }
+        #region Primitive Types
 
-            throw new InvalidOperationException($"WireType {wireType} is not valid for double.");
-        }
-
-        /// <summary>
-        /// Reads a UTF-8 encoded string (WireType.Len).
-        /// Format: varint length prefix + N bytes of UTF-8 data.
-        /// </summary>
-        /// <param name="reader">SpanReader instance.</param>
-        /// <param name="wireType">Wire type (must be Len).</param>
-        /// <returns>Decoded UTF-8 string.</returns>
-        /// <exception cref="InvalidOperationException">If wire type is not Len.</exception>
-        public static string ReadString(this ref SpanReader reader, WireType wireType)
-        {
-            if (wireType != WireType.Len)
-                throw new InvalidOperationException($"Unexpected wire type {wireType} for string.");
-
-            int length = reader.ReadVarInt32();
-
-            return Encoding.UTF8.GetString(reader.GetSlice(length));
-        }
-
-        /// <summary>
-        /// Reads a boolean value (WireType.VarInt).
-        /// Encoding: 0 = false, non-zero = true (standard protobuf behavior).
-        /// </summary>
-        /// <param name="reader">SpanReader instance.</param>
-        /// <param name="wireType">Wire type (must be VarInt).</param>
-        /// <returns>Boolean value.</returns>
-        /// <exception cref="InvalidOperationException">If wire type is not VarInt.</exception>
+        /// <summary>Reads a boolean value (WireType.VarInt).</summary>
         public static bool ReadBool(this ref SpanReader reader, WireType wireType)
         {
-            if (wireType != WireType.VarInt)
-                throw new InvalidOperationException($"Unexpected wire type {wireType} for bool.");
-
+            ReaderHelpers.ValidateWireType(wireType, WireType.VarInt, "bool");
             return reader.ReadVarInt32() != 0;
         }
 
-        /// <summary>
-        /// Reads an unsigned byte value (WireType.VarInt).
-        /// Validates range [0, 255] and throws on overflow.
-        /// </summary>
-        /// <param name="reader">SpanReader instance.</param>
-        /// <param name="wireType">Wire type (must be VarInt).</param>
-        /// <returns>Byte value.</returns>
-        /// <exception cref="InvalidOperationException">If wire type is not VarInt.</exception>
-        /// <exception cref="OverflowException">If value exceeds byte.MaxValue (255).</exception>
+        /// <summary>Reads a boolean value as a varint (no wire type validation).</summary>
+        public static bool ReadBool(this ref SpanReader reader)
+            => reader.ReadVarInt32() != 0;
+
+        /// <summary>Reads an unsigned byte value (WireType.VarInt).</summary>
         public static byte ReadByte(this ref SpanReader reader, WireType wireType)
         {
-            if (wireType != WireType.VarInt)
-                throw new InvalidOperationException($"Unexpected wire type {wireType} for byte.");
-
-            uint value = reader.ReadVarUInt32();
-            if (value > byte.MaxValue)
-                throw new OverflowException($"Value {value} is out of range for byte.");
-
-            return (byte)value;
+            ReaderHelpers.ValidateWireType(wireType, WireType.VarInt, "byte");
+            return ReaderHelpers.ToByte(reader.ReadVarUInt32());
         }
 
-        /// <summary>
-        /// Reads a signed byte value (WireType.VarInt), optionally with ZigZag encoding.
-        /// </summary>
-        /// <param name="reader">SpanReader instance.</param>
-        /// <param name="wireType">Wire type (must be VarInt).</param>
-        /// <param name="zigZag">If true, uses ZigZag decoding for efficient negative number encoding.</param>
-        /// <returns>Signed byte value [-128, 127].</returns>
-        /// <exception cref="InvalidOperationException">If wire type is not VarInt.</exception>
+        /// <summary>Reads a signed byte value (WireType.VarInt), optionally with ZigZag encoding.</summary>
         public static sbyte ReadSByte(this ref SpanReader reader, WireType wireType, bool zigZag = false)
         {
-            if (wireType != WireType.VarInt)
-                throw new InvalidOperationException($"Unexpected wire type {wireType} for sbyte.");
-
-            int value = zigZag ? reader.ReadZigZagVarInt32() : reader.ReadVarInt32();
-            return (sbyte)value;
+            ReaderHelpers.ValidateWireType(wireType, WireType.VarInt, "sbyte");
+            return (sbyte)(zigZag ? reader.ReadZigZagVarInt32() : reader.ReadVarInt32());
         }
 
-        /// <summary>
-        /// Reads a signed 16-bit integer (WireType.VarInt), optionally with ZigZag encoding.
-        /// </summary>
-        /// <param name="reader">SpanReader instance.</param>
-        /// <param name="wireType">Wire type (must be VarInt).</param>
-        /// <param name="zigZag">If true, uses ZigZag decoding.</param>
-        /// <returns>Short value [-32768, 32767].</returns>
-        /// <exception cref="InvalidOperationException">If wire type is not VarInt.</exception>
+        /// <summary>Reads a signed 16-bit integer (WireType.VarInt), optionally with ZigZag encoding.</summary>
         public static short ReadInt16(this ref SpanReader reader, WireType wireType, bool zigZag = false)
         {
-            if (wireType != WireType.VarInt)
-                throw new InvalidOperationException($"Unexpected wire type {wireType} for short.");
-
-            int value = zigZag ? reader.ReadZigZagVarInt32() : reader.ReadVarInt32();
-            return (short)value;
+            ReaderHelpers.ValidateWireType(wireType, WireType.VarInt, "short");
+            return (short)(zigZag ? reader.ReadZigZagVarInt32() : reader.ReadVarInt32());
         }
 
-        /// <summary>
-        /// Reads an unsigned 16-bit integer (WireType.VarInt).
-        /// Validates range [0, 65535] and throws on overflow.
-        /// </summary>
-        /// <param name="reader">SpanReader instance.</param>
-        /// <param name="wireType">Wire type (must be VarInt).</param>
-        /// <returns>Unsigned short value.</returns>
-        /// <exception cref="InvalidOperationException">If wire type is not VarInt.</exception>
-        /// <exception cref="OverflowException">If value exceeds ushort.MaxValue (65535).</exception>
+        /// <summary>Reads an unsigned 16-bit integer (WireType.VarInt).</summary>
         public static ushort ReadUInt16(this ref SpanReader reader, WireType wireType)
         {
-            if (wireType != WireType.VarInt)
-                throw new InvalidOperationException($"Unexpected wire type {wireType} for ushort.");
-
-            uint value = reader.ReadVarUInt32();
-            if (value > ushort.MaxValue)
-                throw new OverflowException($"Value {value} is out of range for ushort.");
-
-            return (ushort)value;
+            ReaderHelpers.ValidateWireType(wireType, WireType.VarInt, "ushort");
+            return ReaderHelpers.ToUInt16(reader.ReadVarUInt32());
         }
 
-        /// <summary>
-        /// Reads a signed 32-bit integer, supporting multiple wire types and ZigZag encoding.
-        /// </summary>
-        /// <param name="reader">SpanReader instance.</param>
-        /// <param name="wireType">Wire type (VarInt or Fixed32b).</param>
-        /// <param name="zigZag">If true, uses ZigZag decoding (only for VarInt).</param>
-        /// <returns>Integer value.</returns>
-        /// <remarks>
-        /// Wire type support:
-        /// - VarInt: Variable-length encoding (1-5 bytes), optionally ZigZag for negative values
-        /// - Fixed32b: Fixed 4-byte little-endian encoding (DataFormat.FixedSize)
-        /// </remarks>
-        /// <exception cref="InvalidOperationException">If wire type is unsupported.</exception>
+        /// <summary>Reads a signed 32-bit integer, supporting VarInt and Fixed32 wire types.</summary>
         public static int ReadInt32(this ref SpanReader reader, WireType wireType, bool zigZag = false)
         {
-            if (wireType == WireType.VarInt)
+            return wireType switch
             {
-                return zigZag ? reader.ReadZigZagVarInt32() : reader.ReadVarInt32();
-            }
-            else if (wireType == WireType.Fixed32b)
-            {
-                return reader.ReadFixedInt32();
-            }
-
-            throw new InvalidOperationException($"Unexpected wire type {wireType} for int32.");
+                WireType.VarInt => zigZag ? reader.ReadZigZagVarInt32() : reader.ReadVarInt32(),
+                WireType.Fixed32b => reader.ReadFixedInt32(),
+                _ => throw new InvalidOperationException($"Unexpected wire type {wireType} for int32.")
+            };
         }
 
-        /// <summary>
-        /// Reads an unsigned 32-bit integer (WireType.VarInt).
-        /// </summary>
-        /// <param name="reader">SpanReader instance.</param>
-        /// <param name="wireType">Wire type (must be VarInt).</param>
-        /// <returns>Unsigned integer value.</returns>
-        /// <exception cref="InvalidOperationException">If wire type is not VarInt.</exception>
+        /// <summary>Reads an unsigned 32-bit integer (WireType.VarInt).</summary>
         public static uint ReadUInt32(this ref SpanReader reader, WireType wireType)
         {
-            if (wireType != WireType.VarInt)
-                throw new InvalidOperationException($"Unexpected wire type {wireType} for uint.");
-
+            ReaderHelpers.ValidateWireType(wireType, WireType.VarInt, "uint");
             return reader.ReadVarUInt32();
         }
 
-        /// <summary>
-        /// Reads a signed 64-bit integer (WireType.VarInt), optionally with ZigZag encoding.
-        /// </summary>
-        /// <param name="reader">SpanReader instance.</param>
-        /// <param name="wireType">Wire type (must be VarInt).</param>
-        /// <param name="zigZag">If true, uses ZigZag decoding for efficient negative number encoding.</param>
-        /// <returns>Long value.</returns>
-        /// <exception cref="InvalidOperationException">If wire type is not VarInt.</exception>
+        /// <summary>Reads a signed 64-bit integer (WireType.VarInt), optionally with ZigZag encoding.</summary>
         public static long ReadInt64(this ref SpanReader reader, WireType wireType, bool zigZag = false)
         {
-            if (wireType != WireType.VarInt)
-                throw new InvalidOperationException($"Unexpected wire type {wireType} for long.");
-
+            ReaderHelpers.ValidateWireType(wireType, WireType.VarInt, "long");
             return zigZag ? reader.ReadZigZagVarInt64() : reader.ReadVarInt64();
         }
 
-        /// <summary>
-        /// Reads an unsigned 64-bit integer (WireType.VarInt).
-        /// </summary>
-        /// <param name="reader">SpanReader instance.</param>
-        /// <param name="wireType">Wire type (must be VarInt).</param>
-        /// <returns>Unsigned long value.</returns>
-        /// <exception cref="InvalidOperationException">If wire type is not VarInt.</exception>
+        /// <summary>Reads an unsigned 64-bit integer (WireType.VarInt).</summary>
         public static ulong ReadUInt64(this ref SpanReader reader, WireType wireType)
         {
-            if (wireType != WireType.VarInt)
-                throw new InvalidOperationException($"Unexpected wire type {wireType} for ulong.");
-
+            ReaderHelpers.ValidateWireType(wireType, WireType.VarInt, "ulong");
             return reader.ReadVarUInt64();
         }
 
-        /// <summary>
-        /// Reads a float value, supporting multiple wire type coercions.
-        /// </summary>
-        /// <param name="reader">SpanReader instance.</param>
-        /// <param name="wireType">Wire type of the field.</param>
-        /// <returns>Float value.</returns>
-        /// <remarks>
-        /// Supported wire types:
-        /// - Fixed32b: Native float encoding (4 bytes, IEEE 754)
-        /// - VarInt: Integer to float coercion (lossy for large values)
-        /// </remarks>
-        /// <exception cref="InvalidOperationException">If wire type is unsupported.</exception>
+        /// <summary>Reads a float value, supporting Fixed32 and VarInt wire types.</summary>
         public static float ReadFloat(this ref SpanReader reader, WireType wireType)
         {
-            if (wireType == WireType.Fixed32b)
+            return wireType switch
             {
-                return reader.ReadFixedFloat();
-            }
-            else if (wireType == WireType.VarInt)
-            {
-                return reader.ReadVarInt32();
-            }
-
-            throw new InvalidOperationException($"Unexpected wire type {wireType} for float.");
+                WireType.Fixed32b => reader.ReadFixedFloat(),
+                WireType.VarInt => reader.ReadVarInt32(),
+                _ => throw new InvalidOperationException($"Unexpected wire type {wireType} for float.")
+            };
         }
 
-        /// <summary>
-        /// Reads a byte array (WireType.Len).
-        /// Format: varint length prefix + N bytes of raw data.
-        /// Allocates new byte[] - not zero-copy.
-        /// </summary>
-        /// <param name="reader">SpanReader instance.</param>
-        /// <returns>Byte array (newly allocated).</returns>
+        /// <summary>Reads a double value, supporting Fixed64, Fixed32, and VarInt wire types.</summary>
+        public static double ReadDouble(this ref SpanReader reader, WireType wireType)
+        {
+            return wireType switch
+            {
+                WireType.Fixed64b => reader.ReadFixedDouble(),
+                WireType.Fixed32b => reader.ReadFixedFloat(),
+                WireType.VarInt => reader.ReadVarInt32(),
+                _ => throw new InvalidOperationException($"WireType {wireType} is not valid for double.")
+            };
+        }
+
+        #endregion
+
+        #region String and Bytes
+
+        /// <summary>Reads a UTF-8 encoded string (WireType.Len).</summary>
+        public static string ReadString(this ref SpanReader reader, WireType wireType)
+        {
+            ReaderHelpers.ValidateWireType(wireType, WireType.Len, "string");
+            int length = reader.ReadVarInt32();
+            return Encoding.UTF8.GetString(reader.GetSlice(length));
+        }
+
+        /// <summary>Reads a byte array (WireType.Len). Allocates new byte[].</summary>
         public static byte[] ReadByteArray(this ref SpanReader reader)
         {
             int length = reader.ReadVarInt32();
             return reader.GetSlice(length).ToArray();
         }
 
-        /// <summary>
-        /// Reads a byte array span (WireType.Len) without allocation.
-        /// Format: varint length prefix + N bytes of raw data.
-        /// Zero-copy - returns span into original data.
-        /// </summary>
-        /// <param name="reader">SpanReader instance.</param>
-        /// <returns>ReadOnlySpan pointing to the byte data (no allocation).</returns>
-        /// <remarks>
-        /// Used by custom buffer serialization for efficient data passing to user code.
-        /// The returned span is valid only while the original data buffer is in scope.
-        /// </remarks>
+        /// <summary>Reads a byte array span (WireType.Len). Zero-copy.</summary>
         public static ReadOnlySpan<byte> ReadByteArraySpan(this ref SpanReader reader)
         {
             int length = reader.ReadVarInt32();
             return reader.GetSlice(length);
         }
 
-        /// <summary>
-        /// Reads Guid in protobuf-net BCL format (nested message with lo/hi fixed64 fields).
-        /// Wire format: [length=18][tag 0x09][8 bytes lo][tag 0x11][8 bytes hi]
-        /// Supports field order independence (hi/lo can appear in any order).
-        /// STRICT validation: requires exactly 18 bytes and both lo/hi fields present (or empty for Guid.Empty).
-        /// </summary>
+        #endregion
+
+        #region BCL Types (Guid, DateTime, TimeSpan)
+
+        /// <summary>Reads Guid in protobuf-net BCL format (nested message with lo/hi fixed64 fields).</summary>
         public static Guid ReadGuid(this ref SpanReader reader, WireType wireType)
         {
-            if (wireType != WireType.Len)
-                throw new InvalidOperationException($"Expected WireType.Len for Guid, got {wireType}");
+            ReaderHelpers.ValidateWireType(wireType, WireType.Len, "Guid");
 
             int length = reader.ReadVarInt32();
-
-            // Special case: length=0 means Guid.Empty (default value not serialized by protobuf-net)
             if (length == 0)
                 return Guid.Empty;
 
-            int startPosition = reader.Position;
-            int endPosition = startPosition + length;
-
-            // BCL format REQUIRES exactly 18 bytes (1 tag + 8 lo + 1 tag + 8 hi)
             if (length != BclTypeFormats.Guid.NestedContentSize)
-                throw new InvalidDataException($"Expected Guid BCL nested message length of {BclTypeFormats.Guid.NestedContentSize} bytes, got {length}");
+                ReaderHelpers.ThrowInvalidGuidLength(length);
 
-            // Initialize byte buffer for Guid construction
+            int endPosition = reader.Position + length;
             Span<byte> guidBytes = stackalloc byte[ProtobufConstants.GuidByteSize];
-            bool hasLo = false;
-            bool hasHi = false;
+            bool hasLo = false, hasHi = false;
 
-            // Parse nested message fields (support field order independence)
             while (reader.Position < endPosition)
             {
                 reader.ReadWireTypeAndFieldId(out var innerWireType, out var fieldId);
 
                 switch (fieldId)
                 {
-                    case BclTypeFormats.Guid.FieldLoNumber: // lo (low 64 bits)
+                    case BclTypeFormats.Guid.FieldLoNumber:
                         if (innerWireType != WireType.Fixed64b)
-                            throw new InvalidDataException($"Expected Fixed64 for Guid.lo, got {innerWireType}");
-
-                        // Read 8 bytes for low part (little-endian)
-                        var loSlice = reader.GetSlice(8);
-                        loSlice.CopyTo(guidBytes.Slice(0, 8));
+                            ReaderHelpers.ThrowGuidFieldWireType(innerWireType, "lo");
+                        reader.GetSlice(8).CopyTo(guidBytes.Slice(0, 8));
                         hasLo = true;
                         break;
 
-                    case BclTypeFormats.Guid.FieldHiNumber: // hi (high 64 bits)
+                    case BclTypeFormats.Guid.FieldHiNumber:
                         if (innerWireType != WireType.Fixed64b)
-                            throw new InvalidDataException($"Expected Fixed64 for Guid.hi, got {innerWireType}");
-
-                        // Read 8 bytes for high part (little-endian)
-                        var hiSlice = reader.GetSlice(8);
-                        hiSlice.CopyTo(guidBytes.Slice(8, 8));
+                            ReaderHelpers.ThrowGuidFieldWireType(innerWireType, "hi");
+                        reader.GetSlice(8).CopyTo(guidBytes.Slice(8, 8));
                         hasHi = true;
                         break;
 
                     default:
-                        // Unknown field — skip (forward compatibility)
                         reader.SkipField(innerWireType);
                         break;
                 }
             }
 
-            // Strict validation: exactly endPosition reached (matches protobuf-net behavior)
-            if (reader.Position != endPosition)
-                throw new InvalidDataException($"Guid nested message length mismatch: expected end at {endPosition}, got {reader.Position}");
-
-            // Strict validation: both fields required (matches protobuf-net behavior)
             if (!hasLo || !hasHi)
-                throw new InvalidDataException($"Incomplete Guid BCL format: hasLo={hasLo}, hasHi={hasHi}");
+                ReaderHelpers.ThrowIncompleteGuid(hasLo, hasHi);
 
-            // Construct Guid from 16 bytes
             return new Guid(guidBytes);
         }
 
-        /// <summary>
-        /// Reads TimeSpan in protobuf-net BCL format (nested message with value/scale fields).
-        /// Wire format: [length][field 1: sint64 value][field 2: int32 scale]
-        /// Supports all TimeSpanScale values for forward/backward compatibility.
-        /// IMPORTANT: TimeSpan is a duration, NOT a timestamp, so no Unix Epoch offset is used.
-        /// </summary>
+        /// <summary>Reads TimeSpan in protobuf-net BCL format.</summary>
         public static TimeSpan ReadTimeSpan(this ref SpanReader reader, WireType wireType)
         {
-            if (wireType != WireType.Len)
-                throw new InvalidOperationException($"Expected WireType.Len for TimeSpan, got {wireType}");
-
-            int length = reader.ReadVarInt32();
-            int startPosition = reader.Position;
-            int endPosition = startPosition + length;
-
-            // Default values (protobuf defaults)
-            long scaledValue = 0;
-            int scale = 5; // Default to Ticks if not specified
-
-            // Parse nested message fields (support field order independence)
-            while (reader.Position < endPosition)
-            {
-                reader.ReadWireTypeAndFieldId(out var innerWireType, out var fieldId);
-
-                switch (fieldId)
-                {
-                    case BclTypeFormats.DateTimeTimeSpan.FieldValueNumber: // value (sint64, ZigZag encoded)
-                        scaledValue = reader.ReadZigZagVarInt64();
-                        break;
-
-                    case BclTypeFormats.DateTimeTimeSpan.FieldScaleNumber: // scale (int32)
-                        scale = reader.ReadVarInt32();
-                        break;
-
-                    default:
-                        // Unknown field - skip
-                        reader.SkipField(innerWireType);
-                        break;
-                }
-            }
-
-            // Convert scaled value to ticks
-            long ticks = DateTimeHelper.ConvertTimeSpanToTicks(scaledValue, scale);
-            return new TimeSpan(ticks);
+            var (scaledValue, scale) = ReadBclTimeFormat(ref reader, wireType, "TimeSpan");
+            return new TimeSpan(DateTimeHelper.ConvertTimeSpanToTicks(scaledValue, scale));
         }
 
-        /// <summary>
-        /// Reads DateTime in protobuf-net BCL format (nested message with value/scale/kind fields).
-        /// Wire format: [length][field 1: sint64 value][field 2: int32 scale][field 3: int32 kind (ignored)]
-        /// Supports all TimeSpanScale values for forward/backward compatibility.
-        /// Level200: DateTimeKind is always ignored (not serialized/deserialized).
-        /// </summary>
+        /// <summary>Reads DateTime in protobuf-net BCL format.</summary>
         public static DateTime ReadDateTime(this ref SpanReader reader, WireType wireType)
         {
-            if (wireType != WireType.Len)
-                throw new InvalidOperationException($"Expected WireType.Len for DateTime, got {wireType}");
+            var (scaledValue, scale) = ReadBclTimeFormat(ref reader, wireType, "DateTime");
+            return new DateTime(DateTimeHelper.ConvertToTicks(scaledValue, scale), DateTimeKind.Unspecified);
+        }
+
+        /// <summary>Parses the BCL time format used by DateTime and TimeSpan.</summary>
+        private static (long scaledValue, int scale) ReadBclTimeFormat(ref SpanReader reader, WireType wireType, string typeName)
+        {
+            ReaderHelpers.ValidateWireType(wireType, WireType.Len, typeName);
 
             int length = reader.ReadVarInt32();
-            int startPosition = reader.Position;
-            int endPosition = startPosition + length;
+            int endPosition = reader.Position + length;
 
-            // Default values (protobuf defaults)
             long scaledValue = 0;
-            int scale = 5; // Default to Ticks if not specified
+            int scale = 5;
 
-            // Parse nested message fields (support field order independence)
             while (reader.Position < endPosition)
             {
                 reader.ReadWireTypeAndFieldId(out var innerWireType, out var fieldId);
 
                 switch (fieldId)
                 {
-                    case BclTypeFormats.DateTimeTimeSpan.FieldValueNumber: // value (sint64, ZigZag encoded)
-                        if (innerWireType != WireType.VarInt)
-                            throw new InvalidOperationException($"Expected VarInt for DateTime.value, got {innerWireType}");
+                    case BclTypeFormats.DateTimeTimeSpan.FieldValueNumber:
                         scaledValue = reader.ReadZigZagVarInt64();
                         break;
-
-                    case BclTypeFormats.DateTimeTimeSpan.FieldScaleNumber: // scale (int32)
-                        if (innerWireType != WireType.VarInt)
-                            throw new InvalidOperationException($"Expected VarInt for DateTime.scale, got {innerWireType}");
+                    case BclTypeFormats.DateTimeTimeSpan.FieldScaleNumber:
                         scale = reader.ReadVarInt32();
                         break;
-
-                    case BclTypeFormats.DateTimeTimeSpan.FieldKindNumber: // kind (int32) - Level200: IGNORED
-                        reader.SkipField(innerWireType);
-                        break;
-
                     default:
-                        // Unknown field - skip (forward compatibility)
                         reader.SkipField(innerWireType);
                         break;
                 }
             }
 
-            // Validate we read exactly the expected length
-            if (reader.Position != endPosition)
-                throw new InvalidOperationException($"DateTime nested message length mismatch");
-
-            // Convert scaled value to ticks and construct DateTime
-            long ticks = DateTimeHelper.ConvertToTicks(scaledValue, scale);
-            return new DateTime(ticks, DateTimeKind.Unspecified); // Level200: always Unspecified
+            return (scaledValue, scale);
         }
 
-        /// <summary>
-        /// Reads a boolean value as a varint (0 = false, non-zero = true).
-        /// Convenience overload without wire type validation.
-        /// </summary>
-        /// <param name="reader">SpanReader instance.</param>
-        /// <returns>Boolean value.</returns>
-        public static bool ReadBool(this ref SpanReader reader)
-        {
-            return reader.ReadVarInt32() != 0;
-        }
+        #endregion
     }
 
     /// <summary>

@@ -19,6 +19,7 @@ namespace GProtobuf.Generator.V2.Handlers
         private readonly string _writerClassName;
         private readonly TypeRegistry _typeRegistry;
 
+
         public MapHandler(StringBuilderWithIndent sb, VirtualMapTypeRegistry registry)
             : this(sb, registry, "StreamWriters", null)
         {
@@ -171,8 +172,8 @@ namespace GProtobuf.Generator.V2.Handlers
         {
             var mapEntryTypeName = VirtualTypeNameGenerator.GetMapEntryTypeName(virtualInfo.KeyType, virtualInfo.ValueType);
 
-            // Call ReadMapEntry directly - returns (bool success, TKey key, TValue value)
-            _sb.AppendIndentedLine($"var entry = SpanReaders.Read{mapEntryTypeName}(ref {readerVar});");
+            // Call ReadMapEntry - generated in current namespace
+            _sb.AppendIndentedLine($"var entry = {_writerClassName}.Read{mapEntryTypeName}(ref {readerVar});");
             _sb.AppendIndentedLine($"if (entry.success)");
             _sb.StartNewBlock();
 
@@ -360,7 +361,7 @@ namespace GProtobuf.Generator.V2.Handlers
                 _sb.AppendIndentedLine($"var valueLength = {readerVar}.ReadVarUInt32();");
                 _sb.AppendIndentedLine($"var valueEnd = {readerVar}.Position + (int)valueLength;");
                 _sb.AppendIndentedLine($"value = new global::{valueType}();");
-                _sb.AppendIndentedLine($"SpanReaders.Populate{sanitizedName}(ref {readerVar}, value);");
+                _sb.AppendIndentedLine($"{_writerClassName}.Populate{sanitizedName}(ref {readerVar}, value);");
                 _sb.AppendIndentedLine($"{readerVar}.Position = valueEnd;");
             }
         }
@@ -421,10 +422,10 @@ namespace GProtobuf.Generator.V2.Handlers
             var elementReadExpr = TypeMapping.GetElementReadExpression(elementType, DataFormat.Default, readerVar);
             if (elementReadExpr == null)
             {
-                // Handle string specially
+                // Handle string specially - use extension method syntax that works for both SpanReader and StreamReader
                 if (TypeMapping.NormalizeTypeName(elementType) == "System.String")
                 {
-                    elementReadExpr = $"global::GProtobuf.Core.SpanReaders.ReadString(ref {readerVar}, global::GProtobuf.Core.WireType.Len)";
+                    elementReadExpr = $"{readerVar}.ReadString(global::GProtobuf.Core.WireType.Len)";
                 }
                 else
                 {
@@ -495,11 +496,11 @@ namespace GProtobuf.Generator.V2.Handlers
             _sb.AppendIndentedLine($"foreach (var kvp in {sourceVar})");
             _sb.StartNewBlock();
 
-    
+
             // Write tag
             TagCodeHelper.WriteTag(_sb, member.FieldId, WireType.Len);
 
-            // Call WriteMapEntry directly
+            // Call WriteMapEntry - generated in current namespace
             _sb.AppendIndentedLine($"{_writerClassName}.Write{mapEntryTypeName}(ref writer, kvp.Key, kvp.Value);");
 
             _sb.EndBlock(); // foreach
@@ -761,9 +762,9 @@ namespace GProtobuf.Generator.V2.Handlers
 
             _sb.AppendIndentedLine($"foreach (var kvp in {sourceVar})");
             _sb.StartNewBlock();
-                     
 
-            // Calculate size directly
+
+            // Calculate size - generated in current namespace
             _sb.AppendIndentedLine("entryCalc.Reset();");
             _sb.AppendIndentedLine($"SizeCalculators.Calculate{mapEntryTypeName}Size(ref entryCalc, kvp.Key, kvp.Value);");
 

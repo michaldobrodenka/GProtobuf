@@ -161,6 +161,20 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 {
                     throw new System.Exception($"Error in GeneratePopulateMethod for type '{type.FullName}'", ex);
                 }
+
+                // Generate OwnFieldsPopulate for derived types
+                if (_registry.IsDerivedType(type.FullName))
+                {
+                    try
+                    {
+                        var className = TypeNameHelper.GetClassName(type.FullName);
+                        GenerateOwnFieldsPopulateMethod(type, className);
+                    }
+                    catch (System.Exception ex)
+                    {
+                        throw new System.Exception($"Error in GenerateOwnFieldsPopulateMethod for type '{type.FullName}'", ex);
+                    }
+                }
             }
 
             // Generate ReadContent methods for ProtoInclude derived types
@@ -190,6 +204,20 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     catch (System.Exception ex)
                     {
                         throw new System.Exception($"Error in GeneratePopulateMethod for ProtoInclude type '{protoIncludeTypeName}'", ex);
+                    }
+
+                    // Generate OwnFieldsPopulate for ProtoInclude derived types
+                    if (_registry.IsDerivedType(protoIncludeTypeName))
+                    {
+                        try
+                        {
+                            var className = TypeNameHelper.GetClassName(protoIncludeTypeName);
+                            GenerateOwnFieldsPopulateMethod(protoIncludeType, className);
+                        }
+                        catch (System.Exception ex)
+                        {
+                            throw new System.Exception($"Error in GenerateOwnFieldsPopulateMethod for ProtoInclude type '{protoIncludeTypeName}'", ex);
+                        }
                     }
 
                     processedTypes.Add(protoIncludeTypeName);
@@ -247,7 +275,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             VirtualMapEntryGenerator generator;
             try
             {
-                generator = new VirtualMapEntryGenerator(_sb, _virtualMapRegistry, _registry);
+                generator = new VirtualMapEntryGenerator(_sb, _virtualMapRegistry, _registry, "Span");
             }
             catch (System.Exception ex)
             {
@@ -1237,6 +1265,103 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         }
 
         /// <summary>
+        /// Generates Populate{ClassName}OwnFields method for derived types.
+        /// Reads ONLY fields defined at this type level (not inherited from base)
+        /// </summary>
+        private void GenerateOwnFieldsPopulateMethod(TypeDefinition type, string className)
+        {
+            var ownMembers = _registry.GetOwnProtoMembers(type.FullName);
+
+            _sb.AppendIndentedLine($"/// <summary>");
+            _sb.AppendIndentedLine($"/// Populates {className}'s OWN fields (not inherited from base).");
+            _sb.AppendIndentedLine($"/// </summary>");
+            _sb.AppendIndentedLine($"public static void Populate{className}OwnFields(ref SpanReader reader, global::{type.FullName} instance)");
+            _sb.StartNewBlock();
+
+            if (ownMembers == null || ownMembers.Count == 0)
+            {
+                _sb.AppendIndentedLine("// No own fields (all inherited from base)");
+                _sb.AppendIndentedLine("while (!reader.IsEnd)");
+                _sb.StartNewBlock();
+                _sb.AppendIndentedLine("reader.ReadWireTypeAndFieldId(out var wireType, out var _);");
+                _sb.AppendIndentedLine("reader.SkipField(wireType);");
+                _sb.EndBlock();
+            }
+            else
+            {
+                // Declare temp lists for array and IEnumerable fields
+                var fieldsNeedingTempList = ownMembers
+                    .Where(m => m.IsCollection && (
+                        m.CollectionKind == CollectionKind.Array ||
+                        (m.CollectionKind == CollectionKind.InterfaceCollection && m.Type != null &&
+                         TypeMapping.NormalizeTypeName(m.Type).StartsWith("System.Collections.Generic.IEnumerable<") &&
+                         !m.Type.Contains("ICollection") &&
+                         !m.Type.Contains("IList"))
+                    ))
+                    .ToList();
+
+                if (fieldsNeedingTempList.Count > 0)
+                {
+                    foreach (var member in fieldsNeedingTempList)
+                    {
+                        var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType);
+                        _sb.AppendIndentedLine($"global::System.Collections.Generic.List<{elementType}> _tempList_{member.Name} = null;");
+                    }
+                    _sb.AppendNewLine();
+                }
+
+                _sb.AppendIndentedLine($"// Read ONLY own fields (not inherited) - {ownMembers.Count} field(s)");
+                _sb.AppendIndentedLine("while (!reader.IsEnd)");
+                _sb.StartNewBlock();
+                _sb.AppendIndentedLine("reader.ReadWireTypeAndFieldId(out var wireType, out var fieldId);");
+                _sb.AppendNewLine();
+                _sb.AppendIndentedLine("switch (fieldId)");
+                _sb.StartNewBlock();
+
+                foreach (var member in ownMembers)
+                {
+                    GenerateFieldPopulateCase(member);
+                }
+
+                _sb.AppendIndentedLine("default:");
+                _sb.IncreaseIndent();
+                _sb.AppendIndentedLine("reader.SkipField(wireType);");
+                _sb.AppendIndentedLine("break;");
+                _sb.DecreaseIndent();
+
+                _sb.EndBlock(); // switch
+                _sb.EndBlock(); // while
+
+                // Convert temp lists to arrays or assign to IEnumerable properties
+                if (fieldsNeedingTempList.Count > 0)
+                {
+                    _sb.AppendNewLine();
+                    foreach (var member in fieldsNeedingTempList)
+                    {
+                        _sb.AppendIndentedLine($"if (_tempList_{member.Name} != null)");
+                        _sb.StartNewBlock();
+
+                        if (member.CollectionKind == CollectionKind.Array)
+                        {
+                            // Arrays need ToArray() conversion
+                            _sb.AppendIndentedLine($"instance.{member.Name} = _tempList_{member.Name}.ToArray();");
+                        }
+                        else
+                        {
+                            // IEnumerable can be assigned List directly (List implements IEnumerable)
+                            _sb.AppendIndentedLine($"instance.{member.Name} = _tempList_{member.Name};");
+                        }
+
+                        _sb.EndBlock();
+                    }
+                }
+            }
+
+            _sb.EndBlock();
+            _sb.AppendNewLine();
+        }
+
+        /// <summary>
         /// Generates Populate method for ProtoInclude derived types.
         /// Handles base class fields and ProtoInclude wrapper containing derived fields.
         /// </summary>
@@ -1442,11 +1567,44 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 var typeNamespace = _registry.GetNamespaceForType(member.Type);
                 var nsPrefix = GeneratorHelpers.GetNamespacePrefix(typeNamespace, _currentNamespace);
 
-                // For derived types (with ProtoInclude parent), use Read{typeName} to handle ProtoInclude wrapper
-                // For non-derived types, use Read{typeName}Content for direct field reading
-                bool isDerivedType = _registry?.IsDerivedType(member.Type) ?? false;
-                var readMethodSuffix = isDerivedType ? "" : "Content";
-                _sb.AppendIndentedLine($"instance.{member.Name} = {nsPrefix}SpanReaders.Read{typeName}{readMethodSuffix}(ref complexReader_{member.FieldId});");
+                // Check if type is part of any inheritance hierarchy (either as base with ProtoInclude or as derived)
+                // For hierarchy types, use Read{typeName} to handle ProtoInclude discriminator
+                // For non-hierarchy types, use Populate for merge semantics (per protobuf spec)
+                bool isPartOfHierarchy = _registry?.IsPartOfHierarchy(member.Type) ?? false;
+
+                if (isPartOfHierarchy)
+                {
+                    // For types with inheritance, we need to read the discriminator to determine actual type
+                    _sb.AppendIndentedLine($"instance.{member.Name} = {nsPrefix}SpanReaders.Read{typeName}(ref complexReader_{member.FieldId});");
+                }
+                else
+                {
+                    // Per protobuf spec: When the same embedded message field appears multiple times,
+                    // the contents should be MERGED (not overwritten).
+                    // Strip nullable marker (?) when creating instance - can't instantiate nullable types directly
+                    var instanceType = member.Type.TrimEnd('?');
+
+                    // Check if the type is a struct (value type) - structs cannot be compared to null
+                    var memberTypeInfo = _registry?.GetByFullName(instanceType);
+                    bool isStruct = memberTypeInfo?.IsStruct ?? false;
+
+                    if (!isStruct)
+                    {
+                        // Only generate null check for reference types (classes)
+                        _sb.AppendIndentedLine($"if (instance.{member.Name} == null)");
+                        _sb.StartNewBlock();
+                        _sb.AppendIndentedLine($"instance.{member.Name} = new global::{instanceType}();");
+                        _sb.EndBlock();
+                    }
+                    else
+                    {
+                        // For structs, always create a new instance (no null check needed)
+                        _sb.AppendIndentedLine($"instance.{member.Name} = new global::{instanceType}();");
+                    }
+                    // For nullable value types, use .Value to get the underlying value
+                    var propertyAccess = member.IsNullable ? $"instance.{member.Name}.Value" : $"instance.{member.Name}";
+                    _sb.AppendIndentedLine($"{nsPrefix}SpanReaders.Populate{typeName}(ref complexReader_{member.FieldId}, {propertyAccess});");
+                }
             }
 
             _sb.AppendIndentedLine("break;");
@@ -1690,11 +1848,41 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 var typeNamespace = _registry.GetNamespaceForType(member.Type);
                 var nsPrefix = GeneratorHelpers.GetNamespacePrefix(typeNamespace, _currentNamespace);
 
-                // For derived types (with ProtoInclude parent), use Read{typeName} to handle ProtoInclude wrapper
-                // For non-derived types, use Read{typeName}Content for direct field reading
-                bool isDerivedType = _registry?.IsDerivedType(member.Type) ?? false;
-                var readMethodSuffix = isDerivedType ? "" : "Content";
-                _sb.AppendIndentedLine($"instance.{member.Name} = {nsPrefix}SpanReaders.Read{typeName}{readMethodSuffix}(ref nestedReader);");
+                // Check if type is part of any inheritance hierarchy
+                bool isPartOfHierarchy = _registry?.IsPartOfHierarchy(member.Type) ?? false;
+
+                if (isPartOfHierarchy)
+                {
+                    // For types with inheritance, we need to read the discriminator to determine actual type
+                    _sb.AppendIndentedLine($"instance.{member.Name} = {nsPrefix}SpanReaders.Read{typeName}(ref nestedReader);");
+                }
+                else
+                {
+                    // Per protobuf spec: When the same embedded message field appears multiple times,
+                    // the contents should be
+                    var instanceType = member.Type.TrimEnd('?');
+
+                    // Check if the type is a struct (value type) - structs cannot be compared to null
+                    var memberTypeInfo = _registry?.GetByFullName(instanceType);
+                    bool isStruct = memberTypeInfo?.IsStruct ?? false;
+
+                    if (!isStruct)
+                    {
+                        // Only generate null check for reference types (classes)
+                        _sb.AppendIndentedLine($"if (instance.{member.Name} == null)");
+                        _sb.StartNewBlock();
+                        _sb.AppendIndentedLine($"instance.{member.Name} = new global::{instanceType}();");
+                        _sb.EndBlock();
+                    }
+                    else
+                    {
+                        // For structs, always create a new instance (no null check needed)
+                        _sb.AppendIndentedLine($"instance.{member.Name} = new global::{instanceType}();");
+                    }
+                    // For nullable value types, use .Value to get the underlying value
+                    var propertyAccess = member.IsNullable ? $"instance.{member.Name}.Value" : $"instance.{member.Name}";
+                    _sb.AppendIndentedLine($"{nsPrefix}SpanReaders.Populate{typeName}(ref nestedReader, {propertyAccess});");
+                }
             }
 
             _sb.AppendIndentedLine("break;");
@@ -2048,7 +2236,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateMapFieldReadBody(ProtoMemberAttribute member)
         {
-            var mapHandler = new MapHandler(_sb, _virtualMapRegistry);
+            var mapHandler = new MapHandler(_sb, _virtualMapRegistry, "SpanReaders", _registry);
             mapHandler.GenerateRead(member, $"result.{member.Name}");
         }
 
@@ -2182,7 +2370,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             _sb.AppendIndentedLine($"// Read derived object from wrapper (derived fields only)");
             _sb.AppendIndentedLine($"result.{member.Name} = new global::{member.Type}();");
-            _sb.AppendIndentedLine($"{derivedReaderPrefix}Populate{typeName}(ref wrapperReader, result.{member.Name});");
+            _sb.AppendIndentedLine($"{derivedReaderPrefix}Populate{typeName}OwnFields(ref wrapperReader, result.{member.Name});");
             _sb.AppendNewLine();
 
             // Read remaining base fields (AFTER wrapper) directly into the derived instance

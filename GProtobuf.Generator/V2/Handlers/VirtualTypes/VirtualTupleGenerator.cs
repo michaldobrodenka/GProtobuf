@@ -114,6 +114,135 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
 
         #endregion
 
+        #region StreamReader
+
+        /// <summary>
+        /// Generates Read{TupleName}Content method for StreamReader.
+        /// </summary>
+        public void GenerateStreamReader(TupleTypeInfo tupleInfo)
+        {
+            _sb.AppendIndentedLine("[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
+            _sb.AppendIndentedLine($"public static {tupleInfo.OriginalTypeName} Read{tupleInfo.SafeName}Content(ref global::GProtobuf.Core.StreamReader reader)");
+            _sb.StartNewBlock();
+
+            // Declare variables for all items
+            for (int i = 0; i < tupleInfo.Arity; i++)
+            {
+                var itemType = tupleInfo.ItemTypes[i];
+                _sb.AppendIndentedLine($"{itemType} item{i + 1} = default({itemType});");
+            }
+
+            _sb.AppendNewLine();
+
+            // Read fields in a loop
+            _sb.AppendIndentedLine("while (!reader.IsEnd)");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine("reader.ReadWireTypeAndFieldId(out var wireType, out var fieldId);");
+            _sb.AppendNewLine();
+            _sb.AppendIndentedLine("switch (fieldId)");
+            _sb.StartNewBlock();
+
+            // Generate case for each item
+            for (int i = 0; i < tupleInfo.Arity; i++)
+            {
+                _sb.AppendIndentedLine($"case {i + 1}:");
+                _sb.IncreaseIndent();
+                GenerateStreamReaderItemRead($"item{i + 1}", tupleInfo.ItemTypes[i]);
+                _sb.AppendIndentedLine("break;");
+                _sb.DecreaseIndent();
+            }
+
+            // Default case: skip unknown fields
+            _sb.AppendIndentedLine("default:");
+            _sb.IncreaseIndent();
+            _sb.AppendIndentedLine("reader.SkipField(wireType);");
+            _sb.AppendIndentedLine("break;");
+            _sb.DecreaseIndent();
+
+            _sb.EndBlock(); // switch
+            _sb.EndBlock(); // while
+
+            // Construct and return the tuple
+            _sb.AppendNewLine();
+            var items = string.Join(", ", Enumerable.Range(1, tupleInfo.Arity).Select(i => $"item{i}"));
+            _sb.AppendIndentedLine($"return new {tupleInfo.OriginalTypeName}({items});");
+
+            _sb.EndBlock(); // method
+            _sb.AppendNewLine();
+        }
+
+        private void GenerateStreamReaderItemRead(string targetVar, string itemType)
+        {
+            var typeInfo = _typeHandler.AnalyzeType(itemType);
+            var actualType = typeInfo.UnderlyingType;
+            var normalizedType = TypeMapping.NormalizeTypeName(actualType);
+
+            switch (typeInfo.Category)
+            {
+                case TypeCategory.Primitive:
+                    // Handle primitives with StreamReaders extension methods
+                    switch (normalizedType)
+                    {
+                        case "System.Int32":
+                            _sb.AppendIndentedLine($"{targetVar} = reader.ReadVarInt32();");
+                            break;
+                        case "System.UInt32":
+                            _sb.AppendIndentedLine($"{targetVar} = reader.ReadVarUInt32();");
+                            break;
+                        case "System.Int64":
+                            _sb.AppendIndentedLine($"{targetVar} = reader.ReadVarInt64();");
+                            break;
+                        case "System.UInt64":
+                            _sb.AppendIndentedLine($"{targetVar} = reader.ReadVarUInt64();");
+                            break;
+                        case "System.Double":
+                            _sb.AppendIndentedLine($"{targetVar} = reader.ReadFixedDouble();");
+                            break;
+                        case "System.Single":
+                            _sb.AppendIndentedLine($"{targetVar} = reader.ReadFixedFloat();");
+                            break;
+                        case "System.Boolean":
+                            _sb.AppendIndentedLine($"{targetVar} = reader.ReadVarInt32() != 0;");
+                            break;
+                        case "System.String":
+                            _sb.AppendIndentedLine($"{targetVar} = global::GProtobuf.Core.StreamReaders.ReadString(ref reader, wireType);");
+                            break;
+                        case "System.Byte[]":
+                            _sb.AppendIndentedLine($"{targetVar} = global::GProtobuf.Core.StreamReaders.ReadByteArray(ref reader);");
+                            break;
+                        case "System.Guid":
+                            _sb.AppendIndentedLine($"{targetVar} = global::GProtobuf.Core.StreamReaders.ReadGuid(ref reader, wireType);");
+                            break;
+                        case "System.DateTime":
+                            _sb.AppendIndentedLine($"{targetVar} = global::GProtobuf.Core.StreamReaders.ReadDateTime(ref reader, wireType);");
+                            break;
+                        case "System.TimeSpan":
+                            _sb.AppendIndentedLine($"{targetVar} = global::GProtobuf.Core.StreamReaders.ReadTimeSpan(ref reader, wireType);");
+                            break;
+                        default:
+                            _sb.AppendIndentedLine($"// WARNING: Unknown primitive type '{normalizedType}'");
+                            _sb.AppendIndentedLine("reader.SkipField(wireType);");
+                            break;
+                    }
+                    break;
+
+                case TypeCategory.Enum:
+                    _sb.AppendIndentedLine($"{targetVar} = ({actualType})reader.ReadVarInt32();");
+                    break;
+
+                case TypeCategory.Complex:
+                    // Use PushLimit for zero-allocation nested message reading
+                    var className = TypeNameHelper.GetSafeMethodName(actualType);
+                    _sb.AppendIndentedLine("var itemLength = reader.ReadVarInt32();");
+                    _sb.AppendIndentedLine("var itemOldLimit = reader.PushLimit(itemLength);");
+                    _sb.AppendIndentedLine($"{targetVar} = StreamReaders.Read{className}Content(ref reader);");
+                    _sb.AppendIndentedLine("reader.PopLimit(itemOldLimit);");
+                    break;
+            }
+        }
+
+        #endregion
+
         #region Writer
 
         /// <summary>

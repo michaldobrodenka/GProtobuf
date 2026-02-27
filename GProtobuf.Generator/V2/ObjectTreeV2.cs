@@ -18,7 +18,7 @@ namespace GProtobuf.Generator.V2
     /// - TypeRegistry: Central type metadata store
     /// - Virtual Type Registries: Track compiler-generated types (Map entries, Tuples)
     /// - Code Generators: SpanReader, BufferWriter, StreamWriter, SizeCalculator, Tags, KeyValue
-    /// - Output: One {Namespace}.Serialization.cs file per namespace
+    /// - Output: One {Namespace}.Serialization.cs file per namespace + shared GProtobuf.Generated.Serialization.cs
     ///
     /// <para><b>Generated Code Structure:</b></para>
     /// Each .cs file contains:
@@ -32,13 +32,13 @@ namespace GProtobuf.Generator.V2
     /// - KeyValue{K}{V}: Generated structs for Dictionary&lt;K,V&gt; serialization
     ///
     /// <para><b>Virtual Types:</b></para>
-    /// - Map entries: KeyValue{K}{V} structs for Dictionary serialization
+    /// - Map entries: KeyValue{K}{V} structs for Dictionary serialization (generated ONCE in GProtobuf.Generated)
     /// - Tuples: Generated for nested tuples in collections (e.g., List&lt;(int, string)&gt;)
     ///
     /// <para><b>Code Generation Order:</b></para>
     /// 1. Register enums in constructor
     /// 2. AddType() called by SerializerGenerator for each [ProtoContract] type
-    /// 3. GenerateCode() invokes per-namespace generation
+    /// 3. GenerateCode() first collects all virtual types, then generates shared file, then per-namespace files
     /// 4. Tags collected from all types (base + virtual)
     /// 5. Code generators execute (Span, Stream, Buffer, Size, KeyValue)
     /// 6. Tags class inserted at beginning of file
@@ -48,6 +48,7 @@ namespace GProtobuf.Generator.V2
         private readonly TypeRegistry _registry = new();
         private readonly Microsoft.CodeAnalysis.Compilation _compilation;
         private readonly Dictionary<string, List<StandaloneTypeInfo>> _standaloneTypesByNamespace = new();
+
 
         #region Type Registration
 
@@ -113,6 +114,7 @@ namespace GProtobuf.Generator.V2
         /// <summary>
         /// Generates serialization code for all registered types.
         /// Produces one {Namespace}.Serialization.cs file per namespace.
+        /// Uses global virtual type registries to avoid duplicate method generation.
         /// </summary>
         /// <returns>
         /// Collection of (FileName, FileCode) tuples.
@@ -135,25 +137,25 @@ namespace GProtobuf.Generator.V2
                 allNamespaces.Add(ns);
             }
 
+            var globalTupleRegistry = new VirtualTupleTypeRegistry();
+            var globalMapRegistry = new VirtualMapTypeRegistry(globalTupleRegistry, _registry, _compilation);
+
+            
             foreach (var ns in allNamespaces)
             {
-                yield return GenerateCodeForNamespace(ns);
+                yield return GenerateCodeForNamespace(ns, globalMapRegistry, globalTupleRegistry);
             }
         }
 
-        private (string FileName, string FileCode) GenerateCodeForNamespace(string ns)
+        private (string FileName, string FileCode) GenerateCodeForNamespace(
+            string ns, VirtualMapTypeRegistry globalMapRegistry, VirtualTupleTypeRegistry globalTupleRegistry)
         {
             try
             {
                 var sb = new StringBuilderWithIndent();
                 var types = _registry.GetByNamespace(ns).ToList();
 
-                // Create shared virtual registries
-                var virtualTupleRegistry = new VirtualTupleTypeRegistry();
-                var virtualMapRegistry = new VirtualMapTypeRegistry(virtualTupleRegistry, _registry, _compilation);
-
                 WriteHeader(sb, ns);
-
 
                 // Get standalone types for this namespace
                 var standaloneTypes = _standaloneTypesByNamespace.TryGetValue(ns, out var list) ? list : new List<StandaloneTypeInfo>();
@@ -180,8 +182,8 @@ namespace GProtobuf.Generator.V2
 
                 try
                 {
-                    // Generate SpanReaders class (uses shared virtual registries, registers Dictionary and Tuple types)
-                    var spanReaderGenerator = new SpanReaderGenerator(sb, _registry, virtualMapRegistry, virtualTupleRegistry);
+                    // Generate SpanReaders class (uses global registries for deduplication)
+                    var spanReaderGenerator = new SpanReaderGenerator(sb, _registry, globalMapRegistry, globalTupleRegistry);
                     spanReaderGenerator.GenerateAll(types, ns);
                 }
                 catch (System.Exception ex)
@@ -189,13 +191,20 @@ namespace GProtobuf.Generator.V2
                     throw new System.Exception($"Error in SpanReaderGenerator for namespace '{ns}'. Inner: {ex.Message}. Stack: {ex.StackTrace}", ex);
                 }
 
-                // StreamReaders class removed - logic inlined into Deserializers
-                // All Stream deserialization now uses ReadRemainingBytes() + SpanReaders
+                try
+                {
+                    // Generate StreamReaders class (uses global registries for deduplication)
+                    new StreamReaderGenerator(sb, _registry, globalMapRegistry, globalTupleRegistry).GenerateAll(types, ns);
+                }
+                catch (System.Exception ex)
+                {
+                    throw new System.Exception($"Error in StreamReaderGenerator for namespace '{ns}'. Inner: {ex.Message}. Stack: {ex.StackTrace}", ex);
+                }
 
                 try
                 {
-                    // Generate StreamWriters class (uses shared virtual registries)
-                    new StreamWriterGenerator(sb, _registry, virtualMapRegistry, virtualTupleRegistry).GenerateAll(types, ns);
+                    // Generate StreamWriters class (uses global registries for deduplication)
+                    new StreamWriterGenerator(sb, _registry, globalMapRegistry, globalTupleRegistry).GenerateAll(types, ns);
                 }
                 catch (System.Exception ex)
                 {
@@ -204,8 +213,8 @@ namespace GProtobuf.Generator.V2
 
                 try
                 {
-                    // Generate BufferWriters class (uses shared virtual registries)
-                    new BufferWriterGenerator(sb, _registry, virtualMapRegistry, virtualTupleRegistry).GenerateAll(types, ns);
+                    // Generate BufferWriters class (uses global registries for deduplication)
+                    new BufferWriterGenerator(sb, _registry, globalMapRegistry, globalTupleRegistry).GenerateAll(types, ns);
                 }
                 catch (System.Exception ex)
                 {
@@ -214,8 +223,8 @@ namespace GProtobuf.Generator.V2
 
                 try
                 {
-                    // Generate SizeCalculators class (uses shared virtual registries)
-                    new SizeCalculatorGenerator(sb, _registry, virtualMapRegistry, virtualTupleRegistry).GenerateAll(types, ns);
+                    // Generate SizeCalculators class (uses global registries for deduplication)
+                    new SizeCalculatorGenerator(sb, _registry, globalMapRegistry, globalTupleRegistry).GenerateAll(types, ns);
                 }
                 catch (System.Exception ex)
                 {
@@ -291,29 +300,24 @@ namespace GProtobuf.Generator.V2
                     sb.EndBlock();
                     sb.AppendNewLine();
 
-                    // Stream overload with buffer
+                    // Stream overload with buffer - true streaming using PushLimit/PopLimit
                     sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(Stream stream, Span<byte> buffer)");
                     sb.StartNewBlock();
                     sb.AppendIndentedLine("var reader = new global::GProtobuf.Core.StreamReader(stream, buffer);");
-                    sb.AppendIndentedLine("var data = reader.ReadRemainingBytes();");
-                    sb.AppendIndentedLine("var spanReader = new SpanReader(data);");
-                    sb.AppendIndentedLine($"return SpanReaders.Read{className}(ref spanReader);");
+                    sb.AppendIndentedLine($"return StreamReaders.Read{className}(ref reader);");
                     sb.EndBlock();
                     sb.AppendNewLine();
 
-                    // Stream overload with buffer and existingInstance
+                    // Stream overload with buffer and existingInstance - true streaming using PushLimit/PopLimit
                     sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(Stream stream, Span<byte> buffer, global::{type.FullName} existingInstance)");
                     sb.StartNewBlock();
                     sb.AppendIndentedLine("var reader = new global::GProtobuf.Core.StreamReader(stream, buffer);");
-                    sb.AppendIndentedLine("var data = reader.ReadRemainingBytes();");
-                    sb.AppendIndentedLine("var spanReader = new SpanReader(data);");
-                    // Use 'is not null' pattern to avoid triggering custom == operator
                     sb.AppendIndentedLine("if (!(existingInstance is null))");
                     sb.StartNewBlock();
-                    sb.AppendIndentedLine($"SpanReaders.Populate{className}(ref spanReader, existingInstance);");
+                    sb.AppendIndentedLine($"StreamReaders.Populate{className}(ref reader, existingInstance);");
                     sb.AppendIndentedLine("return existingInstance;");
                     sb.EndBlock();
-                    sb.AppendIndentedLine($"return SpanReaders.Read{className}(ref spanReader);");
+                    sb.AppendIndentedLine($"return StreamReaders.Read{className}(ref reader);");
                     sb.EndBlock();
                     sb.AppendNewLine();
                 }
@@ -334,13 +338,11 @@ namespace GProtobuf.Generator.V2
                     sb.EndBlock();
                     sb.AppendNewLine();
 
-                    // Deserialize method - Stream overload with buffer
+                    // Deserialize method - Stream overload with buffer - true streaming using PushLimit/PopLimit
                     sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(Stream stream, Span<byte> buffer)");
                     sb.StartNewBlock();
                     sb.AppendIndentedLine("var reader = new global::GProtobuf.Core.StreamReader(stream, buffer);");
-                    sb.AppendIndentedLine("var data = reader.ReadRemainingBytes();");
-                    sb.AppendIndentedLine("var spanReader = new SpanReader(data);");
-                    sb.AppendIndentedLine($"return SpanReaders.Read{className}(ref spanReader);");
+                    sb.AppendIndentedLine($"return StreamReaders.Read{className}(ref reader);");
                     sb.EndBlock();
                     sb.AppendNewLine();
                 }
@@ -366,13 +368,11 @@ namespace GProtobuf.Generator.V2
                     sb.EndBlock();
                     sb.AppendNewLine();
 
-                    // Populate method - Stream overload with custom buffer
+                    // Populate method - Stream overload with custom buffer - true streaming using PushLimit/PopLimit
                     sb.AppendIndentedLine($"public static void Populate{className}(Stream stream, Span<byte> buffer, global::{type.FullName} instance)");
                     sb.StartNewBlock();
                     sb.AppendIndentedLine("var reader = new global::GProtobuf.Core.StreamReader(stream, buffer);");
-                    sb.AppendIndentedLine("var data = reader.ReadRemainingBytes();");
-                    sb.AppendIndentedLine("var spanReader = new SpanReader(data);");
-                    sb.AppendIndentedLine($"SpanReaders.Populate{className}(ref spanReader, instance);");
+                    sb.AppendIndentedLine($"StreamReaders.Populate{className}(ref reader, instance);");
                     sb.EndBlock();
                     sb.AppendNewLine();
                 }
