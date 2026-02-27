@@ -129,7 +129,23 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var elementClassName = TypeNameHelper.GetClassName(elementType);
             var spanReadersClass = NamespaceHelper.GetSpanReadersClass(elementType, _registry);
             _sb.AppendIndentedLine("var subReader = reader.CreateSubReader(length);");
-            _sb.AppendIndentedLine($"{addMethod}({spanReadersClass}.Read{elementClassName}Content(ref subReader));");
+
+            // Check if element type has ProtoInclude inheritance
+            // If so, we need to use Populate{ClassName} which handles the base class wrapper
+            bool hasProtoIncludeInheritance = _registry.IsDerivedType(elementType);
+
+            if (hasProtoIncludeInheritance)
+            {
+                // Type has ProtoInclude inheritance - need to use Populate which handles base class wrapper
+                _sb.AppendIndentedLine($"var instance = new {GetGlobalTypeName(elementType)}();");
+                _sb.AppendIndentedLine($"{spanReadersClass}.Populate{elementClassName}(ref subReader, instance);");
+                _sb.AppendIndentedLine($"{addMethod}(instance);");
+            }
+            else
+            {
+                // No inheritance - use ReadContent directly
+                _sb.AppendIndentedLine($"{addMethod}({spanReadersClass}.Read{elementClassName}Content(ref subReader));");
+            }
         }
 
         private void GenerateDictionaryDeserializer(StandaloneTypeInfo info, string methodName)
