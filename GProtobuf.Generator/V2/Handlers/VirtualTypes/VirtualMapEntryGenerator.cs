@@ -1455,36 +1455,24 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         private void GenerateDictionaryFieldSize(string sourceVar, TypeAnalysisInfo typeInfo, string calcVar, int fieldId)
         {
             var mapEntryTypeName = typeInfo.MapEntryTypeName;
-            var keyType = typeInfo.DictionaryKeyType;
-            var valueType = typeInfo.DictionaryValueType;
 
             var (_, tagBytes) = TypeMapping.PrecomputeTagBytes(fieldId, WireType.Len);
 
-            // Determine the correct dictionary type to instantiate (custom or standard)
-            string dictType;
-            if (TypeHelper.IsCustomDictionaryType(typeInfo.FullTypeName))
-            {
-                dictType = $"global::{typeInfo.FullTypeName}";
-            }
-            else
-            {
-                dictType = $"global::System.Collections.Generic.Dictionary<{keyType}, {valueType}>";
-            }
-
-            _sb.AppendIndentedLine("// INVARIANT: treat null as empty dictionary");
-            _sb.AppendIndentedLine($"var nestedDict = {sourceVar} ?? new {dictType}();");
-            _sb.AppendNewLine();
+            _sb.AppendIndentedLine($"if ({sourceVar} != null)");
+            _sb.StartNewBlock();
 
             // REPEATED format (standard protobuf): each entry gets its own field tag
             // Format: [tag][entry1_len][entry1][tag][entry2_len][entry2]...
             _sb.AppendIndentedLine("// Nested dictionary - REPEATED format (standard protobuf): each entry gets its own tag");
-            _sb.AppendIndentedLine("foreach (var kvp in nestedDict)");
+            _sb.AppendIndentedLine($"foreach (var kvp in {sourceVar})");
             _sb.StartNewBlock();
             _sb.AppendIndentedLine($"{calcVar}.AddByteLength({tagBytes}); // tag for each nested entry");
             _sb.AppendIndentedLine("var innerEntryCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
             _sb.AppendIndentedLine($"SizeCalculators.Calculate{mapEntryTypeName}Size(ref innerEntryCalc, kvp.Key, kvp.Value);");
             _sb.AppendIndentedLine($"{calcVar}.WriteVarUInt32((uint)innerEntryCalc.Length);  // entry length prefix");
             _sb.AppendIndentedLine($"{calcVar}.AddByteLength(innerEntryCalc.Length);         // entry content");
+            _sb.EndBlock();
+
             _sb.EndBlock();
         }
 
@@ -1734,32 +1722,20 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         private void GenerateDictionaryFieldWrite(string sourceVar, TypeAnalysisInfo typeInfo, int fieldId)
         {
             var mapEntryTypeName = typeInfo.MapEntryTypeName;
-            var keyType = typeInfo.DictionaryKeyType;
-            var valueType = typeInfo.DictionaryValueType;
             var (bytesString, _) = TypeMapping.PrecomputeTagBytes(fieldId, WireType.Len);
 
-            // Determine the correct dictionary type to instantiate (custom or standard)
-            string dictType;
-            if (TypeHelper.IsCustomDictionaryType(typeInfo.FullTypeName))
-            {
-                dictType = $"global::{typeInfo.FullTypeName}";
-            }
-            else
-            {
-                dictType = $"global::System.Collections.Generic.Dictionary<{keyType}, {valueType}>";
-            }
-
-            _sb.AppendIndentedLine("// INVARIANT: treat null as empty dictionary");
-            _sb.AppendIndentedLine($"var nestedDict = {sourceVar} ?? new {dictType}();");
-            _sb.AppendNewLine();
+            _sb.AppendIndentedLine($"if ({sourceVar} != null)");
+            _sb.StartNewBlock();
 
             // REPEATED format (standard protobuf): each entry gets its own field tag
             // Format: [tag][entry1_len][entry1][tag][entry2_len][entry2]...
             _sb.AppendIndentedLine("// Nested dictionary - REPEATED format (standard protobuf): each entry gets its own tag");
-            _sb.AppendIndentedLine("foreach (var kvp in nestedDict)");
+            _sb.AppendIndentedLine($"foreach (var kvp in {sourceVar})");
             _sb.StartNewBlock();
             _sb.AppendIndentedLine($"writer.WriteSingleByte({bytesString}); // tag for each nested entry");
             _sb.AppendIndentedLine($"{_writerClassName}.Write{mapEntryTypeName}(ref writer, kvp.Key, kvp.Value);");
+            _sb.EndBlock();
+
             _sb.EndBlock();
         }
 
