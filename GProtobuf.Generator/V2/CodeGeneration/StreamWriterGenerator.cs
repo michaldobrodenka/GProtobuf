@@ -470,15 +470,23 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// </summary>
         private void GenerateWriteContentForDerivedType(TypeDefinition type, string className)
         {
-            // Write root type fields (base class fields)
+            // Write root type fields (base class fields) using helper method
             var rootTypeName = _registry.GetRootType(type.FullName);
-            var rootType = _registry.GetByFullName(rootTypeName);
-            ForEachProtoMember(rootType?.ProtoMembers, "instance", (member, src) => GenerateFieldWrite(member, src));
+            var rootClassName = TypeNameHelper.GetClassName(rootTypeName);
+            var rootNamespace = _registry.GetNamespaceForType(rootTypeName);
+            var rootNsPrefix = GeneratorHelpers.GetNamespacePrefix(rootNamespace, _currentNamespace);
 
-            // Write own fields (if not root)
+            _sb.AppendIndentedLine($"// Base class fields ({rootClassName})");
+            _sb.AppendIndentedLine($"{rootNsPrefix}{_className}.Write{rootClassName}BaseFieldsOnly(ref writer, instance);");
+
+            // Write own fields (if not root) using helper method
             if (type.FullName != rootTypeName)
             {
-                ForEachProtoMember(type.ProtoMembers, "instance", (member, src) => GenerateFieldWrite(member, src));
+                var typeNamespace = _registry.GetNamespaceForType(type.FullName);
+                var typeNsPrefix = GeneratorHelpers.GetNamespacePrefix(typeNamespace, _currentNamespace);
+
+                _sb.AppendIndentedLine($"// Own fields ({className})");
+                _sb.AppendIndentedLine($"{typeNsPrefix}{_className}.Write{className}OwnFields(ref writer, instance);");
             }
         }
 
@@ -625,15 +633,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 // Write nested wrapper FIRST (ProtoInclude before own fields)
                 GenerateNestedWrappersForAsParent(chain, currentIndex + 1, targetIndex, ancestorIndex);
 
-                // Write OWN fields (not inherited) AFTER nested wrapper
-                var ownMembers = _registry.GetOwnProtoMembers(currentTypeName);
-                if (ownMembers != null && ownMembers.Count > 0)
-                {
-                    foreach (var member in ownMembers)
-                    {
-                        GenerateFieldWrite(member, "instance");
-                    }
-                }
+                // Write OWN fields (not inherited) AFTER nested wrapper using helper method
+                _sb.AppendIndentedLine($"Write{currentClassName}OwnFields(ref writer, instance);");
             }
             // NOTE: Ancestor fields are NOT written here - they're written OUTSIDE the wrapper by the caller
         }
@@ -713,14 +714,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var allDerivedTypes = _registry.GetAllDerivedTypes(type.FullName);
             if (allDerivedTypes.Count == 0)
             {
-                // No derived types - just write base fields directly
-                if (type.ProtoMembers != null)
-                {
-                    foreach (var member in type.ProtoMembers)
-                    {
-                        GenerateFieldWrite(member, "instance");
-                    }
-                }
+                // No derived types - just write base fields directly using helper method
+                _sb.AppendIndentedLine($"Write{className}BaseFieldsOnly(ref writer, instance);");
                 return;
             }
 
@@ -795,13 +790,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.EndBlock();
 
             // Default case - write base type fields (when instance is exactly the base type, not derived)
-            if (type.ProtoMembers != null)
-            {
-                foreach (var member in type.ProtoMembers)
-                {
-                    GenerateFieldWrite(member, "instance");
-                }
-            }
+            _sb.AppendIndentedLine($"// Base type instance - write base fields only");
+            _sb.AppendIndentedLine($"Write{className}BaseFieldsOnly(ref writer, instance);");
         }
 
         /// <summary>

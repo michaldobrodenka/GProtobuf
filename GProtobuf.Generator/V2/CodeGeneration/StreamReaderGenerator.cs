@@ -132,9 +132,26 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 GenerateReadMethod(type);
                 GenerateReadContentMethod(type);
                 GeneratePopulateMethod(type);
+
+                // Generate OwnFieldsPopulate method for derived types (used in ProtoInclude wrapper reading)
+                // Skip if type has fields that need temp lists (arrays/IEnumerable) - those can't work with per-field helper
+                if (_registry.IsDerivedType(type.FullName) && !HasFieldsNeedingTempList(type))
+                {
+                    var className = TypeNameHelper.GetClassName(type.FullName);
+                    GeneratePopulateOwnFieldsMethod(type, className);
+                }
+
+                // Generate BaseFieldsOnlyPopulate method for base types with ProtoIncludes
+                // Skip if type has fields that need temp lists (arrays/IEnumerable) - those can't work with per-field helper
+                if (type.ProtoIncludes != null && type.ProtoIncludes.Count > 0 && !HasFieldsNeedingTempList(type))
+                {
+                    var className = TypeNameHelper.GetClassName(type.FullName);
+                    GeneratePopulateBaseFieldsOnlyMethod(type, className);
+                }
             }
 
-            // Generate ReadContent methods for ProtoInclude derived types
+            // Generate ReadContent and OwnFields methods for ProtoInclude derived types
+            // that are not in the main types list (types without [ProtoContract])
             var processedTypes = new HashSet<string>(types.Select(t => t.FullName));
             var protoIncludeTypes = CollectUnprocessedProtoIncludeTypes(processedTypes);
 
@@ -144,6 +161,14 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 if (protoIncludeType != null)
                 {
                     GenerateReadContentMethod(protoIncludeType);
+
+                    // Also generate OwnFieldsPopulate if it's a derived type without temp list fields
+                    if (_registry.IsDerivedType(protoIncludeTypeName) && !HasFieldsNeedingTempList(protoIncludeType))
+                    {
+                        var className = TypeNameHelper.GetClassName(protoIncludeTypeName);
+                        GeneratePopulateOwnFieldsMethod(protoIncludeType, className);
+                    }
+
                     processedTypes.Add(protoIncludeTypeName);
                 }
             }
@@ -2321,6 +2346,18 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             return IsArrayType(typeName) || IsIEnumerableType(typeName);
         }
 
+        /// <summary>
+        /// Checks if a type has any fields that need temp lists (arrays or IEnumerable).
+        /// Types with such fields cannot use per-field PopulateOwnFields/BaseFieldsOnly helpers.
+        /// </summary>
+        private bool HasFieldsNeedingTempList(TypeDefinition type)
+        {
+            if (type.ProtoMembers == null)
+                return false;
+
+            return type.ProtoMembers.Any(m => NeedsTempList(m.Type));
+        }
+
         private string GetArrayElementType(string arrayTypeName)
         {
             if (arrayTypeName == null || !arrayTypeName.EndsWith("[]"))
@@ -3653,6 +3690,112 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var readMethodSuffix = isDerivedType ? "" : "Content";
             _sb.AppendIndentedLine($"{targetCollection}.Add({elementNsPrefix}StreamReaders.Read{elementClassName}{readMethodSuffix}(ref reader));");
             _sb.AppendIndentedLine("reader.PopLimit(itemOldLimit);");
+        }
+
+        #endregion
+
+        #region OwnFields and BaseFieldsOnly Methods
+
+        /// <summary>
+        /// Generates Populate{ClassName}OwnFields method for derived types.
+        /// Populates ONLY fields defined at this type level (not inherited from base).
+        /// Used for ProtoInclude wrapper content reading and inheritance scenarios.
+        /// </summary>
+        private void GeneratePopulateOwnFieldsMethod(TypeDefinition type, string className)
+        {
+            var ownMembers = _registry.GetOwnProtoMembers(type.FullName);
+            var nsPrefix = GeneratorHelpers.GetNamespacePrefix(_registry.GetNamespaceForType(type.FullName), _currentNamespace);
+
+            _sb.AppendIndentedLine($"/// <summary>");
+            _sb.AppendIndentedLine($"/// Populates {className}'s OWN fields (not inherited from base).");
+            _sb.AppendIndentedLine($"/// </summary>");
+            _sb.AppendIndentedLine($"public static bool Populate{className}OwnFields(");
+            _sb.IncreaseIndent();
+            _sb.AppendIndentedLine($"ref {ReaderType} reader,");
+            _sb.AppendIndentedLine($"global::{type.FullName} instance,");
+            _sb.AppendIndentedLine($"global::GProtobuf.Core.WireType wireType,");
+            _sb.AppendIndentedLine($"int fieldId)");
+            _sb.DecreaseIndent();
+            _sb.StartNewBlock();
+
+            if (ownMembers.Count == 0)
+            {
+                _sb.AppendIndentedLine("// No own fields (all inherited from base)");
+                _sb.AppendIndentedLine("return false;");
+            }
+            else
+            {
+                _sb.AppendIndentedLine($"// Read ONLY own fields (not inherited) - {ownMembers.Count} field(s)");
+                _sb.AppendIndentedLine("switch (fieldId)");
+                _sb.StartNewBlock();
+
+                foreach (var member in ownMembers)
+                {
+                    GeneratePopulateFieldReadCase(member, nsPrefix);
+                }
+
+                _sb.AppendIndentedLine("default:");
+                _sb.IncreaseIndent();
+                _sb.AppendIndentedLine("return false;");
+                _sb.DecreaseIndent();
+
+                _sb.EndBlock();
+                _sb.AppendIndentedLine("return true;");
+            }
+
+            _sb.EndBlock();
+            _sb.AppendNewLine();
+        }
+
+        /// <summary>
+        /// Generates Populate{ClassName}BaseFieldsOnly method for base types with ProtoIncludes.
+        /// Populates ONLY base class fields without runtime type dispatch.
+        /// Used for derived type reading after ProtoInclude wrapper.
+        /// </summary>
+        private void GeneratePopulateBaseFieldsOnlyMethod(TypeDefinition type, string className)
+        {
+            var nsPrefix = GeneratorHelpers.GetNamespacePrefix(_registry.GetNamespaceForType(type.FullName), _currentNamespace);
+
+            _sb.AppendIndentedLine($"/// <summary>");
+            _sb.AppendIndentedLine($"/// Populates ONLY base {className} fields without runtime type dispatch.");
+            _sb.AppendIndentedLine($"/// Used for derived type reading after ProtoInclude wrapper.");
+            _sb.AppendIndentedLine($"/// </summary>");
+            _sb.AppendIndentedLine($"public static bool Populate{className}BaseFieldsOnly(");
+            _sb.IncreaseIndent();
+            _sb.AppendIndentedLine($"ref {ReaderType} reader,");
+            _sb.AppendIndentedLine($"global::{type.FullName} instance,");
+            _sb.AppendIndentedLine($"global::GProtobuf.Core.WireType wireType,");
+            _sb.AppendIndentedLine($"int fieldId)");
+            _sb.DecreaseIndent();
+            _sb.StartNewBlock();
+
+            if (type.ProtoMembers == null || type.ProtoMembers.Count == 0)
+            {
+                _sb.AppendIndentedLine("// No base fields");
+                _sb.AppendIndentedLine("return false;");
+            }
+            else
+            {
+                _sb.AppendIndentedLine($"// Read ONLY base fields (no type dispatch) - {type.ProtoMembers.Count} field(s)");
+                _sb.AppendIndentedLine("switch (fieldId)");
+                _sb.StartNewBlock();
+
+                foreach (var member in type.ProtoMembers)
+                {
+                    GeneratePopulateFieldReadCase(member, nsPrefix);
+                }
+
+                _sb.AppendIndentedLine("default:");
+                _sb.IncreaseIndent();
+                _sb.AppendIndentedLine("return false;");
+                _sb.DecreaseIndent();
+
+                _sb.EndBlock();
+                _sb.AppendIndentedLine("return true;");
+            }
+
+            _sb.EndBlock();
+            _sb.AppendNewLine();
         }
 
         #endregion
