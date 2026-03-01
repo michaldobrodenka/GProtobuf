@@ -306,9 +306,16 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             switch (category)
             {
                 case TypeCategory.Primitive:
-                    // Primitive type, string, byte[], Guid - TypeMapping handles all
-                    var writeExpr = TypeMapping.GetWriteExpression(actualType, sourceVar, DataFormat.Default, "writer");
-                    _sb.AppendIndentedLine($"{writeExpr};");
+                    if (TypeMapping.IsBooleanType(actualType))
+                    {
+                        _sb.AppendIndentedLine($"writer.WriteBool({sourceVar});");
+                    }
+                    else
+                    {
+                        // Primitive type, string, byte[], Guid - TypeMapping handles all
+                        var writeExpr = TypeMapping.GetWriteExpression(actualType, sourceVar, DataFormat.Default, "writer");
+                        _sb.AppendIndentedLine($"{writeExpr};");
+                    }
                     break;
 
                 case TypeCategory.Enum:
@@ -393,9 +400,16 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             switch (category)
             {
                 case TypeCategory.Primitive:
-                    // Primitive type, string, byte[], Guid - TypeMapping handles all
-                    var sizeExpr = TypeMapping.GetSizeExpression(actualType, sourceVar, DataFormat.Default, "calculator");
-                    _sb.AppendIndentedLine($"{sizeExpr};");
+                    if (TypeMapping.IsBooleanType(actualType))
+                    {
+                        _sb.AppendIndentedLine($"calculator.WriteBool({sourceVar});");
+                    }
+                    else
+                    {
+                        // Primitive type, string, byte[], Guid - TypeMapping handles all
+                        var sizeExpr = TypeMapping.GetSizeExpression(actualType, sourceVar, DataFormat.Default, "calculator");
+                        _sb.AppendIndentedLine($"{sizeExpr};");
+                    }
                     break;
 
                 case TypeCategory.Enum:

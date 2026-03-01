@@ -1042,7 +1042,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // Check if field is polymorphic (base type with ProtoIncludes)
             bool isPolymorphicField = _registry.IsPolymorphicField(member);
 
-            // Only generate null check for reference types or nullable value types
             if (!isNonNullableStruct)
             {
                 _sb.AppendIndentedLine($"if ({sourceVar} != null)");
@@ -1051,21 +1050,14 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             if (isNestedDerivedType)
             {
-                // CRITICAL: Field declared as concrete derived type (e.g., ModbusManualTransaction Transaction)
-                // Must generate ProtoInclude wrapper for protobuf-net Level200 compatibility.
-                // Wire format: [field tag][total length] [wrapper tag][wrapper length] [derived fields] [base fields]
                 GenerateNestedDerivedTypeWrite(member, sourceVar, typeName, typeDef);
             }
             else if (isPolymorphicField)
             {
-                // CRITICAL: Field declared as polymorphic base type (e.g., ProtoParameterBase ProtoValue)
-                // Runtime instance may be derived type, requiring ProtoInclude wrapper.
-                // Generate runtime type dispatch to check actual type and add wrapper if needed.
                 GeneratePolymorphicFieldWrite(member, sourceVar, typeName, typeDef);
             }
             else
             {
-                // Standard complex type write (no inheritance or base type with runtime dispatch)
                 GenerateStandardComplexTypeWrite(member, sourceVar, typeName, typeDef);
             }
 
@@ -1419,7 +1411,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var typeDef = _registry.GetByFullName(member.Type);
             bool isNonNullableStruct = typeDef != null && typeDef.IsStruct && !member.IsNullable;
 
-            // Only generate null check for reference types or nullable value types
             if (!isNonNullableStruct)
             {
                 _sb.AppendIndentedLine($"if ({sourceVar} != null)");
@@ -1429,11 +1420,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             TagCodeHelper.AddTagSize(_sb, member.FieldId, WireType.Len, calculatorVar);
 
             // Calculate content size first
-            // Use unique variable names to avoid conflicts when multiple fields in same scope
             var lengthVar = isNonNullableStruct ? $"lengthBefore_{member.FieldId}" : "lengthBefore";
             var contentLengthVar = isNonNullableStruct ? $"contentLength_{member.FieldId}" : "contentLength";
 
-            // For nullable enums or structs, use .Value to get the underlying value
             string valueArg = GeneratorHelpers.GetNullableValueAccess(sourceVar, member, typeDef, _registry);
 
             _sb.AppendIndentedLine($"var {lengthVar} = {calculatorVar}.Length;");
@@ -1446,50 +1435,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 _sb.EndBlock();
             }
         }
-
-        /// <summary>
-        /// Generates code to calculate ProtoInclude wrapper size for derived types.
-        /// protobuf-net Level200 always adds wrapper for derived types, even in direct fields.
-        /// </summary>
-        private void GenerateProtoIncludeWrapperSize(string derivedTypeName, string calculatorVar)
-        {
-            var inheritanceChain = _registry.GetInheritanceChain(derivedTypeName);
-            if (inheritanceChain.Count < 2) return;
-
-            var parentTypeName = inheritanceChain[0];
-            var parentType = _registry.GetByFullName(parentTypeName);
-            var protoInclude = GeneratorHelpers.FindProtoInclude(parentType, derivedTypeName);
-
-            if (protoInclude != null)
-            {
-                var wrapperTag = (protoInclude.FieldId << 3) | (int)WireType.Len;
-                _sb.AppendIndentedLine($"// ProtoInclude wrapper for {TypeNameHelper.GetClassName(derivedTypeName)}");
-                _sb.AppendIndentedLine($"{calculatorVar}.WriteVarUInt32({wrapperTag}u);");
-                _sb.AppendIndentedLine($"{calculatorVar}.WriteVarUInt32(0); // Empty wrapper marker");
-            }
-        }
-
-        /// <summary>
-        /// Generates code to write ProtoInclude wrapper for derived types.
-        /// protobuf-net Level200 always adds wrapper for derived types, even in direct fields.
-        /// </summary>
-        private void GenerateProtoIncludeWrapperWrite(string derivedTypeName)
-        {
-            var inheritanceChain = _registry.GetInheritanceChain(derivedTypeName);
-            if (inheritanceChain.Count < 2) return;
-
-            var parentTypeName = inheritanceChain[0];
-            var parentType = _registry.GetByFullName(parentTypeName);
-            var protoInclude = GeneratorHelpers.FindProtoInclude(parentType, derivedTypeName);
-
-            if (protoInclude != null)
-            {
-                var wrapperTag = (protoInclude.FieldId << 3) | (int)WireType.Len;
-                _sb.AppendIndentedLine($"writer.WriteVarUInt32({wrapperTag}u); // ProtoInclude wrapper tag");
-                _sb.AppendIndentedLine("writer.WriteVarUInt32(0); // Empty wrapper marker");
-            }
-        }
-
         #endregion
 
     }

@@ -322,10 +322,17 @@ namespace GProtobuf.Core
         /// Writes a boolean value (WireType.VarInt).
         /// Encoding: 0 = false, 1 = true (always 1 byte).
         /// </summary>
-        /// <param name="value">Boolean value to write.</param>
         public void WriteBool(bool value)
         {
-            WriteSingleByte((byte)(value ? 1 : 0));
+            WriteSingleByte(value ? (byte)1 : (byte)0);
+        }
+
+        /// <summary>
+        /// Writes a boolean true value.
+        /// </summary>
+        public void WriteBoolTrue()
+        {
+            WriteSingleByte(1);
         }
 
         // Additional methods to match StreamWriter API

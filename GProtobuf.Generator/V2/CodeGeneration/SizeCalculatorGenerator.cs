@@ -673,7 +673,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // Check if field is polymorphic (base type with ProtoIncludes)
             bool isPolymorphicField = _registry.IsPolymorphicField(member);
 
-            // Only generate null check for reference types or nullable value types
             if (!isNonNullableStruct)
             {
                 _sb.AppendIndentedLine($"if ({sourceVar} != null)");
@@ -682,19 +681,14 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             if (isNestedDerivedType)
             {
-                // CRITICAL: Field declared as concrete derived type - calculate ProtoInclude wrapper size
                 GenerateNestedDerivedTypeSize(member, sourceVar, typeName, typeDef);
             }
             else if (isPolymorphicField)
             {
-                // CRITICAL: Field declared as polymorphic base type (e.g., ProtoParameterBase ProtoValue)
-                // Runtime instance may be derived type, requiring ProtoInclude wrapper.
-                // Generate runtime type dispatch to calculate wrapper size.
                 GeneratePolymorphicFieldSize(member, sourceVar, typeName, typeDef);
             }
             else
             {
-                // Standard complex type size calculation
                 GenerateStandardComplexTypeSize(member, sourceVar, typeName, typeDef);
             }
 

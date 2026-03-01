@@ -101,7 +101,12 @@ namespace GProtobuf.Core
 
         public void WriteBool(bool value)
         {
-            WriteVarUInt32(value ? 1u : 0u);
+            WriteSingleByte(value ? (byte)1 : (byte)0);
+        }
+
+        public void WriteBoolTrue()
+        {
+            WriteSingleByte(1);
         }
 
         public void WriteByte(byte value)

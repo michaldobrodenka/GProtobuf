@@ -7,7 +7,24 @@ namespace GProtobuf.Generator.V2
     /// </summary>
     internal static class TypeMapping
     {
+        #region Constants
+
+        /// <summary>
+        /// Normalized type name for System.Boolean.
+        /// </summary>
+        public const string BooleanTypeName = "System.Boolean";
+
+        #endregion
+
         #region Type Classification
+
+        /// <summary>
+        /// Checks if type is System.Boolean.
+        /// </summary>
+        public static bool IsBooleanType(string typeName)
+        {
+            return NormalizeTypeName(typeName) == BooleanTypeName;
+        }
 
         /// <summary>
         /// Checks if type is a primitive that can be read/written directly.
@@ -406,7 +423,7 @@ namespace GProtobuf.Generator.V2
                 "System.Byte" => $"{writerVar}.WriteByte({valueExpr})",
                 "System.Single" => $"{writerVar}.WriteFloat({valueExpr})",
                 "System.Double" => $"{writerVar}.WriteDouble({valueExpr})",
-                "System.Boolean" => $"{writerVar}.WriteBool({valueExpr})",
+                "System.Boolean" => $"{writerVar}.WriteBoolTrue()", // Non-nullable bool: inside if(value) check, always true
                 "System.Char" => $"{writerVar}.WriteVarUInt32((uint){valueExpr})",
                 "System.String" => $"{writerVar}.WriteString({valueExpr})",
                 "System.Byte[]" => $"{writerVar}.WriteVarUInt32((uint){valueExpr}.Length); {writerVar}.WriteBytes({valueExpr})",
@@ -538,7 +555,7 @@ namespace GProtobuf.Generator.V2
                 "System.Byte" => $"{calculatorVar}.WriteByte({valueExpr})",
                 "System.Single" => $"{calculatorVar}.AddByteLength(4)",
                 "System.Double" => $"{calculatorVar}.AddByteLength(8)",
-                "System.Boolean" => $"{calculatorVar}.WriteBool({valueExpr})",
+                "System.Boolean" => $"{calculatorVar}.WriteBoolTrue()", // Non-nullable bool: inside if(value) check, always true
                 "System.Char" => $"{calculatorVar}.WriteVarUInt32((uint){valueExpr})",
                 "System.String" => $"{calculatorVar}.WriteString({valueExpr})",
                 "System.Byte[]" => $"{calculatorVar}.WriteBytes({valueExpr})",

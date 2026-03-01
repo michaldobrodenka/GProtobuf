@@ -143,6 +143,11 @@ namespace GProtobuf.Core
             Length++; // Bool is always 1 byte in protobuf
         }
 
+        public void WriteBoolTrue()
+        {
+            Length++; // Bool is always 1 byte in protobuf
+        }
+
         public void WriteByte(byte value)
         {
             WriteVarUInt32(value); // Use optimized version for unsigned

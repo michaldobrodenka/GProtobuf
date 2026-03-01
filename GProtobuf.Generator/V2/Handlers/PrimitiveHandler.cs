@@ -627,39 +627,62 @@ namespace GProtobuf.Generator.V2.Handlers
             // Check if type is supported
             if (!TypeMapping.IsSimpleType(typeName)) return;
 
-            // Generate condition
-            if (isNullable)
+            var normalizedType = TypeMapping.NormalizeTypeName(typeName);
+            bool isReferenceType = normalizedType == "System.String" || normalizedType == "System.Byte[]";
+
+            string valueExpr;
+
+            // For reference types (string, byte[]), use local variable to avoid null check then null access
+            if (isReferenceType && !isNullable && !isRequired)
             {
-                // Nullable types: always use HasValue check (IsRequired ignored)
+                sb.StartNewBlock(); // Scope block to avoid name collisions
+                sb.AppendIndentedLine($"var instanceValue = {sourceVar};");
+                sb.AppendIndentedLine("if (instanceValue != null)");
+                sb.StartNewBlock();
+                valueExpr = "instanceValue";
+            }
+            else if (isNullable)
+            {
                 sb.AppendIndentedLine($"if ({sourceVar}.HasValue)");
                 sb.StartNewBlock();
+                valueExpr = $"{sourceVar}.Value";
             }
-            else if (isRequired)
+            else if (!isRequired)
             {
-                // Non-nullable + IsRequired: ALWAYS serialize (no condition needed)
-                // Generate unconditional write
-            }
-            else
-            {
-                // Non-nullable + NOT required: proto2 default value check
                 var defaultCheck = TypeMapping.GetDefaultValueCheck(typeName, sourceVar);
                 if (defaultCheck != null)
                 {
                     sb.AppendIndentedLine($"if ({defaultCheck})");
                     sb.StartNewBlock();
                 }
+                valueExpr = sourceVar;
+            }
+            else
+            {
+                valueExpr = sourceVar;
             }
 
             // Write tag
             GenerateWriteTag(sb, fieldId, wireType, writerVar);
 
-            // Write value
-            var valueExpr = isNullable ? $"{sourceVar}.Value" : sourceVar;
-            var actualWriteExpr = TypeMapping.GetWriteExpression(typeName, valueExpr, format, writerVar);
-            sb.AppendIndentedLine($"{actualWriteExpr};");
+            // For nullable bool, we need to write the actual value (could be true or false)
+            if (TypeMapping.IsBooleanType(typeName) && isNullable)
+            {
+                sb.AppendIndentedLine($"{writerVar}.WriteBool({valueExpr});");
+            }
+            else
+            {
+                var actualWriteExpr = TypeMapping.GetWriteExpression(typeName, valueExpr, format, writerVar);
+                sb.AppendIndentedLine($"{actualWriteExpr};");
+            }
 
-            // Close block if condition was generated
-            if (isNullable || (!isRequired && TypeMapping.GetDefaultValueCheck(typeName, sourceVar) != null))
+            // Close blocks
+            if (isReferenceType && !isNullable && !isRequired)
+            {
+                sb.EndBlock(); // if
+                sb.EndBlock(); // scope
+            }
+            else if (isNullable || (!isRequired && TypeMapping.GetDefaultValueCheck(typeName, sourceVar) != null))
             {
                 sb.EndBlock();
             }
@@ -779,39 +802,62 @@ namespace GProtobuf.Generator.V2.Handlers
         {
             var wireType = TypeMapping.GetWireType(typeName, format);
 
-            // Generate condition
-            if (isNullable)
+            var normalizedType = TypeMapping.NormalizeTypeName(typeName);
+            bool isReferenceType = normalizedType == "System.String" || normalizedType == "System.Byte[]";
+
+            string valueExpr;
+
+            // For reference types (string, byte[]), use local variable to avoid null check then null access
+            if (isReferenceType && !isNullable && !isRequired)
             {
-                // Nullable types: always use HasValue check (IsRequired ignored)
+                sb.StartNewBlock(); // Scope block to avoid name collisions
+                sb.AppendIndentedLine($"var instanceValue = {sourceVar};");
+                sb.AppendIndentedLine("if (instanceValue != null)");
+                sb.StartNewBlock();
+                valueExpr = "instanceValue";
+            }
+            else if (isNullable)
+            {
                 sb.AppendIndentedLine($"if ({sourceVar}.HasValue)");
                 sb.StartNewBlock();
+                valueExpr = $"{sourceVar}.Value";
             }
-            else if (isRequired)
+            else if (!isRequired)
             {
-                // Non-nullable + IsRequired: ALWAYS calculate size (no condition needed)
-                // Generate unconditional size calculation
-            }
-            else
-            {
-                // Non-nullable + NOT required: proto2 default value check
                 var defaultCheck = TypeMapping.GetDefaultValueCheck(typeName, sourceVar);
                 if (defaultCheck != null)
                 {
                     sb.AppendIndentedLine($"if ({defaultCheck})");
                     sb.StartNewBlock();
                 }
+                valueExpr = sourceVar;
+            }
+            else
+            {
+                valueExpr = sourceVar;
             }
 
             // Add tag size
             GenerateSizeTag(sb, fieldId, wireType, calculatorVar);
 
-            // Add value size
-            var valueExpr = isNullable ? $"{sourceVar}.Value" : sourceVar;
-            var sizeExpr = TypeMapping.GetSizeExpression(typeName, valueExpr, format, calculatorVar);
-            sb.AppendIndentedLine($"{sizeExpr};");
+            // For nullable bool, we need to calculate size for the actual value (could be true or false)
+            if (TypeMapping.IsBooleanType(typeName) && isNullable)
+            {
+                sb.AppendIndentedLine($"{calculatorVar}.WriteBool({valueExpr});");
+            }
+            else
+            {
+                var sizeExpr = TypeMapping.GetSizeExpression(typeName, valueExpr, format, calculatorVar);
+                sb.AppendIndentedLine($"{sizeExpr};");
+            }
 
-            // Close block if condition was generated
-            if (isNullable || (!isRequired && TypeMapping.GetDefaultValueCheck(typeName, sourceVar) != null))
+            // Close blocks
+            if (isReferenceType && !isNullable && !isRequired)
+            {
+                sb.EndBlock(); // if
+                sb.EndBlock(); // scope
+            }
+            else if (isNullable || (!isRequired && TypeMapping.GetDefaultValueCheck(typeName, sourceVar) != null))
             {
                 sb.EndBlock();
             }
