@@ -257,6 +257,9 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             _sb.AppendIndentedLine($"public static void Write{tupleInfo.SafeName}Content(ref {writerType} writer, {tupleInfo.OriginalTypeName} instance)");
             _sb.StartNewBlock();
 
+            // Add null check for tuples (reference types)
+            _sb.AppendIndentedLine("if (instance == null) return;");
+
             // Pre-declare WriteSizeCalculator for reuse across complex items (ref struct - stack allocated)
             // Only declare if there are complex types that need it
             bool hasComplexItems = tupleInfo.ItemTypes.Any(t => _typeHandler.AnalyzeType(t).Category == TypeCategory.Complex);
@@ -350,6 +353,9 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             _sb.AppendIndentedLine("[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
             _sb.AppendIndentedLine($"public static void Calculate{tupleInfo.SafeName}ContentSize(ref global::GProtobuf.Core.WriteSizeCalculator calculator, {tupleInfo.OriginalTypeName} instance)");
             _sb.StartNewBlock();
+
+            // Add null check for tuples (reference types)
+            _sb.AppendIndentedLine("if (instance == null) return;");
 
             // Pre-declare WriteSizeCalculator for reuse across complex items (ref struct - stack allocated)
             // Only declare if there are complex types that need it

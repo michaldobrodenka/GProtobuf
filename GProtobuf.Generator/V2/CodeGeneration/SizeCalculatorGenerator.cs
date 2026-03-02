@@ -154,6 +154,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine($"public static void Calculate{className}Size(ref global::GProtobuf.Core.WriteSizeCalculator calculator, global::{type.FullName} obj)");
             _sb.StartNewBlock();
 
+            // Add null check for reference types
+            if (!type.IsStruct)
+            {
+                _sb.AppendIndentedLine("if (obj == null) return;");
+            }
+
             bool isDerived = _registry.IsDerivedType(type.FullName);
 
             if (isDerived)
@@ -235,6 +241,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine($"public static void Calculate{className}ContentSize(ref global::GProtobuf.Core.WriteSizeCalculator calculator, global::{type.FullName} obj)");
             _sb.StartNewBlock();
 
+            // Add null check for reference types (structs and enums can't be null)
+            if (!type.IsStruct && !type.IsEnum)
+            {
+                _sb.AppendIndentedLine("if (obj == null) return;");
+            }
+
             // For enum types, calculate VarInt32 size
             if (type.IsEnum)
             {
@@ -297,6 +309,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine($"/// </summary>");
             _sb.AppendIndentedLine($"public static void Calculate{className}BaseFieldsOnlySize(ref global::GProtobuf.Core.WriteSizeCalculator calculator, global::{type.FullName} obj)");
             _sb.StartNewBlock();
+
+            // Add null check for reference types
+            if (!type.IsStruct)
+            {
+                _sb.AppendIndentedLine("if (obj == null) return;");
+            }
 
             // Calculate ONLY the fields defined in this base class, no switch/dispatch
             ForEachProtoMember(type.ProtoMembers, "obj", (member, src) => GenerateFieldSize(member, src));
@@ -442,6 +460,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.DecreaseIndent();
             _sb.StartNewBlock();
 
+            // Add null check for reference types
+            if (!type.IsStruct)
+            {
+                _sb.AppendIndentedLine("if (obj == null) return;");
+            }
+
             if (ownMembers.Count == 0)
             {
                 _sb.AppendIndentedLine("// No own fields (all inherited from base)");
@@ -483,6 +507,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine($"global::{type.FullName} obj)");
             _sb.DecreaseIndent();
             _sb.StartNewBlock();
+
+            // Add null check for reference types
+            if (!type.IsStruct)
+            {
+                _sb.AppendIndentedLine("if (obj == null) return;");
+            }
 
             // Tag size for ProtoInclude wrapper
             TagCodeHelper.AddTagSize(_sb, derivedInfo.ProtoInclude.FieldId, WireType.Len);

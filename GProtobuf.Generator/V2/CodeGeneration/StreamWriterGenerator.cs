@@ -148,6 +148,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine($"public static void Write{className}(ref {_writerType} writer, global::{type.FullName} instance)");
             _sb.StartNewBlock();
 
+            // Add null check for reference types (structs can't be null)
+            if (!type.IsStruct)
+            {
+                _sb.AppendIndentedLine("if (instance == null) return;");
+            }
+
             bool isDerived = _registry.IsDerivedType(type.FullName);
 
             if (isDerived)
@@ -191,6 +197,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         {
             _sb.AppendIndentedLine($"public static void Write{className}Content(ref {_writerType} writer, global::{type.FullName} instance)");
             _sb.StartNewBlock();
+
+            // Add null check for reference types (structs and enums can't be null)
+            if (!type.IsStruct && !type.IsEnum)
+            {
+                _sb.AppendIndentedLine("if (instance == null) return;");
+            }
 
             // For enum types, generate simple VarInt write
             if (type.IsEnum)
@@ -254,6 +266,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine($"/// </summary>");
             _sb.AppendIndentedLine($"public static void Write{className}BaseFieldsOnly(ref {_writerType} writer, global::{type.FullName} instance)");
             _sb.StartNewBlock();
+
+            // Add null check for reference types
+            if (!type.IsStruct)
+            {
+                _sb.AppendIndentedLine("if (instance == null) return;");
+            }
 
             // Write ONLY the fields defined in this base class, no switch/dispatch
             ForEachProtoMember(type.ProtoMembers, "instance", (member, src) => GenerateFieldWrite(member, src));
@@ -446,6 +464,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.DecreaseIndent();
             _sb.StartNewBlock();
 
+            // Add null check for reference types
+            if (!type.IsStruct)
+            {
+                _sb.AppendIndentedLine("if (instance == null) return;");
+            }
+
             if (ownMembers.Count == 0)
             {
                 _sb.AppendIndentedLine("// No own fields (all inherited from base)");
@@ -525,6 +549,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             _sb.AppendIndentedLine($"private static void Write{className}_As{ancestorClassName}(ref {_writerType} writer, global::{type.FullName} instance)");
             _sb.StartNewBlock();
+
+            // Add null check for reference types
+            if (!type.IsStruct)
+            {
+                _sb.AppendIndentedLine("if (instance == null) return;");
+            }
 
             // protobuf-net wire format:
             // 1. ProtoInclude wrapper(s) containing ONLY derived fields
