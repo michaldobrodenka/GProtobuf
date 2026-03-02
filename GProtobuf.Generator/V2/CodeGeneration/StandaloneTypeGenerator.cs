@@ -551,6 +551,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // Stream serializer
             _sb.AppendIndentedLine($"public static void {methodName}(Stream stream, {paramType} {varName})");
             _sb.StartNewBlock();
+            _sb.AppendIndentedLine($"if ({varName} == null) return;");
             _sb.AppendIndentedLine("var writer = new global::GProtobuf.Core.StreamWriter(stream, stackalloc byte[256]);");
             _sb.AppendIndentedLine($"foreach (var item in {varName})");
             _sb.StartNewBlock();
@@ -563,6 +564,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // IBufferWriter serializer
             _sb.AppendIndentedLine($"public static void {methodName}(IBufferWriter<byte> buffer, {paramType} {varName})");
             _sb.StartNewBlock();
+            _sb.AppendIndentedLine($"if ({varName} == null) return;");
             _sb.AppendIndentedLine("var writer = new global::GProtobuf.Core.BufferWriter(buffer);");
             _sb.AppendIndentedLine($"foreach (var item in {varName})");
             _sb.StartNewBlock();
@@ -637,6 +639,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // Stream serializer
             _sb.AppendIndentedLine($"public static void {methodName}(Stream stream, {paramType} dict)");
             _sb.StartNewBlock();
+            _sb.AppendIndentedLine("if (dict == null) return;");
             _sb.AppendIndentedLine("var writer = new global::GProtobuf.Core.StreamWriter(stream, stackalloc byte[256]);");
             _sb.AppendIndentedLine("foreach (var kvp in dict)");
             _sb.StartNewBlock();
@@ -649,6 +652,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // IBufferWriter serializer
             _sb.AppendIndentedLine($"public static void {methodName}(IBufferWriter<byte> buffer, {paramType} dict)");
             _sb.StartNewBlock();
+            _sb.AppendIndentedLine("if (dict == null) return;");
             _sb.AppendIndentedLine("var writer = new global::GProtobuf.Core.BufferWriter(buffer);");
             _sb.AppendIndentedLine("foreach (var kvp in dict)");
             _sb.StartNewBlock();
@@ -682,7 +686,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine("// Key (field 1)");
             GenerateTaggedFieldWrite(keyType, "kvp.Key", 1, info.KeyIsPrimitive, null, writerClassName);
 
-            // Write value (field 2)
+            // Write value (field 2) - only if not null (for reference types)
             _sb.AppendIndentedLine("// Value (field 2)");
             // For nested collections, pass the pre-calculated size variable to avoid duplicate calculation
             string? valuePrecalculatedSizeVar = null;
@@ -691,7 +695,25 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 var safeVarName = "kvp.Value".Replace(".", "_").Replace("[", "_").Replace("]", "_");
                 valuePrecalculatedSizeVar = $"_listContentSize_{safeVarName}_2";
             }
-            GenerateTaggedFieldWrite(valueType, "kvp.Value", 2, info.ValueIsPrimitive, info.NestedValueInfo, writerClassName, valuePrecalculatedSizeVar);
+
+            // Only add null check for collection types (List, Array, Dictionary) which are always reference types
+            // Custom types (classes/structs) - no null check, let it fail naturally if null
+            var isCollectionValue = info.NestedValueInfo != null &&
+                (info.NestedValueInfo.Kind == StandaloneTypeKind.List ||
+                 info.NestedValueInfo.Kind == StandaloneTypeKind.Array ||
+                 info.NestedValueInfo.Kind == StandaloneTypeKind.Dictionary);
+
+            if (isCollectionValue)
+            {
+                _sb.AppendIndentedLine("if (kvp.Value != null)");
+                _sb.StartNewBlock();
+                GenerateTaggedFieldWrite(valueType, "kvp.Value", 2, info.ValueIsPrimitive, info.NestedValueInfo, writerClassName, valuePrecalculatedSizeVar);
+                _sb.EndBlock();
+            }
+            else
+            {
+                GenerateTaggedFieldWrite(valueType, "kvp.Value", 2, info.ValueIsPrimitive, info.NestedValueInfo, writerClassName, valuePrecalculatedSizeVar);
+            }
         }
 
         private void GenerateSizeCalculation(string typeName, string varName, int fieldNumber, bool isPrimitive, StandaloneTypeInfo? nestedInfo, string resultVarName)
@@ -706,17 +728,17 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
             else if (nestedInfo != null && (nestedInfo.Kind == StandaloneTypeKind.List || nestedInfo.Kind == StandaloneTypeKind.Array))
             {
-                // Nested collection - generate loop for size calculation
+                // Nested collection (always reference type) - generate loop for size calculation with null check
                 GenerateNestedCollectionSizeCalculation(varName, fieldNumber, nestedInfo, tagSize, resultVarName);
             }
             else if (nestedInfo != null && nestedInfo.Kind == StandaloneTypeKind.Dictionary)
             {
-                // Nested dictionary - generate loop
+                // Nested dictionary (always reference type) - generate loop with null check
                 GenerateNestedDictionarySizeCalculation(varName, fieldNumber, nestedInfo, tagSize, resultVarName);
             }
             else
             {
-                // Complex type - use WriteSizeCalculator
+                // Custom type (class or struct) - no null check, let it fail naturally if null class is passed
                 var className = TypeNameHelper.GetClassName(typeName);
                 var sizeCalcClass = NamespaceHelper.GetSizeCalculatorsClass(typeName, _registry);
                 var safeVarName = varName.Replace(".", "_").Replace("[", "_").Replace("]", "_");
@@ -731,18 +753,23 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var elementType = nestedInfo.ElementType!;
             var safeVarName = varName.Replace(".", "_").Replace("[", "_").Replace("]", "_");
 
+            // Initialize size to 0, then calculate only if not null
+            _sb.AppendIndentedLine($"var _listContentSize_{safeVarName}_{fieldNumber} = 0;");
+            _sb.AppendIndentedLine($"if ({varName} != null)");
+            _sb.StartNewBlock();
+
             if (nestedInfo.ElementIsPrimitive)
             {
                 if (nestedInfo.ElementIsEnum)
                 {
                     // For enum elements, calculate varint size
-                    _sb.AppendIndentedLine($"var _listContentSize_{safeVarName}_{fieldNumber} = {varName}.Sum(x => 1 + global::GProtobuf.Core.Utils.GetVarintSize((uint)(int)x));");
+                    _sb.AppendIndentedLine($"_listContentSize_{safeVarName}_{fieldNumber} = {varName}.Sum(x => 1 + global::GProtobuf.Core.Utils.GetVarintSize((uint)(int)x));");
                 }
                 else
                 {
                     // For primitive elements, use LINQ (no ref params needed)
                     var elemSize = GetPrimitiveSizeExpression(elementType, "x");
-                    _sb.AppendIndentedLine($"var _listContentSize_{safeVarName}_{fieldNumber} = {varName}.Sum(x => 1 + {elemSize});");
+                    _sb.AppendIndentedLine($"_listContentSize_{safeVarName}_{fieldNumber} = {varName}.Sum(x => 1 + {elemSize});");
                 }
             }
             else
@@ -750,7 +777,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 // For complex elements, generate loop with WriteSizeCalculator
                 var className = TypeNameHelper.GetClassName(elementType);
                 var sizeCalcClass = NamespaceHelper.GetSizeCalculatorsClass(elementType, _registry);
-                _sb.AppendIndentedLine($"var _listContentSize_{safeVarName}_{fieldNumber} = 0;");
                 _sb.AppendIndentedLine($"foreach (var _item_{safeVarName}_{fieldNumber} in {varName})");
                 _sb.StartNewBlock();
                 _sb.AppendIndentedLine($"var _itemCalc_{safeVarName}_{fieldNumber} = new global::GProtobuf.Core.WriteSizeCalculator();");
@@ -758,7 +784,10 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 _sb.AppendIndentedLine($"_listContentSize_{safeVarName}_{fieldNumber} += 1 + global::GProtobuf.Core.Utils.GetVarintSize((uint)_itemCalc_{safeVarName}_{fieldNumber}.Length) + _itemCalc_{safeVarName}_{fieldNumber}.Length;");
                 _sb.EndBlock();
             }
-            _sb.AppendIndentedLine($"var {resultVarName} = {tagSize} + global::GProtobuf.Core.Utils.GetVarintSize((uint)_listContentSize_{safeVarName}_{fieldNumber}) + _listContentSize_{safeVarName}_{fieldNumber};");
+
+            _sb.EndBlock(); // end if (varName != null)
+            // If null, resultVarName is 0 (field not written); otherwise include tag + length prefix + content
+            _sb.AppendIndentedLine($"var {resultVarName} = {varName} != null ? {tagSize} + global::GProtobuf.Core.Utils.GetVarintSize((uint)_listContentSize_{safeVarName}_{fieldNumber}) + _listContentSize_{safeVarName}_{fieldNumber} : 0;");
         }
 
         private void GenerateNestedDictionarySizeCalculation(string varName, int fieldNumber, StandaloneTypeInfo nestedInfo, int tagSize, string resultVarName)
@@ -767,7 +796,10 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var valueType = nestedInfo.ValueType!;
             var safeVarName = varName.Replace(".", "_").Replace("[", "_").Replace("]", "_");
 
+            // Initialize size to 0, then calculate only if not null
             _sb.AppendIndentedLine($"var _dictContentSize_{safeVarName}_{fieldNumber} = 0;");
+            _sb.AppendIndentedLine($"if ({varName} != null)");
+            _sb.StartNewBlock();
             _sb.AppendIndentedLine($"foreach (var _kvp_{safeVarName}_{fieldNumber} in {varName})");
             _sb.StartNewBlock();
 
@@ -778,8 +810,10 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             _sb.AppendIndentedLine($"var _innerEntrySize_{safeVarName}_{fieldNumber} = _innerKeySize_{safeVarName}_{fieldNumber} + _innerValueSize_{safeVarName}_{fieldNumber};");
             _sb.AppendIndentedLine($"_dictContentSize_{safeVarName}_{fieldNumber} += 1 + global::GProtobuf.Core.Utils.GetVarintSize((uint)_innerEntrySize_{safeVarName}_{fieldNumber}) + _innerEntrySize_{safeVarName}_{fieldNumber};");
-            _sb.EndBlock();
-            _sb.AppendIndentedLine($"var {resultVarName} = {tagSize} + global::GProtobuf.Core.Utils.GetVarintSize((uint)_dictContentSize_{safeVarName}_{fieldNumber}) + _dictContentSize_{safeVarName}_{fieldNumber};");
+            _sb.EndBlock(); // end foreach
+            _sb.EndBlock(); // end if (varName != null)
+            // If null, resultVarName is 0 (field not written); otherwise include tag + length prefix + content
+            _sb.AppendIndentedLine($"var {resultVarName} = {varName} != null ? {tagSize} + global::GProtobuf.Core.Utils.GetVarintSize((uint)_dictContentSize_{safeVarName}_{fieldNumber}) + _dictContentSize_{safeVarName}_{fieldNumber} : 0;");
         }
 
         private void GenerateTaggedFieldWrite(string typeName, string varName, int fieldNumber, bool isPrimitive, StandaloneTypeInfo? nestedInfo, string writerClassName, string? precalculatedListSizeVar = null)
@@ -954,9 +988,26 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             GenerateSizeCalculation(valueType, $"innerKvp_{fieldNumber}.Value", 2, nestedInfo.ValueIsPrimitive, nestedInfo.NestedValueInfo, $"innerValueSize2_{fieldNumber}");
             _sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)(innerKeySize2_{fieldNumber} + innerValueSize2_{fieldNumber}));");
 
-            // Write key and value
+            // Write key (always)
             GenerateTaggedFieldWrite(keyType, $"innerKvp_{fieldNumber}.Key", 1, nestedInfo.KeyIsPrimitive, null, writerClassName);
-            GenerateTaggedFieldWrite(valueType, $"innerKvp_{fieldNumber}.Value", 2, nestedInfo.ValueIsPrimitive, nestedInfo.NestedValueInfo, writerClassName);
+
+            // Only add null check for collection types (List, Array, Dictionary) which are always reference types
+            var isCollectionValue = nestedInfo.NestedValueInfo != null &&
+                (nestedInfo.NestedValueInfo.Kind == StandaloneTypeKind.List ||
+                 nestedInfo.NestedValueInfo.Kind == StandaloneTypeKind.Array ||
+                 nestedInfo.NestedValueInfo.Kind == StandaloneTypeKind.Dictionary);
+
+            if (isCollectionValue)
+            {
+                _sb.AppendIndentedLine($"if (innerKvp_{fieldNumber}.Value != null)");
+                _sb.StartNewBlock();
+                GenerateTaggedFieldWrite(valueType, $"innerKvp_{fieldNumber}.Value", 2, nestedInfo.ValueIsPrimitive, nestedInfo.NestedValueInfo, writerClassName);
+                _sb.EndBlock();
+            }
+            else
+            {
+                GenerateTaggedFieldWrite(valueType, $"innerKvp_{fieldNumber}.Value", 2, nestedInfo.ValueIsPrimitive, nestedInfo.NestedValueInfo, writerClassName);
+            }
             _sb.EndBlock();
         }
 

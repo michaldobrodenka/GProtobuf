@@ -179,7 +179,9 @@ namespace GProtobuf.Generator.V2.Handlers
             // Register tuple type
             var tupleInfo = _tupleRegistry.Register(tupleTypeName, itemTypes);
 
-            _sb.AppendIndentedLine($"if ({sourceVar} != null)");
+            _sb.StartNewBlock(); // Scope block to avoid name collisions
+            _sb.AppendIndentedLine($"var tupleValue = {sourceVar};");
+            _sb.AppendIndentedLine("if (tupleValue != null)");
             _sb.StartNewBlock();
 
             // Write tag for tuple field
@@ -187,13 +189,14 @@ namespace GProtobuf.Generator.V2.Handlers
 
             // Calculate tuple content size
             _sb.AppendIndentedLine("var tupleCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
-            _sb.AppendIndentedLine($"SizeCalculators.Calculate{tupleInfo.SafeName}ContentSize(ref tupleCalc, {sourceVar});");
+            _sb.AppendIndentedLine($"SizeCalculators.Calculate{tupleInfo.SafeName}ContentSize(ref tupleCalc, tupleValue);");
 
             // Write length and content
             _sb.AppendIndentedLine("writer.WriteVarUInt32((uint)tupleCalc.Length);");
-            _sb.AppendIndentedLine($"{writerClassName}.Write{tupleInfo.SafeName}Content(ref writer, {sourceVar});");
+            _sb.AppendIndentedLine($"{writerClassName}.Write{tupleInfo.SafeName}Content(ref writer, tupleValue);");
 
             _sb.EndBlock(); // if
+            _sb.EndBlock(); // scope
         }
 
         /// <summary>
@@ -215,9 +218,11 @@ namespace GProtobuf.Generator.V2.Handlers
             // Register tuple type
             var tupleInfo = _tupleRegistry.Register(tupleTypeName, itemTypes);
 
-            _sb.AppendIndentedLine($"if ({sourceVar} != null)");
+            _sb.StartNewBlock(); // Scope block to avoid name collisions
+            _sb.AppendIndentedLine($"var collection = {sourceVar};");
+            _sb.AppendIndentedLine("if (collection != null)");
             _sb.StartNewBlock();
-            _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
+            _sb.AppendIndentedLine("foreach (var item in collection)");
             _sb.StartNewBlock();
 
             // Write tag
@@ -233,6 +238,7 @@ namespace GProtobuf.Generator.V2.Handlers
 
             _sb.EndBlock(); // foreach
             _sb.EndBlock(); // if
+            _sb.EndBlock(); // scope
         }
 
         #endregion
@@ -258,7 +264,9 @@ namespace GProtobuf.Generator.V2.Handlers
             // Register tuple type
             var tupleInfo = _tupleRegistry.Register(tupleTypeName, itemTypes);
 
-            _sb.AppendIndentedLine($"if ({sourceVar} != null)");
+            _sb.StartNewBlock(); // Scope block to avoid name collisions
+            _sb.AppendIndentedLine($"var tupleValue = {sourceVar};");
+            _sb.AppendIndentedLine("if (tupleValue != null)");
             _sb.StartNewBlock();
 
             // Add tag size for the tuple field
@@ -266,13 +274,14 @@ namespace GProtobuf.Generator.V2.Handlers
 
             // Calculate tuple content size
             _sb.AppendIndentedLine("var tupleCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
-            _sb.AppendIndentedLine($"SizeCalculators.Calculate{tupleInfo.SafeName}ContentSize(ref tupleCalc, {sourceVar});");
+            _sb.AppendIndentedLine($"SizeCalculators.Calculate{tupleInfo.SafeName}ContentSize(ref tupleCalc, tupleValue);");
 
             // Add tuple length varint + content size
             _sb.AppendIndentedLine($"{calculatorVar}.WriteVarUInt32((uint)tupleCalc.Length);");
             _sb.AppendIndentedLine($"{calculatorVar}.AddByteLength(tupleCalc.Length);");
 
             _sb.EndBlock(); // if
+            _sb.EndBlock(); // scope
         }
 
         /// <summary>
@@ -294,9 +303,11 @@ namespace GProtobuf.Generator.V2.Handlers
             // Register tuple type
             var tupleInfo = _tupleRegistry.Register(tupleTypeName, itemTypes);
 
-            _sb.AppendIndentedLine($"if ({sourceVar} != null)");
+            _sb.StartNewBlock(); // Scope block to avoid name collisions
+            _sb.AppendIndentedLine($"var collection = {sourceVar};");
+            _sb.AppendIndentedLine("if (collection != null)");
             _sb.StartNewBlock();
-            _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
+            _sb.AppendIndentedLine("foreach (var item in collection)");
             _sb.StartNewBlock();
 
             // Add tag size
@@ -312,6 +323,7 @@ namespace GProtobuf.Generator.V2.Handlers
 
             _sb.EndBlock(); // foreach
             _sb.EndBlock(); // if
+            _sb.EndBlock(); // scope
         }
 
         #endregion

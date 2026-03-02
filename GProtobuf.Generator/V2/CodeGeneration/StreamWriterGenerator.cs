@@ -1062,28 +1062,34 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // Check if field is polymorphic (base type with ProtoIncludes)
             bool isPolymorphicField = _registry.IsPolymorphicField(member);
 
+            string localVar = sourceVar;
+
             if (!isNonNullableStruct)
             {
-                _sb.AppendIndentedLine($"if ({sourceVar} != null)");
+                _sb.StartNewBlock(); // Scope block to avoid name collisions
+                _sb.AppendIndentedLine($"var complexValue = {sourceVar};");
+                _sb.AppendIndentedLine("if (complexValue != null)");
                 _sb.StartNewBlock();
+                localVar = "complexValue";
             }
 
             if (isNestedDerivedType)
             {
-                GenerateNestedDerivedTypeWrite(member, sourceVar, typeName, typeDef);
+                GenerateNestedDerivedTypeWrite(member, localVar, typeName, typeDef);
             }
             else if (isPolymorphicField)
             {
-                GeneratePolymorphicFieldWrite(member, sourceVar, typeName, typeDef);
+                GeneratePolymorphicFieldWrite(member, localVar, typeName, typeDef);
             }
             else
             {
-                GenerateStandardComplexTypeWrite(member, sourceVar, typeName, typeDef);
+                GenerateStandardComplexTypeWrite(member, localVar, typeName, typeDef);
             }
 
             if (!isNonNullableStruct)
             {
-                _sb.EndBlock();
+                _sb.EndBlock(); // if
+                _sb.EndBlock(); // scope
             }
         }
 
@@ -1431,10 +1437,15 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var typeDef = _registry.GetByFullName(member.Type);
             bool isNonNullableStruct = typeDef != null && typeDef.IsStruct && !member.IsNullable;
 
+            string localVar = sourceVar;
+
             if (!isNonNullableStruct)
             {
-                _sb.AppendIndentedLine($"if ({sourceVar} != null)");
+                _sb.StartNewBlock(); // Scope block to avoid name collisions
+                _sb.AppendIndentedLine($"var complexValue = {sourceVar};");
+                _sb.AppendIndentedLine("if (complexValue != null)");
                 _sb.StartNewBlock();
+                localVar = "complexValue";
             }
 
             TagCodeHelper.AddTagSize(_sb, member.FieldId, WireType.Len, calculatorVar);
@@ -1443,7 +1454,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var lengthVar = isNonNullableStruct ? $"lengthBefore_{member.FieldId}" : "lengthBefore";
             var contentLengthVar = isNonNullableStruct ? $"contentLength_{member.FieldId}" : "contentLength";
 
-            string valueArg = GeneratorHelpers.GetNullableValueAccess(sourceVar, member, typeDef, _registry);
+            string valueArg = GeneratorHelpers.GetNullableValueAccess(localVar, member, typeDef, _registry);
 
             _sb.AppendIndentedLine($"var {lengthVar} = {calculatorVar}.Length;");
             _sb.AppendIndentedLine($"SizeCalculators.Calculate{typeName}ContentSize(ref {calculatorVar}, {valueArg});");
@@ -1452,7 +1463,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             if (!isNonNullableStruct)
             {
-                _sb.EndBlock();
+                _sb.EndBlock(); // if
+                _sb.EndBlock(); // scope
             }
         }
         #endregion

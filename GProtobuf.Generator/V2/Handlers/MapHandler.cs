@@ -469,21 +469,24 @@ namespace GProtobuf.Generator.V2.Handlers
             // Check if we should use virtual type
             var virtualInfo = RegisterIfNeeded(member);
 
-            _sb.AppendIndentedLine($"if ({sourceVar} != null)");
+            _sb.StartNewBlock(); // Scope block to avoid name collisions
+            _sb.AppendIndentedLine($"var map = {sourceVar};");
+            _sb.AppendIndentedLine("if (map != null)");
             _sb.StartNewBlock();
 
             if (virtualInfo != null)
             {
                 // Use virtual type writer
-                GenerateVirtualTypeWrite(sourceVar, virtualInfo, member);
+                GenerateVirtualTypeWrite("map", virtualInfo, member);
             }
             else
             {
                 // Use inline writing for simple types
-                GenerateInlineWrite(sourceVar, keyType, valueType, member);
+                GenerateInlineWrite("map", keyType, valueType, member);
             }
 
             _sb.EndBlock(); // if
+            _sb.EndBlock(); // scope
         }
 
         /// <summary>
@@ -733,21 +736,24 @@ namespace GProtobuf.Generator.V2.Handlers
             // Check if we should use virtual type
             var virtualInfo = RegisterIfNeeded(member);
 
-            _sb.AppendIndentedLine($"if ({sourceVar} != null)");
+            _sb.StartNewBlock(); // Scope block to avoid name collisions
+            _sb.AppendIndentedLine($"var map = {sourceVar};");
+            _sb.AppendIndentedLine("if (map != null)");
             _sb.StartNewBlock();
 
             if (virtualInfo != null)
             {
                 // Use virtual type size calculator
-                GenerateVirtualTypeSize(sourceVar, virtualInfo, member, calculatorVar);
+                GenerateVirtualTypeSize("map", virtualInfo, member, calculatorVar);
             }
             else
             {
                 // Use inline size calculation for simple types
-                GenerateInlineSize(sourceVar, valueType, member, calculatorVar);
+                GenerateInlineSize("map", valueType, member, calculatorVar);
             }
 
             _sb.EndBlock(); // if
+            _sb.EndBlock(); // scope
         }
 
         /// <summary>

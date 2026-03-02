@@ -643,19 +643,28 @@ namespace GProtobuf.Generator.V2.Handlers
             }
             else if (isNullable)
             {
-                sb.AppendIndentedLine($"if ({sourceVar}.HasValue)");
+                sb.StartNewBlock(); // Scope block to avoid name collisions
+                sb.AppendIndentedLine($"var instanceValue = {sourceVar};");
+                sb.AppendIndentedLine("if (instanceValue.HasValue)");
                 sb.StartNewBlock();
-                valueExpr = $"{sourceVar}.Value";
+                valueExpr = "instanceValue.Value";
             }
             else if (!isRequired)
             {
                 var defaultCheck = TypeMapping.GetDefaultValueCheck(typeName, sourceVar);
                 if (defaultCheck != null)
                 {
-                    sb.AppendIndentedLine($"if ({defaultCheck})");
+                    sb.StartNewBlock(); // Scope block to avoid name collisions
+                    sb.AppendIndentedLine($"var instanceValue = {sourceVar};");
+                    var localDefaultCheck = TypeMapping.GetDefaultValueCheck(typeName, "instanceValue");
+                    sb.AppendIndentedLine($"if ({localDefaultCheck})");
                     sb.StartNewBlock();
+                    valueExpr = "instanceValue";
                 }
-                valueExpr = sourceVar;
+                else
+                {
+                    valueExpr = sourceVar;
+                }
             }
             else
             {
@@ -682,9 +691,15 @@ namespace GProtobuf.Generator.V2.Handlers
                 sb.EndBlock(); // if
                 sb.EndBlock(); // scope
             }
-            else if (isNullable || (!isRequired && TypeMapping.GetDefaultValueCheck(typeName, sourceVar) != null))
+            else if (isNullable)
             {
-                sb.EndBlock();
+                sb.EndBlock(); // if
+                sb.EndBlock(); // scope
+            }
+            else if (!isRequired && TypeMapping.GetDefaultValueCheck(typeName, sourceVar) != null)
+            {
+                sb.EndBlock(); // if
+                sb.EndBlock(); // scope
             }
         }
 
@@ -699,7 +714,9 @@ namespace GProtobuf.Generator.V2.Handlers
             int fieldId,
             string writerVar = "writer")
         {
-            sb.AppendIndentedLine($"if ({sourceVar} != null)");
+            sb.StartNewBlock(); // Scope block to avoid name collisions
+            sb.AppendIndentedLine($"var collection = {sourceVar};");
+            sb.AppendIndentedLine("if (collection != null)");
             sb.StartNewBlock();
 
             // Write Len tag
@@ -708,7 +725,7 @@ namespace GProtobuf.Generator.V2.Handlers
             // Calculate packed size first
             sb.AppendIndentedLine($"var calculator = new global::GProtobuf.Core.WriteSizeCalculator();");
             var elementSizeExpr = TypeMapping.GetElementSizeExpression(elementTypeName, "item", format, "calculator");
-            sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
+            sb.AppendIndentedLine("foreach (var item in collection)");
             sb.StartNewBlock();
             sb.AppendIndentedLine($"{elementSizeExpr};");
             sb.EndBlock();
@@ -718,12 +735,13 @@ namespace GProtobuf.Generator.V2.Handlers
 
             // Write elements
             var elementWriteExpr = TypeMapping.GetElementWriteExpression(elementTypeName, "item", format, writerVar);
-            sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
+            sb.AppendIndentedLine("foreach (var item in collection)");
             sb.StartNewBlock();
             sb.AppendIndentedLine($"{elementWriteExpr};");
             sb.EndBlock();
 
-            sb.EndBlock();
+            sb.EndBlock(); // if
+            sb.EndBlock(); // scope
         }
 
         /// <summary>
@@ -746,9 +764,11 @@ namespace GProtobuf.Generator.V2.Handlers
             // For enums, use VarInt wire type; otherwise use TypeMapping
             var wireType = isEnum ? WireType.VarInt : TypeMapping.GetWireType(elementTypeName, format);
 
-            sb.AppendIndentedLine($"if ({sourceVar} != null)");
+            sb.StartNewBlock(); // Scope block to avoid name collisions
+            sb.AppendIndentedLine($"var collection = {sourceVar};");
+            sb.AppendIndentedLine("if (collection != null)");
             sb.StartNewBlock();
-            sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
+            sb.AppendIndentedLine("foreach (var item in collection)");
             sb.StartNewBlock();
 
             // Add null validation for string and byte[] (Level200 compatibility)
@@ -779,8 +799,9 @@ namespace GProtobuf.Generator.V2.Handlers
                 sb.AppendIndentedLine($"{elementWriteExpr};");
             }
 
-            sb.EndBlock();
-            sb.EndBlock();
+            sb.EndBlock(); // foreach
+            sb.EndBlock(); // if
+            sb.EndBlock(); // scope
         }
 
         #endregion
@@ -818,19 +839,28 @@ namespace GProtobuf.Generator.V2.Handlers
             }
             else if (isNullable)
             {
-                sb.AppendIndentedLine($"if ({sourceVar}.HasValue)");
+                sb.StartNewBlock(); // Scope block to avoid name collisions
+                sb.AppendIndentedLine($"var instanceValue = {sourceVar};");
+                sb.AppendIndentedLine("if (instanceValue.HasValue)");
                 sb.StartNewBlock();
-                valueExpr = $"{sourceVar}.Value";
+                valueExpr = "instanceValue.Value";
             }
             else if (!isRequired)
             {
                 var defaultCheck = TypeMapping.GetDefaultValueCheck(typeName, sourceVar);
                 if (defaultCheck != null)
                 {
-                    sb.AppendIndentedLine($"if ({defaultCheck})");
+                    sb.StartNewBlock(); // Scope block to avoid name collisions
+                    sb.AppendIndentedLine($"var instanceValue = {sourceVar};");
+                    var localDefaultCheck = TypeMapping.GetDefaultValueCheck(typeName, "instanceValue");
+                    sb.AppendIndentedLine($"if ({localDefaultCheck})");
                     sb.StartNewBlock();
+                    valueExpr = "instanceValue";
                 }
-                valueExpr = sourceVar;
+                else
+                {
+                    valueExpr = sourceVar;
+                }
             }
             else
             {
@@ -857,9 +887,15 @@ namespace GProtobuf.Generator.V2.Handlers
                 sb.EndBlock(); // if
                 sb.EndBlock(); // scope
             }
-            else if (isNullable || (!isRequired && TypeMapping.GetDefaultValueCheck(typeName, sourceVar) != null))
+            else if (isNullable)
             {
-                sb.EndBlock();
+                sb.EndBlock(); // if
+                sb.EndBlock(); // scope
+            }
+            else if (!isRequired && TypeMapping.GetDefaultValueCheck(typeName, sourceVar) != null)
+            {
+                sb.EndBlock(); // if
+                sb.EndBlock(); // scope
             }
         }
 
@@ -874,7 +910,9 @@ namespace GProtobuf.Generator.V2.Handlers
             int fieldId,
             string calculatorVar = "calculator")
         {
-            sb.AppendIndentedLine($"if ({sourceVar} != null)");
+            sb.StartNewBlock(); // Scope block to avoid name collisions
+            sb.AppendIndentedLine($"var collection = {sourceVar};");
+            sb.AppendIndentedLine("if (collection != null)");
             sb.StartNewBlock();
 
             // Add Len tag size
@@ -883,7 +921,7 @@ namespace GProtobuf.Generator.V2.Handlers
             // Calculate packed content size
             sb.AppendIndentedLine($"var tempCalculator = new global::GProtobuf.Core.WriteSizeCalculator();");
             var elementSizeExpr = TypeMapping.GetElementSizeExpression(elementTypeName, "item", format, "tempCalculator");
-            sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
+            sb.AppendIndentedLine("foreach (var item in collection)");
             sb.StartNewBlock();
             sb.AppendIndentedLine($"{elementSizeExpr};");
             sb.EndBlock();
@@ -892,7 +930,8 @@ namespace GProtobuf.Generator.V2.Handlers
             sb.AppendIndentedLine($"{calculatorVar}.WriteVarUInt32((uint)tempCalculator.Length);");
             sb.AppendIndentedLine($"{calculatorVar}.AddByteLength(tempCalculator.Length);");
 
-            sb.EndBlock();
+            sb.EndBlock(); // if
+            sb.EndBlock(); // scope
         }
 
         /// <summary>
@@ -914,9 +953,11 @@ namespace GProtobuf.Generator.V2.Handlers
             // For enums, use VarInt wire type; otherwise use TypeMapping
             var wireType = isEnum ? WireType.VarInt : TypeMapping.GetWireType(elementTypeName, format);
 
-            sb.AppendIndentedLine($"if ({sourceVar} != null)");
+            sb.StartNewBlock(); // Scope block to avoid name collisions
+            sb.AppendIndentedLine($"var collection = {sourceVar};");
+            sb.AppendIndentedLine("if (collection != null)");
             sb.StartNewBlock();
-            sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
+            sb.AppendIndentedLine("foreach (var item in collection)");
             sb.StartNewBlock();
 
             // Add null validation for string and byte[] (Level200 compatibility)
@@ -947,8 +988,9 @@ namespace GProtobuf.Generator.V2.Handlers
                 sb.AppendIndentedLine($"{elementSizeExpr};");
             }
 
-            sb.EndBlock();
-            sb.EndBlock();
+            sb.EndBlock(); // foreach
+            sb.EndBlock(); // if
+            sb.EndBlock(); // scope
         }
 
         #endregion

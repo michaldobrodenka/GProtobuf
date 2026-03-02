@@ -30,9 +30,11 @@ namespace GProtobuf.Generator.V2.Handlers
             string elementClassName,
             string writerClassName = "StreamWriters")
         {
-            _sb.AppendIndentedLine($"if ({sourceVar} != null)");
+            _sb.StartNewBlock(); // Scope block to avoid name collisions
+            _sb.AppendIndentedLine($"var collection = {sourceVar};");
+            _sb.AppendIndentedLine("if (collection != null)");
             _sb.StartNewBlock();
-            _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
+            _sb.AppendIndentedLine("foreach (var item in collection)");
             _sb.StartNewBlock();
 
             // Check if element is a simple BCL type
@@ -112,6 +114,7 @@ namespace GProtobuf.Generator.V2.Handlers
 
             _sb.EndBlock(); // foreach
             _sb.EndBlock(); // if
+            _sb.EndBlock(); // scope
         }
 
         #endregion
@@ -304,9 +307,11 @@ namespace GProtobuf.Generator.V2.Handlers
             string elementClassName,
             string calculatorVar = "calculator")
         {
-            _sb.AppendIndentedLine($"if ({sourceVar} != null)");
+            _sb.StartNewBlock(); // Scope block to avoid name collisions
+            _sb.AppendIndentedLine($"var collection = {sourceVar};");
+            _sb.AppendIndentedLine("if (collection != null)");
             _sb.StartNewBlock();
-            _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
+            _sb.AppendIndentedLine("foreach (var item in collection)");
             _sb.StartNewBlock();
 
             // Check if element is a simple BCL type
@@ -380,6 +385,7 @@ namespace GProtobuf.Generator.V2.Handlers
 
             _sb.EndBlock(); // foreach
             _sb.EndBlock(); // if
+            _sb.EndBlock(); // scope
         }
 
         #endregion
