@@ -162,6 +162,7 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                         bool generateStreamReader = true;
                         bool generateStreamWriter = true;
                         bool generateBufferWriter = true;
+                        bool generateOnePassStreamWriter = false;
 
                         foreach (var namedArg in attr.NamedArguments)
                         {
@@ -179,6 +180,9 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                                 case "GenerateBufferWriter":
                                     generateBufferWriter = namedArg.Value.Value is bool v4 && v4;
                                     break;
+                                case "GenerateOnePassStreamWriter":
+                                    generateOnePassStreamWriter = namedArg.Value.Value is bool v5 && v5;
+                                    break;
                             }
                         }
 
@@ -187,7 +191,8 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                             GenerateSpanReader = generateSpanReader,
                             GenerateStreamReader = generateStreamReader,
                             GenerateStreamWriter = generateStreamWriter,
-                            GenerateBufferWriter = generateBufferWriter
+                            GenerateBufferWriter = generateBufferWriter,
+                            GenerateOnePassStreamWriter = generateOnePassStreamWriter
                         };
                     }
                 }
@@ -229,7 +234,7 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                         new DiagnosticDescriptor(
                             "GPROTO001",
                             "GProtobuf Generator Started",
-                            "GProtobuf generator started with {0} enum types, {1} type definitions, {2} standalone types. Options: SpanReader={3}, StreamReader={4}, StreamWriter={5}, BufferWriter={6}",
+                            "GProtobuf generator started with {0} enum types, {1} type definitions, {2} standalone types. Options: SpanReader={3}, StreamReader={4}, StreamWriter={5}, BufferWriter={6}, OnePassStreamWriter={7}",
                             "GProtobuf",
                             DiagnosticSeverity.Info,
                             true),
@@ -240,7 +245,8 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                         options.GenerateSpanReader,
                         options.GenerateStreamReader,
                         options.GenerateStreamWriter,
-                        options.GenerateBufferWriter));
+                        options.GenerateBufferWriter,
+                        options.GenerateOnePassStreamWriter));
 
                     var objectTree = new ObjectTreeV2(enumTypes, compilation, standaloneTypes, options);
                     foreach (var (namespaceName, typeDefinition) in typeDefinitions)

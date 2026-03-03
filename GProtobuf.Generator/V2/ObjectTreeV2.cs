@@ -238,7 +238,20 @@ namespace GProtobuf.Generator.V2
                     }
                 }
 
-                // Generate SizeCalculators class - needed when any writer is enabled
+                // Generate OnePassStreamWriters class (uses global registries for deduplication)
+                if (_options.GenerateOnePassStreamWriter)
+                {
+                    try
+                    {
+                        new OnePassStreamWriterGenerator(sb, _registry, globalMapRegistry, globalTupleRegistry).GenerateAll(types, ns);
+                    }
+                    catch (System.Exception ex)
+                    {
+                        throw new System.Exception($"Error in OnePassStreamWriterGenerator for namespace '{ns}'", ex);
+                    }
+                }
+
+                // Generate SizeCalculators class - needed when any writer is enabled (except OnePass which doesn't need size calculation)
                 if (_options.GenerateStreamWriter || _options.GenerateBufferWriter)
                 {
                     try
@@ -440,7 +453,7 @@ namespace GProtobuf.Generator.V2
         private void GenerateSerializers(StringBuilderWithIndent sb, List<TypeDefinition> types, List<StandaloneTypeInfo> standaloneTypes)
         {
             // Only generate if at least one writer is enabled
-            if (!_options.GenerateStreamWriter && !_options.GenerateBufferWriter)
+            if (!_options.GenerateStreamWriter && !_options.GenerateBufferWriter && !_options.GenerateOnePassStreamWriter)
             {
                 return;
             }
@@ -471,6 +484,18 @@ namespace GProtobuf.Generator.V2
                     sb.StartNewBlock();
                     sb.AppendIndentedLine("var writer = new global::GProtobuf.Core.BufferWriter(buffer);");
                     sb.AppendIndentedLine($"BufferWriters.Write{className}(ref writer, obj);");
+                    sb.AppendIndentedLine("writer.Flush();");
+                    sb.EndBlock();
+                    sb.AppendNewLine();
+                }
+
+                if (_options.GenerateOnePassStreamWriter)
+                {
+                    // OnePassStreamWriter serializer (one-pass approach using memory pooling)
+                    sb.AppendIndentedLine($"public static void Serialize{className}OnePass(Stream stream, global::{type.FullName} obj)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine("var writer = new global::GProtobuf.Core.OnePassStreamWriter(stream, stackalloc byte[256]);");
+                    sb.AppendIndentedLine($"OnePassStreamWriters.Write{className}(ref writer, obj);");
                     sb.AppendIndentedLine("writer.Flush();");
                     sb.EndBlock();
                     sb.AppendNewLine();

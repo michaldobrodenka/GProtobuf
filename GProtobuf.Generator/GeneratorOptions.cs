@@ -27,6 +27,11 @@ namespace GProtobuf.Generator
         public bool GenerateBufferWriter { get; init; } = true;
 
         /// <summary>
+        /// Enable generation of OnePassStreamWriter-based serialization methods.
+        /// </summary>
+        public bool GenerateOnePassStreamWriter { get; init; } = false;
+
+        /// <summary>
         /// Default options with all generators enabled.
         /// </summary>
         public static GeneratorOptions Default { get; } = new();
