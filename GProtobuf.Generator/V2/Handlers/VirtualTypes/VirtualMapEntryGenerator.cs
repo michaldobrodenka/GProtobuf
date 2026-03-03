@@ -19,6 +19,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         private readonly string _readerType;
         private readonly string _readerClassName;
         private readonly bool _isStreamReader;
+        private readonly bool _isOnePassWriter;
 
         public VirtualMapEntryGenerator(StringBuilderWithIndent sb, VirtualMapTypeRegistry registry, TypeRegistry typeRegistry = null)
             : this(sb, registry, typeRegistry, "Stream")
@@ -35,6 +36,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             _readerType = $"global::GProtobuf.Core.{writerKind}Reader";
             _readerClassName = $"{writerKind}Readers";
             _isStreamReader = writerKind == "Stream";
+            _isOnePassWriter = writerKind == "OnePassStream";
         }
 
         /// <summary>
@@ -1723,13 +1725,24 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 // Handle nullable types - append .Value for Content method calls
                 var valueAccess = GetNullableValueAccess(sourceVar, typeName);
 
-                // Calculate size
-                _sb.AppendIndentedLine($"var writeCalc{fieldId} = new global::GProtobuf.Core.WriteSizeCalculator();");
-                _sb.AppendIndentedLine($"SizeCalculators.Calculate{className}ContentSize(ref writeCalc{fieldId}, {valueAccess});");
-                _sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)writeCalc{fieldId}.Length);");
+                // For OnePassStreamWriter, tuple writers don't have Content suffix and use BeginSubMessage/EndSubMessage
+                if (_isOnePassWriter)
+                {
+                    // OnePass mode uses BeginSubMessage/EndSubMessage instead of size prefix
+                    _sb.AppendIndentedLine("writer.BeginSubMessage();");
+                    _sb.AppendIndentedLine($"{writersClass}.Write{className}(ref writer, {valueAccess});");
+                    _sb.AppendIndentedLine("writer.EndSubMessage();");
+                }
+                else
+                {
+                    // Calculate size
+                    _sb.AppendIndentedLine($"var writeCalc{fieldId} = new global::GProtobuf.Core.WriteSizeCalculator();");
+                    _sb.AppendIndentedLine($"SizeCalculators.Calculate{className}ContentSize(ref writeCalc{fieldId}, {valueAccess});");
+                    _sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)writeCalc{fieldId}.Length);");
 
-                // Write content
-                _sb.AppendIndentedLine($"{writersClass}.Write{className}Content(ref writer, {valueAccess});");
+                    // Write content
+                    _sb.AppendIndentedLine($"{writersClass}.Write{className}Content(ref writer, {valueAccess});");
+                }
                 return;
             }
 
@@ -1997,6 +2010,22 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             return false;
         }
 
+        /// <summary>
+        /// Checks if a type name is a C# keyword type (int, string, bool, etc.)
+        /// These should not be prefixed with global::
+        /// </summary>
+        private static bool IsCSharpKeywordType(string typeName)
+        {
+            return typeName switch
+            {
+                "int" or "long" or "short" or "sbyte" => true,
+                "uint" or "ulong" or "ushort" or "byte" => true,
+                "float" or "double" or "decimal" => true,
+                "bool" or "string" or "char" or "object" => true,
+                _ => false
+            };
+        }
+
         private static string GetFullTypeName(string typeName, TypeAnalysisInfo typeInfo)
         {
             // Null/empty check - prevent generating invalid generic types like HashSet<>
@@ -2064,6 +2093,26 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             {
                 var elemType = GetFullTypeName(typeInfo.CollectionElementType, typeInfo.CollectionElementTypeInfo);
                 return $"{elemType}[]";
+            }
+
+            // Fallback check for array types not properly flagged in typeInfo
+            if (typeName.EndsWith("[]"))
+            {
+                var elementTypeName = typeName.Substring(0, typeName.Length - 2);
+                // Check if element type is a primitive/keyword type
+                if (TypeMapping.IsSimpleType(elementTypeName) || IsCSharpKeywordType(elementTypeName))
+                {
+                    var shortTypeName = TypeMapping.GetShortTypeName(elementTypeName);
+                    return $"{shortTypeName}[]";
+                }
+                // Non-primitive array element
+                return $"global::{elementTypeName}[]";
+            }
+
+            // Check if typeName is a primitive type that shouldn't have global:: prefix
+            if (TypeMapping.IsSimpleType(typeName) || IsCSharpKeywordType(typeName))
+            {
+                return TypeMapping.GetShortTypeName(typeName);
             }
 
             return $"global::{typeName}";

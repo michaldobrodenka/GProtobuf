@@ -181,12 +181,22 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             for (int i = 0; i < tupleInfo.ItemTypes.Count; i++)
             {
                 var elementType = tupleInfo.ItemTypes[i];
-                var itemAccess = $"value.Item{i + 1}";
+                var itemAccess = GetTupleItemAccessor("value", i);
                 var fieldId = i + 1;
 
                 if (_primitiveHandler.CanHandle(elementType))
                 {
                     _primitiveHandler.GenerateWrite(_sb, itemAccess, elementType, DataFormat.Default, fieldId, false, false);
+                }
+                else if (TupleHandler.IsTupleType(elementType))
+                {
+                    // Nested tuple - register and call Write method (no Content suffix for tuples)
+                    var nestedItemTypes = TupleHandler.ParseTupleTypes(elementType);
+                    var nestedTupleInfo = _virtualTupleRegistry.Register(elementType, nestedItemTypes);
+                    TagCodeHelper.WriteTag(_sb, fieldId, WireType.Len);
+                    _sb.AppendIndentedLine("writer.BeginSubMessage();");
+                    _sb.AppendIndentedLine($"Write{nestedTupleInfo.SafeName}(ref writer, {itemAccess});");
+                    _sb.AppendIndentedLine("writer.EndSubMessage();");
                 }
                 else
                 {
@@ -684,6 +694,31 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             // For non-primitive types, use global:: prefix
             return $"global::{typeName}";
+        }
+
+        /// <summary>
+        /// Gets the correct accessor for a tuple item by index.
+        /// For items 0-6, returns "variable.Item1" through "variable.Item7".
+        /// For items 7+, uses Rest property: "variable.Rest.Item1", "variable.Rest.Rest.Item1", etc.
+        /// </summary>
+        private static string GetTupleItemAccessor(string variableName, int itemIndex)
+        {
+            // Items 0-6 use Item1-Item7
+            if (itemIndex < 7)
+            {
+                return $"{variableName}.Item{itemIndex + 1}";
+            }
+
+            // Items 7+ use Rest.ItemX, Rest.Rest.ItemX, etc.
+            var restDepth = (itemIndex - 7) / 7 + 1;
+            var itemInRest = (itemIndex - 7) % 7 + 1;
+
+            var accessor = variableName;
+            for (int i = 0; i < restDepth; i++)
+            {
+                accessor += ".Rest";
+            }
+            return $"{accessor}.Item{itemInRest}";
         }
 
         #endregion
