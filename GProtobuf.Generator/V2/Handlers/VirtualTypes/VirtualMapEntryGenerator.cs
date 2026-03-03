@@ -1458,9 +1458,6 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
 
             var (_, tagBytes) = TypeMapping.PrecomputeTagBytes(fieldId, WireType.Len);
 
-            _sb.AppendIndentedLine($"if ({sourceVar} != null)");
-            _sb.StartNewBlock();
-
             // REPEATED format (standard protobuf): each entry gets its own field tag
             // Format: [tag][entry1_len][entry1][tag][entry2_len][entry2]...
             _sb.AppendIndentedLine("// Nested dictionary - REPEATED format (standard protobuf): each entry gets its own tag");
@@ -1471,8 +1468,6 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             _sb.AppendIndentedLine($"SizeCalculators.Calculate{mapEntryTypeName}Size(ref innerEntryCalc, kvp.Key, kvp.Value);");
             _sb.AppendIndentedLine($"{calcVar}.WriteVarUInt32((uint)innerEntryCalc.Length);  // entry length prefix");
             _sb.AppendIndentedLine($"{calcVar}.AddByteLength(innerEntryCalc.Length);         // entry content");
-            _sb.EndBlock();
-
             _sb.EndBlock();
         }
 
@@ -1489,9 +1484,6 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 _sb.AppendIndentedLine($"// Skipping size calculation for this collection field");
                 return;
             }
-
-            _sb.AppendIndentedLine($"if ({sourceVar} != null)");
-            _sb.StartNewBlock();
 
             if (elemInfo.IsDictionary)
             {
@@ -1594,8 +1586,6 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 _sb.EndBlock();
                 _sb.EndBlock();
             }
-
-            _sb.EndBlock();
         }
 
         private void GenerateFieldWrite(string sourceVar, string typeName, TypeAnalysisInfo typeInfo,
@@ -1724,9 +1714,6 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             var mapEntryTypeName = typeInfo.MapEntryTypeName;
             var (bytesString, _) = TypeMapping.PrecomputeTagBytes(fieldId, WireType.Len);
 
-            _sb.AppendIndentedLine($"if ({sourceVar} != null)");
-            _sb.StartNewBlock();
-
             // REPEATED format (standard protobuf): each entry gets its own field tag
             // Format: [tag][entry1_len][entry1][tag][entry2_len][entry2]...
             _sb.AppendIndentedLine("// Nested dictionary - REPEATED format (standard protobuf): each entry gets its own tag");
@@ -1734,8 +1721,6 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             _sb.StartNewBlock();
             _sb.AppendIndentedLine($"writer.WriteSingleByte({bytesString}); // tag for each nested entry");
             _sb.AppendIndentedLine($"{_writerClassName}.Write{mapEntryTypeName}(ref writer, kvp.Key, kvp.Value);");
-            _sb.EndBlock();
-
             _sb.EndBlock();
         }
 
@@ -1752,9 +1737,6 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 _sb.AppendIndentedLine($"// Skipping write for this collection field");
                 return;
             }
-
-            _sb.AppendIndentedLine($"if ({sourceVar} != null)");
-            _sb.StartNewBlock();
 
             if (elemInfo.IsDictionary)
             {
@@ -1863,8 +1845,6 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 _sb.EndBlock();
                 _sb.EndBlock();
             }
-
-            _sb.EndBlock();
         }
 
         #endregion
