@@ -398,13 +398,13 @@ namespace GProtobuf.Generator.WireFormat
                 "System.Int16" => format switch
                 {
                     DataFormat.FixedSize => $"{writerVar}.WriteFixedInt32({valueExpr})",
-                    DataFormat.ZigZag => $"{writerVar}.WriteInt16({valueExpr}, true)",
-                    _ => $"{writerVar}.WriteInt16({valueExpr}, false)"
+                    DataFormat.ZigZag => $"{writerVar}.WriteZigZag32({valueExpr})",
+                    _ => $"{writerVar}.WriteVarInt32({valueExpr})"
                 },
                 "System.SByte" => format switch
                 {
-                    DataFormat.ZigZag => $"{writerVar}.WriteSByte({valueExpr}, true)",
-                    _ => $"{writerVar}.WriteSByte({valueExpr}, false)"
+                    DataFormat.ZigZag => $"{writerVar}.WriteZigZag32({valueExpr})",
+                    _ => $"{writerVar}.WriteVarInt32({valueExpr})"
                 },
                 "System.UInt32" => format switch
                 {
@@ -463,13 +463,13 @@ namespace GProtobuf.Generator.WireFormat
                 "System.Int16" => format switch
                 {
                     DataFormat.FixedSize => $"{writerVar}.WriteFixedInt32({valueExpr})",
-                    DataFormat.ZigZag => $"{writerVar}.WriteInt16({valueExpr}, true)",
-                    _ => $"{writerVar}.WriteInt16({valueExpr}, false)"
+                    DataFormat.ZigZag => $"{writerVar}.WriteZigZag32({valueExpr})",
+                    _ => $"{writerVar}.WriteVarInt32({valueExpr})"
                 },
                 "System.SByte" => format switch
                 {
-                    DataFormat.ZigZag => $"{writerVar}.WriteSByte({valueExpr}, true)",
-                    _ => $"{writerVar}.WriteSByte({valueExpr}, false)"
+                    DataFormat.ZigZag => $"{writerVar}.WriteZigZag32({valueExpr})",
+                    _ => $"{writerVar}.WriteVarInt32({valueExpr})"
                 },
                 "System.UInt32" => format switch
                 {
@@ -530,13 +530,13 @@ namespace GProtobuf.Generator.WireFormat
                 "System.Int16" => format switch
                 {
                     DataFormat.FixedSize => $"{calculatorVar}.AddByteLength(4)",
-                    DataFormat.ZigZag => $"{calculatorVar}.WriteInt16({valueExpr}, true)",
-                    _ => $"{calculatorVar}.WriteInt16({valueExpr}, false)"
+                    DataFormat.ZigZag => $"{calculatorVar}.WriteZigZag32({valueExpr})",
+                    _ => $"{calculatorVar}.WriteVarInt32({valueExpr})"
                 },
                 "System.SByte" => format switch
                 {
-                    DataFormat.ZigZag => $"{calculatorVar}.WriteSByte({valueExpr}, true)",
-                    _ => $"{calculatorVar}.WriteSByte({valueExpr}, false)"
+                    DataFormat.ZigZag => $"{calculatorVar}.WriteZigZag32({valueExpr})",
+                    _ => $"{calculatorVar}.WriteVarInt32({valueExpr})"
                 },
                 "System.UInt32" => format switch
                 {
