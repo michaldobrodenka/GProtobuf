@@ -58,5 +58,32 @@ namespace GProtobuf.Generator.V2.Handlers.Core
             var (_, byteCount) = TypeMapping.PrecomputeTagBytes(fieldId, wireType);
             return byteCount;
         }
+
+        /// <summary>
+        /// Generates code to add combined tag + fixed value size to calculator.
+        /// Returns true if combined generation was used, false if caller should generate value size separately.
+        /// </summary>
+        public static bool TryAddCombinedTagAndValueSize(
+            StringBuilderWithIndent sb,
+            int fieldId,
+            WireType wireType,
+            string typeName,
+            DataFormat format,
+            string calculatorVar = "calculator")
+        {
+            var fixedValueSize = TypeMapping.GetFixedWireSize(typeName, format);
+            if (fixedValueSize < 0)
+            {
+                // Variable size - just add tag, caller handles value
+                AddTagSize(sb, fieldId, wireType, calculatorVar);
+                return false;
+            }
+
+            // Both tag and value are fixed size - combine them
+            var (_, tagByteCount) = TypeMapping.PrecomputeTagBytes(fieldId, wireType);
+            var totalSize = tagByteCount + fixedValueSize;
+            sb.AppendIndentedLine($"{calculatorVar}.AddByteLength({totalSize});");
+            return true;
+        }
     }
 }

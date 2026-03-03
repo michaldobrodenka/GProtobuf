@@ -867,18 +867,21 @@ namespace GProtobuf.Generator.V2.Handlers
                 valueExpr = sourceVar;
             }
 
-            // Add tag size
-            GenerateSizeTag(sb, fieldId, wireType, calculatorVar);
-
             // For nullable bool, we need to calculate size for the actual value (could be true or false)
             if (TypeMapping.IsBooleanType(typeName) && isNullable)
             {
+                GenerateSizeTag(sb, fieldId, wireType, calculatorVar);
                 sb.AppendIndentedLine($"{calculatorVar}.WriteBool({valueExpr});");
             }
             else
             {
-                var sizeExpr = TypeMapping.GetSizeExpression(typeName, valueExpr, format, calculatorVar);
-                sb.AppendIndentedLine($"{sizeExpr};");
+                // Try to combine tag + value size for fixed-size types (optimization)
+                if (!TagCodeHelper.TryAddCombinedTagAndValueSize(sb, fieldId, wireType, typeName, format, calculatorVar))
+                {
+                    // Variable size - tag was added, now add value size
+                    var sizeExpr = TypeMapping.GetSizeExpression(typeName, valueExpr, format, calculatorVar);
+                    sb.AppendIndentedLine($"{sizeExpr};");
+                }
             }
 
             // Close blocks
