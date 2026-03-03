@@ -282,6 +282,51 @@ namespace GProtobuf.Core
             return GetVarintSize(encoded);
         }
 
+        /// <summary>
+        /// Calculates the varint-encoded size for a signed 32-bit integer (with sign extension).
+        /// Negative values are sign-extended to 64-bit and take 10 bytes.
+        /// </summary>
+        /// <param name="value">Signed integer value.</param>
+        /// <returns>Size in bytes (1-5 for positive, 10 for negative).</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int GetSignedVarintSize(int value)
+        {
+            // Negative values are sign-extended to 64-bit (10 bytes)
+            if (value < 0) return 10;
+            return GetVarintSize((uint)value);
+        }
+
+        /// <summary>
+        /// Calculates the varint-encoded size for a signed 64-bit integer.
+        /// Negative values take up to 10 bytes due to sign extension.
+        /// </summary>
+        /// <param name="value">Signed long value.</param>
+        /// <returns>Size in bytes (1-10).</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int GetSignedVarintSize64(long value)
+        {
+            // Cast to ulong for proper size calculation
+            return GetVarintSize((ulong)value);
+        }
+
+        /// <summary>
+        /// Alias for GetVarintSize(ulong) for consistency in generated code.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int GetVarintSize64(ulong value)
+        {
+            return GetVarintSize(value);
+        }
+
+        /// <summary>
+        /// Alias for GetZigZagVarintSize(long) for consistency in generated code.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int GetZigZagVarintSize64(long value)
+        {
+            return GetZigZagVarintSize(value);
+        }
+
         #endregion
     }
 }

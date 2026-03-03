@@ -274,6 +274,70 @@ namespace GProtobuf.CrossTests
 
         #endregion
 
+        #region Null Serialization Tests
+
+        [Fact]
+        public void Test_SerializeDictionary_Null_ShouldNotThrow()
+        {
+            // Arrange: null dictionary
+            Dictionary<int, int> nullDict = null;
+
+            using var ms = new MemoryStream();
+
+            // Act & Assert: should not throw NullReferenceException
+            global::GProtobuf.Generated.Serialization.Serializers.SerializeDictionaryOfInt32AndInt32(ms, nullDict);
+
+            // Stream should be empty (nothing written for null)
+            Assert.Equal(0, ms.Length);
+        }
+
+        [Fact]
+        public void Test_SerializeDictionary_Null_StringString_ShouldNotThrow()
+        {
+            // Arrange: null dictionary
+            Dictionary<string, string> nullDict = null;
+
+            using var ms = new MemoryStream();
+
+            // Act & Assert: should not throw NullReferenceException
+            global::GProtobuf.Generated.Serialization.Serializers.SerializeDictionaryOfStringAndString(ms, nullDict);
+
+            // Stream should be empty (nothing written for null)
+            Assert.Equal(0, ms.Length);
+        }
+
+        [Fact]
+        public void Test_SerializeList_Null_ShouldNotThrow()
+        {
+            // Arrange: null list
+            List<int> nullList = null;
+
+            using var ms = new MemoryStream();
+
+            // Act & Assert: should not throw NullReferenceException
+            global::GProtobuf.Generated.Serialization.Serializers.SerializeListOfInt32(ms, nullList);
+
+            // Stream should be empty (nothing written for null)
+            Assert.Equal(0, ms.Length);
+        }
+
+        [Fact]
+        public void Test_SerializeArray_Null_ShouldNotThrow()
+        {
+            // Arrange: null array
+            int[] nullArray = null;
+
+            using var ms = new MemoryStream();
+
+            // Act & Assert: should not throw NullReferenceException
+            global::GProtobuf.Generated.Serialization.Serializers.SerializeArrayOfInt32(ms, nullArray);
+
+            // Stream should be empty (nothing written for null)
+            Assert.Equal(0, ms.Length);
+        }
+
+        #endregion
+
         #region Dictionary<int, int> Tests
 
         [Fact]
