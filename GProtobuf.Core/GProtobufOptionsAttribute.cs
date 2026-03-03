@@ -64,5 +64,20 @@ namespace GProtobuf.Core
         /// - BufferWriters.Write{Type}(ref BufferWriter writer, T obj) extension methods
         /// </remarks>
         public bool GenerateBufferWriter { get; set; } = true;
+
+        /// <summary>
+        /// Enable generation of OnePassStreamWriter-based serialization methods.
+        /// Default: false
+        /// </summary>
+        /// <remarks>
+        /// When enabled, generates:
+        /// - Serialize{Type}OnePass(Stream stream, T obj) methods
+        /// - OnePassStreamWriters.Write{Type}(ref OnePassStreamWriter writer, T obj) extension methods
+        ///
+        /// OnePassStreamWriter uses a different approach than StreamWriter:
+        /// - StreamWriter (2-pass): calculates size first, then writes data
+        /// - OnePassStreamWriter (1-pass): uses memory pooling for nested messages (BeginSubMessage/EndSubMessage)
+        /// </remarks>
+        public bool GenerateOnePassStreamWriter { get; set; } = false;
     }
 }
