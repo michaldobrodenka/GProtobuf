@@ -21,17 +21,25 @@ namespace GProtobuf.Generator.V2.CodeGeneration
     {
         private readonly StringBuilderWithIndent _sb;
         private readonly TypeRegistry _registry;
+        private readonly GeneratorOptions _options;
 
-        public StandaloneTypeGenerator(StringBuilderWithIndent sb, TypeRegistry registry)
+        public StandaloneTypeGenerator(StringBuilderWithIndent sb, TypeRegistry registry, GeneratorOptions options = null)
         {
             _sb = sb;
             _registry = registry;
+            _options = options ?? GeneratorOptions.Default;
         }
 
         #region Deserializers
 
         public void GenerateDeserializers(List<StandaloneTypeInfo> standaloneTypes)
         {
+            // Only generate if SpanReader is enabled (standalone deserializers use SpanReader)
+            if (!_options.GenerateSpanReader)
+            {
+                return;
+            }
+
             foreach (var standalone in standaloneTypes)
             {
                 GenerateDeserializer(standalone);
@@ -501,6 +509,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         public void GenerateSerializers(List<StandaloneTypeInfo> standaloneTypes)
         {
+            // Only generate if at least one writer is enabled
+            if (!_options.GenerateStreamWriter && !_options.GenerateBufferWriter)
+            {
+                return;
+            }
+
             foreach (var standalone in standaloneTypes)
             {
                 GenerateSerializer(standalone);
@@ -549,30 +563,36 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var elementType = info.ElementType!;
 
             // Stream serializer
-            _sb.AppendIndentedLine($"public static void {methodName}(Stream stream, {paramType} {varName})");
-            _sb.StartNewBlock();
-            _sb.AppendIndentedLine($"if ({varName} == null) return;");
-            _sb.AppendIndentedLine("var writer = new global::GProtobuf.Core.StreamWriter(stream, stackalloc byte[256]);");
-            _sb.AppendIndentedLine($"foreach (var item in {varName})");
-            _sb.StartNewBlock();
-            GenerateElementWrite(elementType, info.ElementIsPrimitive, info.ElementIsEnum, "item", "writer", false);
-            _sb.EndBlock();
-            _sb.AppendIndentedLine("writer.Flush();");
-            _sb.EndBlock();
-            _sb.AppendNewLine();
+            if (_options.GenerateStreamWriter)
+            {
+                _sb.AppendIndentedLine($"public static void {methodName}(Stream stream, {paramType} {varName})");
+                _sb.StartNewBlock();
+                _sb.AppendIndentedLine($"if ({varName} == null) return;");
+                _sb.AppendIndentedLine("var writer = new global::GProtobuf.Core.StreamWriter(stream, stackalloc byte[256]);");
+                _sb.AppendIndentedLine($"foreach (var item in {varName})");
+                _sb.StartNewBlock();
+                GenerateElementWrite(elementType, info.ElementIsPrimitive, info.ElementIsEnum, "item", "writer", false);
+                _sb.EndBlock();
+                _sb.AppendIndentedLine("writer.Flush();");
+                _sb.EndBlock();
+                _sb.AppendNewLine();
+            }
 
             // IBufferWriter serializer
-            _sb.AppendIndentedLine($"public static void {methodName}(IBufferWriter<byte> buffer, {paramType} {varName})");
-            _sb.StartNewBlock();
-            _sb.AppendIndentedLine($"if ({varName} == null) return;");
-            _sb.AppendIndentedLine("var writer = new global::GProtobuf.Core.BufferWriter(buffer);");
-            _sb.AppendIndentedLine($"foreach (var item in {varName})");
-            _sb.StartNewBlock();
-            GenerateElementWrite(elementType, info.ElementIsPrimitive, info.ElementIsEnum, "item", "writer", true);
-            _sb.EndBlock();
-            _sb.AppendIndentedLine("writer.Flush();");
-            _sb.EndBlock();
-            _sb.AppendNewLine();
+            if (_options.GenerateBufferWriter)
+            {
+                _sb.AppendIndentedLine($"public static void {methodName}(IBufferWriter<byte> buffer, {paramType} {varName})");
+                _sb.StartNewBlock();
+                _sb.AppendIndentedLine($"if ({varName} == null) return;");
+                _sb.AppendIndentedLine("var writer = new global::GProtobuf.Core.BufferWriter(buffer);");
+                _sb.AppendIndentedLine($"foreach (var item in {varName})");
+                _sb.StartNewBlock();
+                GenerateElementWrite(elementType, info.ElementIsPrimitive, info.ElementIsEnum, "item", "writer", true);
+                _sb.EndBlock();
+                _sb.AppendIndentedLine("writer.Flush();");
+                _sb.EndBlock();
+                _sb.AppendNewLine();
+            }
         }
 
         private void GenerateElementWrite(string elementType, bool isPrimitive, bool isEnum, string varName, string writerName, bool isBufferWriter)
@@ -637,30 +657,36 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
 
             // Stream serializer
-            _sb.AppendIndentedLine($"public static void {methodName}(Stream stream, {paramType} dict)");
-            _sb.StartNewBlock();
-            _sb.AppendIndentedLine("if (dict == null) return;");
-            _sb.AppendIndentedLine("var writer = new global::GProtobuf.Core.StreamWriter(stream, stackalloc byte[256]);");
-            _sb.AppendIndentedLine("foreach (var kvp in dict)");
-            _sb.StartNewBlock();
-            GenerateMapEntryWrite(info, "StreamWriters");
-            _sb.EndBlock();
-            _sb.AppendIndentedLine("writer.Flush();");
-            _sb.EndBlock();
-            _sb.AppendNewLine();
+            if (_options.GenerateStreamWriter)
+            {
+                _sb.AppendIndentedLine($"public static void {methodName}(Stream stream, {paramType} dict)");
+                _sb.StartNewBlock();
+                _sb.AppendIndentedLine("if (dict == null) return;");
+                _sb.AppendIndentedLine("var writer = new global::GProtobuf.Core.StreamWriter(stream, stackalloc byte[256]);");
+                _sb.AppendIndentedLine("foreach (var kvp in dict)");
+                _sb.StartNewBlock();
+                GenerateMapEntryWrite(info, "StreamWriters");
+                _sb.EndBlock();
+                _sb.AppendIndentedLine("writer.Flush();");
+                _sb.EndBlock();
+                _sb.AppendNewLine();
+            }
 
             // IBufferWriter serializer
-            _sb.AppendIndentedLine($"public static void {methodName}(IBufferWriter<byte> buffer, {paramType} dict)");
-            _sb.StartNewBlock();
-            _sb.AppendIndentedLine("if (dict == null) return;");
-            _sb.AppendIndentedLine("var writer = new global::GProtobuf.Core.BufferWriter(buffer);");
-            _sb.AppendIndentedLine("foreach (var kvp in dict)");
-            _sb.StartNewBlock();
-            GenerateMapEntryWrite(info, "BufferWriters");
-            _sb.EndBlock();
-            _sb.AppendIndentedLine("writer.Flush();");
-            _sb.EndBlock();
-            _sb.AppendNewLine();
+            if (_options.GenerateBufferWriter)
+            {
+                _sb.AppendIndentedLine($"public static void {methodName}(IBufferWriter<byte> buffer, {paramType} dict)");
+                _sb.StartNewBlock();
+                _sb.AppendIndentedLine("if (dict == null) return;");
+                _sb.AppendIndentedLine("var writer = new global::GProtobuf.Core.BufferWriter(buffer);");
+                _sb.AppendIndentedLine("foreach (var kvp in dict)");
+                _sb.StartNewBlock();
+                GenerateMapEntryWrite(info, "BufferWriters");
+                _sb.EndBlock();
+                _sb.AppendIndentedLine("writer.Flush();");
+                _sb.EndBlock();
+                _sb.AppendNewLine();
+            }
         }
 
         private void GenerateMapEntryWrite(StandaloneTypeInfo info, string writerClassName)

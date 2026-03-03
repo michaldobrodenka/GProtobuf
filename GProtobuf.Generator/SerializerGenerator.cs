@@ -144,6 +144,57 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                     return result.ToImmutableArray();
                 });
 
+        // Pipeline 4: Generator options from [assembly: GProtobufOptions(...)]
+        // Controls which code generators are enabled (SpanReader, StreamReader, StreamWriter, BufferWriter)
+        var optionsPipeline = context.CompilationProvider
+            .Select((compilation, ct) =>
+            {
+                var gprotobufOptionsAttr = compilation.GetTypeByMetadataName("GProtobuf.Core.GProtobufOptionsAttribute");
+                if (gprotobufOptionsAttr == null)
+                    return GeneratorOptions.Default;
+
+                foreach (var attr in compilation.Assembly.GetAttributes())
+                {
+                    if (SymbolEqualityComparer.Default.Equals(attr.AttributeClass, gprotobufOptionsAttr))
+                    {
+                        // Parse named arguments
+                        bool generateSpanReader = true;
+                        bool generateStreamReader = true;
+                        bool generateStreamWriter = true;
+                        bool generateBufferWriter = true;
+
+                        foreach (var namedArg in attr.NamedArguments)
+                        {
+                            switch (namedArg.Key)
+                            {
+                                case "GenerateSpanReader":
+                                    generateSpanReader = namedArg.Value.Value is bool v1 && v1;
+                                    break;
+                                case "GenerateStreamReader":
+                                    generateStreamReader = namedArg.Value.Value is bool v2 && v2;
+                                    break;
+                                case "GenerateStreamWriter":
+                                    generateStreamWriter = namedArg.Value.Value is bool v3 && v3;
+                                    break;
+                                case "GenerateBufferWriter":
+                                    generateBufferWriter = namedArg.Value.Value is bool v4 && v4;
+                                    break;
+                            }
+                        }
+
+                        return new GeneratorOptions
+                        {
+                            GenerateSpanReader = generateSpanReader,
+                            GenerateStreamReader = generateStreamReader,
+                            GenerateStreamWriter = generateStreamWriter,
+                            GenerateBufferWriter = generateBufferWriter
+                        };
+                    }
+                }
+
+                return GeneratorOptions.Default;
+            });
+
         // Combine ProtoContract and ProtoInclude pipelines
         var combinedPipeline = protoContractPipeline
             .Collect()
@@ -160,12 +211,14 @@ public sealed class SerializerGenerator : IIncrementalGenerator
             combinedPipeline
                 .Combine(enumTypesProvider)
                 .Combine(standaloneTypesPipeline)
+                .Combine(optionsPipeline)
                 .Combine(context.CompilationProvider),
             static (context, provider) =>
             {
-                var typeDefinitions = provider.Left.Left.Left; // ProtoContract + ProtoInclude types
-                var enumTypes = provider.Left.Left.Right;
-                var standaloneTypes = provider.Left.Right; // Types from [GenerateSerializer]
+                var typeDefinitions = provider.Left.Left.Left.Left; // ProtoContract + ProtoInclude types
+                var enumTypes = provider.Left.Left.Left.Right;
+                var standaloneTypes = provider.Left.Left.Right; // Types from [GenerateSerializer]
+                var options = provider.Left.Right; // Generator options from [GProtobufOptions]
                 var compilation = provider.Right;
 
 
@@ -176,16 +229,20 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                         new DiagnosticDescriptor(
                             "GPROTO001",
                             "GProtobuf Generator Started",
-                            "GProtobuf generator started with {0} enum types, {1} type definitions, {2} standalone types",
+                            "GProtobuf generator started with {0} enum types, {1} type definitions, {2} standalone types. Options: SpanReader={3}, StreamReader={4}, StreamWriter={5}, BufferWriter={6}",
                             "GProtobuf",
                             DiagnosticSeverity.Info,
                             true),
                         Location.None,
                         enumTypes.Count,
                         typeDefinitions.Count(),
-                        standaloneTypes.Length));
+                        standaloneTypes.Length,
+                        options.GenerateSpanReader,
+                        options.GenerateStreamReader,
+                        options.GenerateStreamWriter,
+                        options.GenerateBufferWriter));
 
-                    var objectTree = new ObjectTreeV2(enumTypes, compilation, standaloneTypes);
+                    var objectTree = new ObjectTreeV2(enumTypes, compilation, standaloneTypes, options);
                     foreach (var (namespaceName, typeDefinition) in typeDefinitions)
                     {
                         objectTree.AddType(namespaceName, typeDefinition);

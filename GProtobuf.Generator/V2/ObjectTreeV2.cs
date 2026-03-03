@@ -48,6 +48,7 @@ namespace GProtobuf.Generator.V2
         private readonly TypeRegistry _registry = new();
         private readonly Microsoft.CodeAnalysis.Compilation _compilation;
         private readonly Dictionary<string, List<StandaloneTypeInfo>> _standaloneTypesByNamespace = new();
+        private readonly GeneratorOptions _options;
 
 
         #region Type Registration
@@ -64,9 +65,13 @@ namespace GProtobuf.Generator.V2
         /// <param name="standaloneTypes">
         /// Types specified via [assembly: GenerateSerializer(typeof(...))] for standalone serialization.
         /// </param>
-        public ObjectTreeV2(HashSet<string> enumTypes, Microsoft.CodeAnalysis.Compilation compilation = null, ImmutableArray<ITypeSymbol> standaloneTypes = default)
+        /// <param name="options">
+        /// Generator options from [assembly: GProtobufOptions(...)]. Controls which generators are enabled.
+        /// </param>
+        public ObjectTreeV2(HashSet<string> enumTypes, Microsoft.CodeAnalysis.Compilation compilation = null, ImmutableArray<ITypeSymbol> standaloneTypes = default, GeneratorOptions options = null)
         {
             _compilation = compilation;
+            _options = options ?? GeneratorOptions.Default;
 
             // Register all enum types in the TypeRegistry
             if (enumTypes != null)
@@ -180,55 +185,70 @@ namespace GProtobuf.Generator.V2
                     throw new System.Exception($"Error in GenerateSerializers for namespace '{ns}'", ex);
                 }
 
-                try
+                // Generate SpanReaders class (uses global registries for deduplication)
+                if (_options.GenerateSpanReader)
                 {
-                    // Generate SpanReaders class (uses global registries for deduplication)
-                    var spanReaderGenerator = new SpanReaderGenerator(sb, _registry, globalMapRegistry, globalTupleRegistry);
-                    spanReaderGenerator.GenerateAll(types, ns);
-                }
-                catch (System.Exception ex)
-                {
-                    throw new System.Exception($"Error in SpanReaderGenerator for namespace '{ns}'. Inner: {ex.Message}. Stack: {ex.StackTrace}", ex);
-                }
-
-                try
-                {
-                    // Generate StreamReaders class (uses global registries for deduplication)
-                    new StreamReaderGenerator(sb, _registry, globalMapRegistry, globalTupleRegistry).GenerateAll(types, ns);
-                }
-                catch (System.Exception ex)
-                {
-                    throw new System.Exception($"Error in StreamReaderGenerator for namespace '{ns}'. Inner: {ex.Message}. Stack: {ex.StackTrace}", ex);
+                    try
+                    {
+                        var spanReaderGenerator = new SpanReaderGenerator(sb, _registry, globalMapRegistry, globalTupleRegistry);
+                        spanReaderGenerator.GenerateAll(types, ns);
+                    }
+                    catch (System.Exception ex)
+                    {
+                        throw new System.Exception($"Error in SpanReaderGenerator for namespace '{ns}'. Inner: {ex.Message}. Stack: {ex.StackTrace}", ex);
+                    }
                 }
 
-                try
+                // Generate StreamReaders class (uses global registries for deduplication)
+                if (_options.GenerateStreamReader)
                 {
-                    // Generate StreamWriters class (uses global registries for deduplication)
-                    new StreamWriterGenerator(sb, _registry, globalMapRegistry, globalTupleRegistry).GenerateAll(types, ns);
-                }
-                catch (System.Exception ex)
-                {
-                    throw new System.Exception($"Error in StreamWriterGenerator for namespace '{ns}'", ex);
-                }
-
-                try
-                {
-                    // Generate BufferWriters class (uses global registries for deduplication)
-                    new BufferWriterGenerator(sb, _registry, globalMapRegistry, globalTupleRegistry).GenerateAll(types, ns);
-                }
-                catch (System.Exception ex)
-                {
-                    throw new System.Exception($"Error in BufferWriterGenerator for namespace '{ns}'", ex);
+                    try
+                    {
+                        new StreamReaderGenerator(sb, _registry, globalMapRegistry, globalTupleRegistry).GenerateAll(types, ns);
+                    }
+                    catch (System.Exception ex)
+                    {
+                        throw new System.Exception($"Error in StreamReaderGenerator for namespace '{ns}'. Inner: {ex.Message}. Stack: {ex.StackTrace}", ex);
+                    }
                 }
 
-                try
+                // Generate StreamWriters class (uses global registries for deduplication)
+                if (_options.GenerateStreamWriter)
                 {
-                    // Generate SizeCalculators class (uses global registries for deduplication)
-                    new SizeCalculatorGenerator(sb, _registry, globalMapRegistry, globalTupleRegistry).GenerateAll(types, ns);
+                    try
+                    {
+                        new StreamWriterGenerator(sb, _registry, globalMapRegistry, globalTupleRegistry).GenerateAll(types, ns);
+                    }
+                    catch (System.Exception ex)
+                    {
+                        throw new System.Exception($"Error in StreamWriterGenerator for namespace '{ns}'", ex);
+                    }
                 }
-                catch (System.Exception ex)
+
+                // Generate BufferWriters class (uses global registries for deduplication)
+                if (_options.GenerateBufferWriter)
                 {
-                    throw new System.Exception($"Error in SizeCalculatorGenerator for namespace '{ns}'", ex);
+                    try
+                    {
+                        new BufferWriterGenerator(sb, _registry, globalMapRegistry, globalTupleRegistry).GenerateAll(types, ns);
+                    }
+                    catch (System.Exception ex)
+                    {
+                        throw new System.Exception($"Error in BufferWriterGenerator for namespace '{ns}'", ex);
+                    }
+                }
+
+                // Generate SizeCalculators class - needed when any writer is enabled
+                if (_options.GenerateStreamWriter || _options.GenerateBufferWriter)
+                {
+                    try
+                    {
+                        new SizeCalculatorGenerator(sb, _registry, globalMapRegistry, globalTupleRegistry).GenerateAll(types, ns);
+                    }
+                    catch (System.Exception ex)
+                    {
+                        throw new System.Exception($"Error in SizeCalculatorGenerator for namespace '{ns}'", ex);
+                    }
                 }
 
                 WriteFooter(sb);
@@ -247,6 +267,12 @@ namespace GProtobuf.Generator.V2
 
         private void GenerateDeserializers(StringBuilderWithIndent sb, List<TypeDefinition> types, List<StandaloneTypeInfo> standaloneTypes)
         {
+            // Only generate if at least one reader is enabled
+            if (!_options.GenerateSpanReader && !_options.GenerateStreamReader)
+            {
+                return;
+            }
+
             sb.AppendIndentedLine("public static class Deserializers");
             sb.StartNewBlock();
 
@@ -263,88 +289,100 @@ namespace GProtobuf.Generator.V2
                     // Deserialize(data) - creates new instance (for method group compatibility)
                     // Deserialize(data, existingInstance) - populates existing instance
 
-                    // Simple overload for method group compatibility (Func<ReadOnlySpan<byte>, T>)
-                    sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(ReadOnlySpan<byte> data)");
-                    sb.StartNewBlock();
-                    sb.AppendIndentedLine("var reader = new SpanReader(data);");
-                    sb.AppendIndentedLine($"return SpanReaders.Read{className}(ref reader);");
-                    sb.EndBlock();
-                    sb.AppendNewLine();
+                    if (_options.GenerateSpanReader)
+                    {
+                        // Simple overload for method group compatibility (Func<ReadOnlySpan<byte>, T>)
+                        sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(ReadOnlySpan<byte> data)");
+                        sb.StartNewBlock();
+                        sb.AppendIndentedLine("var reader = new SpanReader(data);");
+                        sb.AppendIndentedLine($"return SpanReaders.Read{className}(ref reader);");
+                        sb.EndBlock();
+                        sb.AppendNewLine();
 
-                    // Overload with existingInstance for populating existing objects
-                    sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(ReadOnlySpan<byte> data, global::{type.FullName} existingInstance)");
-                    sb.StartNewBlock();
-                    sb.AppendIndentedLine("var reader = new SpanReader(data);");
-                    sb.AppendIndentedLine("if (!(existingInstance is null))");
-                    sb.StartNewBlock();
-                    sb.AppendIndentedLine($"SpanReaders.Populate{className}(ref reader, existingInstance);");
-                    sb.AppendIndentedLine("return existingInstance;");
-                    sb.EndBlock();
-                    sb.AppendIndentedLine($"return SpanReaders.Read{className}(ref reader);");
-                    sb.EndBlock();
-                    sb.AppendNewLine();
+                        // Overload with existingInstance for populating existing objects
+                        sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(ReadOnlySpan<byte> data, global::{type.FullName} existingInstance)");
+                        sb.StartNewBlock();
+                        sb.AppendIndentedLine("var reader = new SpanReader(data);");
+                        sb.AppendIndentedLine("if (!(existingInstance is null))");
+                        sb.StartNewBlock();
+                        sb.AppendIndentedLine($"SpanReaders.Populate{className}(ref reader, existingInstance);");
+                        sb.AppendIndentedLine("return existingInstance;");
+                        sb.EndBlock();
+                        sb.AppendIndentedLine($"return SpanReaders.Read{className}(ref reader);");
+                        sb.EndBlock();
+                        sb.AppendNewLine();
+                    }
 
-                    // Stream overload (allocates default buffer)
-                    sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(Stream stream)");
-                    sb.StartNewBlock();
-                    sb.AppendIndentedLine("Span<byte> buffer = stackalloc byte[global::GProtobuf.Core.StreamReader.DefaultBufferSize];");
-                    sb.AppendIndentedLine($"return Deserialize{className}(stream, buffer);");
-                    sb.EndBlock();
-                    sb.AppendNewLine();
+                    if (_options.GenerateStreamReader)
+                    {
+                        // Stream overload (allocates default buffer)
+                        sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(Stream stream)");
+                        sb.StartNewBlock();
+                        sb.AppendIndentedLine("Span<byte> buffer = stackalloc byte[global::GProtobuf.Core.StreamReader.DefaultBufferSize];");
+                        sb.AppendIndentedLine($"return Deserialize{className}(stream, buffer);");
+                        sb.EndBlock();
+                        sb.AppendNewLine();
 
-                    // Stream overload with existingInstance
-                    sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(Stream stream, global::{type.FullName} existingInstance)");
-                    sb.StartNewBlock();
-                    sb.AppendIndentedLine("Span<byte> buffer = stackalloc byte[global::GProtobuf.Core.StreamReader.DefaultBufferSize];");
-                    sb.AppendIndentedLine($"return Deserialize{className}(stream, buffer, existingInstance);");
-                    sb.EndBlock();
-                    sb.AppendNewLine();
+                        // Stream overload with existingInstance
+                        sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(Stream stream, global::{type.FullName} existingInstance)");
+                        sb.StartNewBlock();
+                        sb.AppendIndentedLine("Span<byte> buffer = stackalloc byte[global::GProtobuf.Core.StreamReader.DefaultBufferSize];");
+                        sb.AppendIndentedLine($"return Deserialize{className}(stream, buffer, existingInstance);");
+                        sb.EndBlock();
+                        sb.AppendNewLine();
 
-                    // Stream overload with buffer - true streaming using PushLimit/PopLimit
-                    sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(Stream stream, Span<byte> buffer)");
-                    sb.StartNewBlock();
-                    sb.AppendIndentedLine("var reader = new global::GProtobuf.Core.StreamReader(stream, buffer);");
-                    sb.AppendIndentedLine($"return StreamReaders.Read{className}(ref reader);");
-                    sb.EndBlock();
-                    sb.AppendNewLine();
+                        // Stream overload with buffer - true streaming using PushLimit/PopLimit
+                        sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(Stream stream, Span<byte> buffer)");
+                        sb.StartNewBlock();
+                        sb.AppendIndentedLine("var reader = new global::GProtobuf.Core.StreamReader(stream, buffer);");
+                        sb.AppendIndentedLine($"return StreamReaders.Read{className}(ref reader);");
+                        sb.EndBlock();
+                        sb.AppendNewLine();
 
-                    // Stream overload with buffer and existingInstance - true streaming using PushLimit/PopLimit
-                    sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(Stream stream, Span<byte> buffer, global::{type.FullName} existingInstance)");
-                    sb.StartNewBlock();
-                    sb.AppendIndentedLine("var reader = new global::GProtobuf.Core.StreamReader(stream, buffer);");
-                    sb.AppendIndentedLine("if (!(existingInstance is null))");
-                    sb.StartNewBlock();
-                    sb.AppendIndentedLine($"StreamReaders.Populate{className}(ref reader, existingInstance);");
-                    sb.AppendIndentedLine("return existingInstance;");
-                    sb.EndBlock();
-                    sb.AppendIndentedLine($"return StreamReaders.Read{className}(ref reader);");
-                    sb.EndBlock();
-                    sb.AppendNewLine();
+                        // Stream overload with buffer and existingInstance - true streaming using PushLimit/PopLimit
+                        sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(Stream stream, Span<byte> buffer, global::{type.FullName} existingInstance)");
+                        sb.StartNewBlock();
+                        sb.AppendIndentedLine("var reader = new global::GProtobuf.Core.StreamReader(stream, buffer);");
+                        sb.AppendIndentedLine("if (!(existingInstance is null))");
+                        sb.StartNewBlock();
+                        sb.AppendIndentedLine($"StreamReaders.Populate{className}(ref reader, existingInstance);");
+                        sb.AppendIndentedLine("return existingInstance;");
+                        sb.EndBlock();
+                        sb.AppendIndentedLine($"return StreamReaders.Read{className}(ref reader);");
+                        sb.EndBlock();
+                        sb.AppendNewLine();
+                    }
                 }
                 else
                 {
-                    sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(ReadOnlySpan<byte> data)");
-                    sb.StartNewBlock();
-                    sb.AppendIndentedLine("var reader = new SpanReader(data);");
-                    sb.AppendIndentedLine($"return SpanReaders.Read{className}(ref reader);");
-                    sb.EndBlock();
-                    sb.AppendNewLine();
+                    if (_options.GenerateSpanReader)
+                    {
+                        sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(ReadOnlySpan<byte> data)");
+                        sb.StartNewBlock();
+                        sb.AppendIndentedLine("var reader = new SpanReader(data);");
+                        sb.AppendIndentedLine($"return SpanReaders.Read{className}(ref reader);");
+                        sb.EndBlock();
+                        sb.AppendNewLine();
+                    }
 
-                    // Deserialize method - Stream overload (allocates default buffer)
-                    sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(Stream stream)");
-                    sb.StartNewBlock();
-                    sb.AppendIndentedLine("Span<byte> buffer = stackalloc byte[global::GProtobuf.Core.StreamReader.DefaultBufferSize];");
-                    sb.AppendIndentedLine($"return Deserialize{className}(stream, buffer);");
-                    sb.EndBlock();
-                    sb.AppendNewLine();
+                    if (_options.GenerateStreamReader)
+                    {
+                        // Deserialize method - Stream overload (allocates default buffer)
+                        sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(Stream stream)");
+                        sb.StartNewBlock();
+                        sb.AppendIndentedLine("Span<byte> buffer = stackalloc byte[global::GProtobuf.Core.StreamReader.DefaultBufferSize];");
+                        sb.AppendIndentedLine($"return Deserialize{className}(stream, buffer);");
+                        sb.EndBlock();
+                        sb.AppendNewLine();
 
-                    // Deserialize method - Stream overload with buffer - true streaming using PushLimit/PopLimit
-                    sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(Stream stream, Span<byte> buffer)");
-                    sb.StartNewBlock();
-                    sb.AppendIndentedLine("var reader = new global::GProtobuf.Core.StreamReader(stream, buffer);");
-                    sb.AppendIndentedLine($"return StreamReaders.Read{className}(ref reader);");
-                    sb.EndBlock();
-                    sb.AppendNewLine();
+                        // Deserialize method - Stream overload with buffer - true streaming using PushLimit/PopLimit
+                        sb.AppendIndentedLine($"public static global::{type.FullName} Deserialize{className}(Stream stream, Span<byte> buffer)");
+                        sb.StartNewBlock();
+                        sb.AppendIndentedLine("var reader = new global::GProtobuf.Core.StreamReader(stream, buffer);");
+                        sb.AppendIndentedLine($"return StreamReaders.Read{className}(ref reader);");
+                        sb.EndBlock();
+                        sb.AppendNewLine();
+                    }
                 }
 
                 // =================================================================
@@ -353,35 +391,41 @@ namespace GProtobuf.Generator.V2
                 // =================================================================
                 if (canPopulate)
                 {
-                    sb.AppendIndentedLine($"public static void Populate{className}(ReadOnlySpan<byte> data, global::{type.FullName} instance)");
-                    sb.StartNewBlock();
-                    sb.AppendIndentedLine("var reader = new SpanReader(data);");
-                    sb.AppendIndentedLine($"SpanReaders.Populate{className}(ref reader, instance);");
-                    sb.EndBlock();
-                    sb.AppendNewLine();
+                    if (_options.GenerateSpanReader)
+                    {
+                        sb.AppendIndentedLine($"public static void Populate{className}(ReadOnlySpan<byte> data, global::{type.FullName} instance)");
+                        sb.StartNewBlock();
+                        sb.AppendIndentedLine("var reader = new SpanReader(data);");
+                        sb.AppendIndentedLine($"SpanReaders.Populate{className}(ref reader, instance);");
+                        sb.EndBlock();
+                        sb.AppendNewLine();
+                    }
 
-                    // Populate method - Stream overload (allocates default buffer)
-                    sb.AppendIndentedLine($"public static void Populate{className}(Stream stream, global::{type.FullName} instance)");
-                    sb.StartNewBlock();
-                    sb.AppendIndentedLine("Span<byte> buffer = stackalloc byte[global::GProtobuf.Core.StreamReader.DefaultBufferSize];");
-                    sb.AppendIndentedLine($"Populate{className}(stream, buffer, instance);");
-                    sb.EndBlock();
-                    sb.AppendNewLine();
+                    if (_options.GenerateStreamReader)
+                    {
+                        // Populate method - Stream overload (allocates default buffer)
+                        sb.AppendIndentedLine($"public static void Populate{className}(Stream stream, global::{type.FullName} instance)");
+                        sb.StartNewBlock();
+                        sb.AppendIndentedLine("Span<byte> buffer = stackalloc byte[global::GProtobuf.Core.StreamReader.DefaultBufferSize];");
+                        sb.AppendIndentedLine($"Populate{className}(stream, buffer, instance);");
+                        sb.EndBlock();
+                        sb.AppendNewLine();
 
-                    // Populate method - Stream overload with custom buffer - true streaming using PushLimit/PopLimit
-                    sb.AppendIndentedLine($"public static void Populate{className}(Stream stream, Span<byte> buffer, global::{type.FullName} instance)");
-                    sb.StartNewBlock();
-                    sb.AppendIndentedLine("var reader = new global::GProtobuf.Core.StreamReader(stream, buffer);");
-                    sb.AppendIndentedLine($"StreamReaders.Populate{className}(ref reader, instance);");
-                    sb.EndBlock();
-                    sb.AppendNewLine();
+                        // Populate method - Stream overload with custom buffer - true streaming using PushLimit/PopLimit
+                        sb.AppendIndentedLine($"public static void Populate{className}(Stream stream, Span<byte> buffer, global::{type.FullName} instance)");
+                        sb.StartNewBlock();
+                        sb.AppendIndentedLine("var reader = new global::GProtobuf.Core.StreamReader(stream, buffer);");
+                        sb.AppendIndentedLine($"StreamReaders.Populate{className}(ref reader, instance);");
+                        sb.EndBlock();
+                        sb.AppendNewLine();
+                    }
                 }
             }
 
             // Generate deserializers for standalone types (List<T>, T[], Dictionary<K,V>)
             if (standaloneTypes.Count > 0)
             {
-                var standaloneGenerator = new StandaloneTypeGenerator(sb, _registry);
+                var standaloneGenerator = new StandaloneTypeGenerator(sb, _registry, _options);
                 standaloneGenerator.GenerateDeserializers(standaloneTypes);
             }
 
@@ -395,6 +439,12 @@ namespace GProtobuf.Generator.V2
 
         private void GenerateSerializers(StringBuilderWithIndent sb, List<TypeDefinition> types, List<StandaloneTypeInfo> standaloneTypes)
         {
+            // Only generate if at least one writer is enabled
+            if (!_options.GenerateStreamWriter && !_options.GenerateBufferWriter)
+            {
+                return;
+            }
+
             sb.AppendIndentedLine("public static class Serializers");
             sb.StartNewBlock();
 
@@ -402,29 +452,35 @@ namespace GProtobuf.Generator.V2
             {
                 var className = TypeNameHelper.GetClassName(type.FullName);
 
-                // Stream serializer
-                sb.AppendIndentedLine($"public static void Serialize{className}(Stream stream, global::{type.FullName} obj)");
-                sb.StartNewBlock();
-                sb.AppendIndentedLine("var writer = new global::GProtobuf.Core.StreamWriter(stream, stackalloc byte[256]);");
-                sb.AppendIndentedLine($"StreamWriters.Write{className}(ref writer, obj);");
-                sb.AppendIndentedLine("writer.Flush();");
-                sb.EndBlock();
-                sb.AppendNewLine();
+                if (_options.GenerateStreamWriter)
+                {
+                    // Stream serializer
+                    sb.AppendIndentedLine($"public static void Serialize{className}(Stream stream, global::{type.FullName} obj)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine("var writer = new global::GProtobuf.Core.StreamWriter(stream, stackalloc byte[256]);");
+                    sb.AppendIndentedLine($"StreamWriters.Write{className}(ref writer, obj);");
+                    sb.AppendIndentedLine("writer.Flush();");
+                    sb.EndBlock();
+                    sb.AppendNewLine();
+                }
 
-                // IBufferWriter serializer
-                sb.AppendIndentedLine($"public static void Serialize{className}(IBufferWriter<byte> buffer, global::{type.FullName} obj)");
-                sb.StartNewBlock();
-                sb.AppendIndentedLine("var writer = new global::GProtobuf.Core.BufferWriter(buffer);");
-                sb.AppendIndentedLine($"BufferWriters.Write{className}(ref writer, obj);");
-                sb.AppendIndentedLine("writer.Flush();");
-                sb.EndBlock();
-                sb.AppendNewLine();
+                if (_options.GenerateBufferWriter)
+                {
+                    // IBufferWriter serializer
+                    sb.AppendIndentedLine($"public static void Serialize{className}(IBufferWriter<byte> buffer, global::{type.FullName} obj)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine("var writer = new global::GProtobuf.Core.BufferWriter(buffer);");
+                    sb.AppendIndentedLine($"BufferWriters.Write{className}(ref writer, obj);");
+                    sb.AppendIndentedLine("writer.Flush();");
+                    sb.EndBlock();
+                    sb.AppendNewLine();
+                }
             }
 
             // Generate serializers for standalone types (List<T>, T[], Dictionary<K,V>)
             if (standaloneTypes.Count > 0)
             {
-                var standaloneGenerator = new StandaloneTypeGenerator(sb, _registry);
+                var standaloneGenerator = new StandaloneTypeGenerator(sb, _registry, _options);
                 standaloneGenerator.GenerateSerializers(standaloneTypes);
             }
 
