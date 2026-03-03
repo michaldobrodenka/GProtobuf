@@ -53,71 +53,67 @@ namespace GProtobuf.Core
             int pos = bufferPosition;
             int space = buffer.Length - pos;
 
-            if (space <= 5)
+            if (space > 5)
             {
-                Flush();
-                pos = 0;
-            }
+                ref byte p = ref RefAt(pos);
 
-            ref byte p = ref RefAt(pos);
+                // Unrolled fast path for 1-3 byte varints
+                if (value < 0x80u)
+                {
+                    Unsafe.WriteUnaligned(ref p, (byte)value);
+                    bufferPosition = pos + 1;
+                    return;
+                }
+                if (value < 0x4000u)
+                {
+                    Unsafe.WriteUnaligned(ref p, (byte)(value | 0x80u));
+                    Unsafe.WriteUnaligned(ref Unsafe.Add(ref p, 1), (byte)(value >> 7));
+                    bufferPosition = pos + 2;
+                    return;
+                }
+                if (value < 0x200000u)
+                {
+                    Unsafe.WriteUnaligned(ref p, (byte)(value | 0x80u));
+                    Unsafe.WriteUnaligned(ref Unsafe.Add(ref p, 1), (byte)((value >> 7) | 0x80u));
+                    Unsafe.WriteUnaligned(ref Unsafe.Add(ref p, 2), (byte)(value >> 14));
+                    bufferPosition = pos + 3;
+                    return;
+                }
 
-            // Unrolled fast path for 1-3 byte varints
-            if (value < 0x80u)
-            {
+                // Fallback loop for 4-5 byte varints (rare)
+                while (value > 0x7Fu)
+                {
+                    Unsafe.WriteUnaligned(ref p, (byte)((value & 0x7Fu) | 0x80u));
+                    p = ref Unsafe.Add(ref p, 1);
+                    pos++;
+                    value >>= 7;
+                }
+
                 Unsafe.WriteUnaligned(ref p, (byte)value);
-                bufferPosition = pos + 1;
-                return;
-            }
-            if (value < 0x4000u)
-            {
-                Unsafe.WriteUnaligned(ref p, (byte)(value | 0x80u));
-                Unsafe.WriteUnaligned(ref Unsafe.Add(ref p, 1), (byte)(value >> 7));
-                bufferPosition = pos + 2;
-                return;
-            }
-            if (value < 0x200000u)
-            {
-                Unsafe.WriteUnaligned(ref p, (byte)(value | 0x80u));
-                Unsafe.WriteUnaligned(ref Unsafe.Add(ref p, 1), (byte)((value >> 7) | 0x80u));
-                Unsafe.WriteUnaligned(ref Unsafe.Add(ref p, 2), (byte)(value >> 14));
-                bufferPosition = pos + 3;
-                return;
-            }
-
-            // Fallback loop for 4-5 byte varints (rare)
-            while (value > 0x7Fu)
-            {
-                Unsafe.WriteUnaligned(ref p, (byte)((value & 0x7Fu) | 0x80u));
-                p = ref Unsafe.Add(ref p, 1);
                 pos++;
-                value >>= 7;
+
+                bufferPosition = pos;
             }
-
-            Unsafe.WriteUnaligned(ref p, (byte)value);
-            pos++;
-
-            bufferPosition = pos;
-            //}
-            //else
-            //{
-            //    // fallback when buffer nearly full
-            //    WriteVarUInt32Slow(value);
-            //}
+            else
+            {
+                // fallback when buffer nearly full
+                WriteVarUInt32Slow(value);
+            }
         }
 
-        ///// <summary>
-        ///// Slow path for WriteVarUInt32 when buffer space is limited.
-        ///// </summary>
-        //[MethodImpl(MethodImplOptions.NoInlining)]
-        //private void WriteVarUInt32Slow(uint value)
-        //{
-        //    while (value > 0x7Fu)
-        //    {
-        //        WriteSingleByte((byte)((value & 0x7Fu) | 0x80u));
-        //        value >>= 7;
-        //    }
-        //    WriteSingleByte((byte)value);
-        //}
+        /// <summary>
+        /// Slow path for WriteVarUInt32 when buffer space is limited.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private void WriteVarUInt32Slow(uint value)
+        {
+            while (value > 0x7Fu)
+            {
+                WriteSingleByte((byte)((value & 0x7Fu) | 0x80u));
+                value >>= 7;
+            }
+            WriteSingleByte((byte)value);
+        }
 
         public void WriteFixedSizeInt32(int intValue)
         {
@@ -156,7 +152,19 @@ namespace GProtobuf.Core
 
         public void WriteByte(byte value)
         {
-            WriteVarUInt32(value); // Use optimized version for unsigned
+            int pos = bufferPosition;
+            if (buffer.Length - pos < 2)
+            {
+                Flush();
+                pos = 0;
+            }
+
+            // byte >> 7 is 0 or 1, branchless:
+            uint hi = (uint)value >> 7;
+            // hi=0: writes just value (second byte is 0, we don't advance to it)
+            // hi=1: writes (value & 0x7F)|0x80 and byte1=1
+            Unsafe.WriteUnaligned(ref RefAt(pos), (ushort)(((uint)value & 0x7Fu) | (hi * 0x180u)));
+            bufferPosition = pos + 1 + (int)hi;
         }
 
         public void WriteSByte(sbyte value, bool zigZag = false)
@@ -177,7 +185,27 @@ namespace GProtobuf.Core
 
         public void WriteUInt16(ushort value)
         {
-            WriteVarUInt32(value); // Use optimized version for unsigned
+            int pos = bufferPosition;
+            if (buffer.Length - pos < 3)
+            {
+                Flush();
+                pos = 0;
+            }
+
+            uint v = value;
+            int sv = (int)v;
+
+            // Branchless: b1=1 if v>=0x80, b2=1 if v>=0x4000
+            uint b1 = (uint)((sv - 0x80) >> 31) + 1;
+            uint b2 = (uint)((sv - 0x4000) >> 31) + 1;
+
+            // Construct all 3 bytes, advance only by actual count
+            uint byte0 = (v & 0x7F) | (b1 << 7);
+            uint byte1 = ((v >> 7) & 0x7F) | (b2 << 7);
+            uint byte2 = v >> 14;
+
+            Unsafe.WriteUnaligned(ref RefAt(pos), (uint)(byte0 | (byte1 << 8) | (byte2 << 16)));
+            bufferPosition = pos + 1 + (int)b1 + (int)b2;
         }
 
         public void WriteUInt32(uint value)
@@ -247,13 +275,10 @@ namespace GProtobuf.Core
             // Handle null as empty string in protobuf
             if (value == null)
             {
-                //WriteVarUInt32(0);
-                WriteSingleByte(0);
+                WriteVarUInt32(0);
                 return;
             }
 
-            // ASCII fast path: Most API strings are ASCII (20-30% faster)
-            // For short ASCII strings, skip UTF-8 encoding entirely
             if (value.Length < 128 && System.Text.Ascii.IsValid(value))
             {
                 WriteVarUInt32((uint)value.Length);

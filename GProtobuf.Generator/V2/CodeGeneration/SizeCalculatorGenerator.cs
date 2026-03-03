@@ -137,9 +137,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
         }
 
+        private const string CalculatorType = "global::GProtobuf.Core.WriteSizeCalculator";
+
         /// <summary>
-        /// Generates dictionary-based type dispatch fields for types with many derived classes.
-        /// This provides O(1) type lookup vs O(n) type pattern matching in switch statements.
+        /// Generates function pointer dispatch tables for types with many derived classes.
+        /// This provides O(1) type lookup with direct function pointer call vs O(n) type pattern matching.
         /// </summary>
         private void GenerateTypeDispatchDictionaries(List<TypeDefinition> types)
         {
@@ -155,7 +157,16 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                         var className = TypeNameHelper.GetClassName(type.FullName);
                         if (!generatedDictionaries.Contains(className))
                         {
-                            TryGenerateDictionaryDispatch(className, type.FullName, sortedDerived);
+                            TryGenerateFunctionPointerDispatch(
+                                className,
+                                type.FullName,
+                                CalculatorType,
+                                "calculator",
+                                sortedDerived,
+                                (derivedType, derivedClassName, castVar) =>
+                                {
+                                    _sb.AppendIndentedLine($"Calculate{derivedClassName}WrapperSize(ref calculator, {castVar});");
+                                });
                             generatedDictionaries.Add(className);
                         }
                     }
@@ -373,15 +384,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 return;
             }
 
-            // Use dictionary-based dispatch for large type hierarchies (O(1) vs O(n) type checks)
+            // Use function pointer dispatch for large type hierarchies (O(1) lookup + direct call)
             if (sortedDerived.Count >= DictionaryDispatchThreshold)
             {
                 _sb.AppendIndentedLine("// Dispatch to derived type wrapper calculation");
-                GenerateDictionaryBasedSwitch(className, "obj", sortedDerived, (index, derivedType, derivedClassName) =>
-                {
-                    _sb.AppendIndentedLine($"Calculate{derivedClassName}WrapperSize(ref calculator, (global::{derivedType})obj);");
-                    _sb.AppendIndentedLine("break;");
-                });
+                GenerateFunctionPointerCall(className, type.FullName, CalculatorType, "calculator", "obj", sortedDerived.Count, returnAfterCall: false);
             }
             else
             {

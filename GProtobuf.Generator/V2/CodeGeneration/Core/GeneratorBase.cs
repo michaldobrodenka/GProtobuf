@@ -172,54 +172,82 @@ namespace GProtobuf.Generator.V2.CodeGeneration.Core
             }
         }
 
-        #region Dictionary-Based Type Dispatch Optimization
+        #region Function Pointer Type Dispatch Optimization
 
         /// <summary>
-        /// Threshold for using dictionary-based dispatch vs type switch.
+        /// Threshold for using function pointer dispatch vs type switch.
         /// For small numbers of derived types, the type switch is faster due to JIT optimization.
         /// </summary>
         protected const int DictionaryDispatchThreshold = 8;
 
         /// <summary>
-        /// Set of base types that need dictionary dispatch generation.
-        /// Populated during type dispatch generation, used to generate dictionaries at class level.
+        /// Set of base types that need function pointer dispatch generation.
+        /// Populated during type dispatch generation, used to generate dispatch tables at class level.
         /// </summary>
         protected HashSet<string> _typesNeedingDictionaryDispatch = new HashSet<string>();
 
         /// <summary>
-        /// Generates dictionary field and GetTypeIndex method for a polymorphic base type.
-        /// Returns true if dictionary dispatch should be used, false for regular type switch.
+        /// Generates FrozenDictionary with function pointers and wrapper methods for a polymorphic base type.
+        /// Returns true if function pointer dispatch should be used, false for regular type switch.
         /// </summary>
         /// <param name="className">The class name of the base type</param>
         /// <param name="fullTypeName">The full type name</param>
+        /// <param name="refParamType">The ref parameter type (e.g., "global::GProtobuf.Core.StreamWriter")</param>
+        /// <param name="refParamName">The ref parameter name (e.g., "writer")</param>
         /// <param name="derivedTypes">List of derived types (sorted by depth, most derived first)</param>
-        /// <returns>True if dictionary dispatch was generated and should be used</returns>
-        protected bool TryGenerateDictionaryDispatch(string className, string fullTypeName, List<string> derivedTypes)
+        /// <param name="generateTargetCall">Action to generate the target method call inside wrapper (derivedType, derivedClassName, castVar)</param>
+        /// <returns>True if function pointer dispatch was generated and should be used</returns>
+        protected bool TryGenerateFunctionPointerDispatch(
+            string className,
+            string fullTypeName,
+            string refParamType,
+            string refParamName,
+            List<string> derivedTypes,
+            Action<string, string, string> generateTargetCall)
         {
             if (derivedTypes == null || derivedTypes.Count < DictionaryDispatchThreshold)
                 return false;
 
-            // Generate dictionary field
-            _sb.AppendIndentedLine($"#region {className} Type Dispatch Dictionary");
-            _sb.AppendIndentedLine($"private static System.Collections.Generic.Dictionary<nint, int> _{className}TypeIndex;");
+            _sb.AppendIndentedLine($"#region {className} Function Pointer Dispatch");
+            _sb.AppendNewLine();
+
+            // Generate wrapper methods for each derived type
+            foreach (var derivedType in derivedTypes)
+            {
+                var derivedClassName = TypeNameHelper.GetClassName(derivedType);
+                _sb.AppendIndentedLine("[System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
+                _sb.AppendIndentedLine($"private static void {className}Dispatch_{derivedClassName}(ref {refParamType} {refParamName}, global::{fullTypeName} instance)");
+                _sb.StartNewBlock();
+                generateTargetCall(derivedType, derivedClassName, $"(global::{derivedType})instance");
+                _sb.EndBlock();
+                _sb.AppendNewLine();
+            }
+
+            // Generate FrozenDictionary field
+            _sb.AppendIndentedLine($"private static System.Collections.Frozen.FrozenDictionary<nint, nint> _{className}Dispatch;");
             _sb.AppendNewLine();
 
             // Generate lazy initializer
-            _sb.AppendIndentedLine($"private static System.Collections.Generic.Dictionary<nint, int> Get{className}TypeIndex()");
+            _sb.AppendIndentedLine($"private static System.Collections.Frozen.FrozenDictionary<nint, nint> Get{className}Dispatch()");
             _sb.StartNewBlock();
-            _sb.AppendIndentedLine($"if (_{className}TypeIndex != null) return _{className}TypeIndex;");
+            _sb.AppendIndentedLine($"if (_{className}Dispatch != null) return _{className}Dispatch;");
             _sb.AppendNewLine();
-            _sb.AppendIndentedLine($"var dict = new System.Collections.Generic.Dictionary<nint, int>({derivedTypes.Count});");
+            _sb.AppendIndentedLine($"var dict = new System.Collections.Generic.Dictionary<nint, nint>({derivedTypes.Count});");
+            _sb.AppendIndentedLine("unsafe");
+            _sb.StartNewBlock();
 
-            for (int i = 0; i < derivedTypes.Count; i++)
+            foreach (var derivedType in derivedTypes)
             {
-                _sb.AppendIndentedLine($"dict[typeof(global::{derivedTypes[i]}).TypeHandle.Value] = {i};");
+                var derivedClassName = TypeNameHelper.GetClassName(derivedType);
+                _sb.AppendIndentedLine($"dict[typeof(global::{derivedType}).TypeHandle.Value] = (nint)(delegate*<ref {refParamType}, global::{fullTypeName}, void>)&{className}Dispatch_{derivedClassName};");
             }
 
-            _sb.AppendIndentedLine($"_{className}TypeIndex = dict;");
-            _sb.AppendIndentedLine("return dict;");
+            _sb.EndBlock(); // unsafe
+            _sb.AppendIndentedLine($"_{className}Dispatch = System.Collections.Frozen.FrozenDictionary.ToFrozenDictionary(dict);");
+            _sb.AppendIndentedLine($"return _{className}Dispatch;");
             _sb.EndBlock();
             _sb.AppendNewLine();
+
             _sb.AppendIndentedLine("#endregion");
             _sb.AppendNewLine();
 
@@ -228,36 +256,36 @@ namespace GProtobuf.Generator.V2.CodeGeneration.Core
         }
 
         /// <summary>
-        /// Generates the dictionary lookup and integer switch for type dispatch.
+        /// Generates the function pointer lookup and direct call for type dispatch.
         /// </summary>
         /// <param name="className">The class name of the base type</param>
+        /// <param name="fullTypeName">The full type name of the base</param>
+        /// <param name="refParamType">The ref parameter type</param>
+        /// <param name="refParamName">The ref parameter name</param>
         /// <param name="sourceVar">Source variable name (e.g., "obj", "instance")</param>
-        /// <param name="derivedTypes">List of derived types (sorted by depth, most derived first)</param>
-        /// <param name="generateCase">Action to generate code for each case (index, derivedType, derivedClassName)</param>
-        protected void GenerateDictionaryBasedSwitch(
+        /// <param name="derivedTypeCount">Number of derived types (for comment)</param>
+        /// <param name="returnAfterCall">If true, generates 'return;' after call. If false, execution continues.</param>
+        protected void GenerateFunctionPointerCall(
             string className,
+            string fullTypeName,
+            string refParamType,
+            string refParamName,
             string sourceVar,
-            List<string> derivedTypes,
-            Action<int, string, string> generateCase)
+            int derivedTypeCount,
+            bool returnAfterCall = true)
         {
-            _sb.AppendIndentedLine($"// O(1) dictionary-based type dispatch (optimized for {derivedTypes.Count} types)");
-            _sb.AppendIndentedLine($"var typeDict = Get{className}TypeIndex();");
-            _sb.AppendIndentedLine($"if (typeDict.TryGetValue(System.Type.GetTypeHandle({sourceVar}).Value, out var typeIndex))");
+            _sb.AppendIndentedLine($"// O(1) function pointer dispatch (optimized for {derivedTypeCount} types)");
+            _sb.AppendIndentedLine($"var dispatchTable = Get{className}Dispatch();");
+            _sb.AppendIndentedLine($"if (dispatchTable.TryGetValue(System.Type.GetTypeHandle({sourceVar}).Value, out var fnPtr))");
             _sb.StartNewBlock();
-            _sb.AppendIndentedLine("switch (typeIndex)");
+            _sb.AppendIndentedLine("unsafe");
             _sb.StartNewBlock();
-
-            for (int i = 0; i < derivedTypes.Count; i++)
+            _sb.AppendIndentedLine($"((delegate*<ref {refParamType}, global::{fullTypeName}, void>)fnPtr)(ref {refParamName}, {sourceVar});");
+            _sb.EndBlock(); // unsafe
+            if (returnAfterCall)
             {
-                var derivedType = derivedTypes[i];
-                var derivedClassName = TypeNameHelper.GetClassName(derivedType);
-                _sb.AppendIndentedLine($"case {i}:");
-                _sb.IncreaseIndent();
-                generateCase(i, derivedType, derivedClassName);
-                _sb.DecreaseIndent();
+                _sb.AppendIndentedLine("return;");
             }
-
-            _sb.EndBlock();
             _sb.EndBlock();
         }
 

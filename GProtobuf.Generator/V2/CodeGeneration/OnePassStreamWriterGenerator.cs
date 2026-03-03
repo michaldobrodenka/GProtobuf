@@ -98,7 +98,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateMapKeyWrite(VirtualMapEntryInfo virtualType, string sourceVar)
         {
-            if (virtualType.KeyIsEnum)
+            var keyTypeInfo = virtualType.KeyTypeInfo;
+
+            // Check both KeyIsEnum flag and KeyTypeInfo.IsEnum for enum detection
+            // This handles cases where enum wasn't detected during registration
+            if (virtualType.KeyIsEnum || keyTypeInfo?.IsEnum == true)
             {
                 TagCodeHelper.WriteTag(_sb, 1, WireType.VarInt);
                 _sb.AppendIndentedLine($"writer.WriteVarInt32((int){sourceVar});");
@@ -107,52 +111,362 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 _primitiveHandler.GenerateWrite(_sb, sourceVar, virtualType.KeyType, DataFormat.Default, 1, false, false);
             }
-            else
+            else if (TupleHandler.IsTupleType(virtualType.KeyType))
             {
-                // Complex key type
-                var keyClassName = TypeNameHelper.GetClassName(virtualType.KeyType);
+                // Tuple key type - use WriteTupleName (no Content suffix in OnePass mode)
+                var itemTypes = TupleHandler.ParseTupleTypes(virtualType.KeyType);
+                var tupleInfo = _virtualTupleRegistry.Register(virtualType.KeyType, itemTypes);
                 TagCodeHelper.WriteTag(_sb, 1, WireType.Len);
                 _sb.AppendIndentedLine("writer.BeginSubMessage();");
-                _sb.AppendIndentedLine($"Write{keyClassName}Content(ref writer, {sourceVar});");
+                _sb.AppendIndentedLine($"Write{tupleInfo.SafeName}(ref writer, {sourceVar});");
+                _sb.AppendIndentedLine("writer.EndSubMessage();");
+            }
+            else if (keyTypeInfo?.IsArray == true)
+            {
+                // Array key type - write each element as repeated field 1
+                GenerateArrayKeyWrite(virtualType, sourceVar, keyTypeInfo);
+            }
+            else if (keyTypeInfo?.IsList == true || keyTypeInfo?.IsHashSet == true || keyTypeInfo?.IsCollection == true)
+            {
+                // Collection key type - write each element as repeated field 1
+                GenerateCollectionKeyWrite(virtualType, sourceVar, keyTypeInfo);
+            }
+            else if (keyTypeInfo?.IsDictionary == true)
+            {
+                // Dictionary key type - write as nested map entries
+                GenerateDictionaryKeyWrite(virtualType, sourceVar, keyTypeInfo);
+            }
+            else
+            {
+                // Custom ProtoContract key type - use namespace-qualified call
+                var keyClassName = TypeNameHelper.GetClassName(virtualType.KeyType);
+                var writersClass = GetWritersClass(virtualType.KeyType);
+                TagCodeHelper.WriteTag(_sb, 1, WireType.Len);
+                _sb.AppendIndentedLine("writer.BeginSubMessage();");
+                _sb.AppendIndentedLine($"{writersClass}.Write{keyClassName}Content(ref writer, {sourceVar});");
                 _sb.AppendIndentedLine("writer.EndSubMessage();");
             }
         }
 
+        private void GenerateArrayKeyWrite(VirtualMapEntryInfo virtualType, string sourceVar, TypeAnalysisInfo keyTypeInfo)
+        {
+            var elementType = keyTypeInfo.CollectionElementType;
+            var elemInfo = keyTypeInfo.CollectionElementTypeInfo;
+
+            _sb.AppendIndentedLine($"if ({sourceVar} != null)");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine($"foreach (var keyItem in {sourceVar})");
+            _sb.StartNewBlock();
+            GenerateRepeatedElementWrite(elementType, elemInfo, "keyItem", 1);
+            _sb.EndBlock();
+            _sb.EndBlock();
+        }
+
+        private void GenerateCollectionKeyWrite(VirtualMapEntryInfo virtualType, string sourceVar, TypeAnalysisInfo keyTypeInfo)
+        {
+            var elementType = keyTypeInfo.CollectionElementType;
+            var elemInfo = keyTypeInfo.CollectionElementTypeInfo;
+
+            _sb.AppendIndentedLine($"if ({sourceVar} != null)");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine($"foreach (var keyItem in {sourceVar})");
+            _sb.StartNewBlock();
+            GenerateRepeatedElementWrite(elementType, elemInfo, "keyItem", 1);
+            _sb.EndBlock();
+            _sb.EndBlock();
+        }
+
+        private void GenerateDictionaryKeyWrite(VirtualMapEntryInfo virtualType, string sourceVar, TypeAnalysisInfo keyTypeInfo)
+        {
+            var innerKeyType = keyTypeInfo.DictionaryKeyType;
+            var innerValueType = keyTypeInfo.DictionaryValueType;
+
+            bool keyIsEnum = _registry?.IsEnum(innerKeyType) ?? false;
+            bool valueIsEnum = _registry?.IsEnum(innerValueType) ?? false;
+
+            var nestedEntryInfo = _virtualMapRegistry.RegisterMapEntry(innerKeyType, innerValueType, keyIsEnum, valueIsEnum);
+
+            _sb.AppendIndentedLine($"if ({sourceVar} != null)");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine($"foreach (var keyKvp in {sourceVar})");
+            _sb.StartNewBlock();
+            TagCodeHelper.WriteTag(_sb, 1, WireType.Len);
+            _sb.AppendIndentedLine("writer.BeginSubMessage();");
+            _sb.AppendIndentedLine($"Write{nestedEntryInfo.TypeName}(ref writer, keyKvp.Key, keyKvp.Value);");
+            _sb.AppendIndentedLine("writer.EndSubMessage();");
+            _sb.EndBlock();
+            _sb.EndBlock();
+        }
+
         private void GenerateMapValueWrite(VirtualMapEntryInfo virtualType, string sourceVar)
         {
-            if (virtualType.ValueIsEnum)
+            var valueTypeInfo = virtualType.ValueTypeInfo;
+
+            // Check both ValueIsEnum flag and ValueTypeInfo.IsEnum for enum detection
+            // This handles cases where enum wasn't detected during registration
+            if (virtualType.ValueIsEnum || valueTypeInfo?.IsEnum == true)
             {
                 TagCodeHelper.WriteTag(_sb, 2, WireType.VarInt);
                 _sb.AppendIndentedLine($"writer.WriteVarInt32((int){sourceVar});");
+                return;
             }
-            else if (_primitiveHandler.CanHandle(virtualType.ValueType))
-            {
-                _primitiveHandler.GenerateWrite(_sb, sourceVar, virtualType.ValueType, DataFormat.Default, 2, false, false);
-            }
-            else
-            {
-                // Complex value type - use BeginSubMessage/EndSubMessage
-                var valueClassName = TypeNameHelper.GetClassName(virtualType.ValueType);
-                // Check if value needs null check (reference types)
-                var valueTypeInfo = virtualType.ValueTypeInfo;
-                bool needsNullCheck = valueTypeInfo != null && !valueTypeInfo.IsPrimitive && !valueTypeInfo.IsStruct;
 
-                if (needsNullCheck)
+            // Check for nullable struct types (T? where T is a custom struct)
+            // This must be checked before GetNullableUnderlyingType which only handles simple types
+            if (TypeHelper.IsNullableType(virtualType.ValueType))
+            {
+                var potentialUnderlyingType = TypeHelper.GetNullableUnderlyingType(virtualType.ValueType);
+                var potentialTypeInfo = _virtualMapRegistry.AnalyzeType(potentialUnderlyingType);
+                if (potentialTypeInfo != null && potentialTypeInfo.IsStruct)
                 {
+                    // Nullable struct - use .Value accessor
+                    GenerateNullableCustomTypeValueWrite(potentialUnderlyingType, potentialTypeInfo, sourceVar);
+                    return;
+                }
+            }
+
+            // Check for nullable types (System.Nullable<T> or T?)
+            var underlyingType = GetNullableUnderlyingType(virtualType.ValueType);
+            if (underlyingType != null)
+            {
+                // Nullable type - check if underlying is primitive
+                if (_primitiveHandler.CanHandle(underlyingType))
+                {
+                    // Nullable primitive - check HasValue and access .Value
                     _sb.AppendIndentedLine($"if ({sourceVar} != null)");
                     _sb.StartNewBlock();
-                }
-
-                TagCodeHelper.WriteTag(_sb, 2, WireType.Len);
-                _sb.AppendIndentedLine("writer.BeginSubMessage();");
-                _sb.AppendIndentedLine($"Write{valueClassName}Content(ref writer, {sourceVar});");
-                _sb.AppendIndentedLine("writer.EndSubMessage();");
-
-                if (needsNullCheck)
-                {
+                    _primitiveHandler.GenerateWrite(_sb, $"{sourceVar}.Value", underlyingType, DataFormat.Default, 2, false, false);
                     _sb.EndBlock();
+                    return;
                 }
+
+                // Nullable custom type (enum serialized as complex type, or ProtoContract struct)
+                // Use the underlying type for writing, with null check and .Value accessor
+                var underlyingTypeInfo = _virtualMapRegistry.AnalyzeType(underlyingType);
+                GenerateNullableCustomTypeValueWrite(underlyingType, underlyingTypeInfo, sourceVar);
+                return;
             }
+
+            if (_primitiveHandler.CanHandle(virtualType.ValueType))
+            {
+                _primitiveHandler.GenerateWrite(_sb, sourceVar, virtualType.ValueType, DataFormat.Default, 2, false, false);
+                return;
+            }
+
+            // Handle array value types (int[], string[], CustomClass[])
+            if (valueTypeInfo?.IsArray == true)
+            {
+                GenerateArrayValueWrite(virtualType, sourceVar, valueTypeInfo);
+                return;
+            }
+
+            // Handle collection value types (List<T>, HashSet<T>)
+            if (valueTypeInfo?.IsList == true || valueTypeInfo?.IsHashSet == true || valueTypeInfo?.IsCollection == true)
+            {
+                GenerateCollectionValueWrite(virtualType, sourceVar, valueTypeInfo);
+                return;
+            }
+
+            // Handle dictionary value types (Dictionary<K,V>)
+            if (valueTypeInfo?.IsDictionary == true)
+            {
+                GenerateDictionaryValueWrite(virtualType, sourceVar, valueTypeInfo);
+                return;
+            }
+
+            // Handle tuple value types
+            if (TupleHandler.IsTupleType(virtualType.ValueType))
+            {
+                GenerateTupleValueWrite(virtualType, sourceVar);
+                return;
+            }
+
+            // ProtoContract custom type - use BeginSubMessage/EndSubMessage with WriteXXXContent
+            GenerateCustomTypeValueWrite(virtualType, sourceVar, valueTypeInfo);
+        }
+
+        private void GenerateNullableCustomTypeValueWrite(string underlyingType, TypeAnalysisInfo underlyingTypeInfo, string sourceVar)
+        {
+            var valueClassName = TypeNameHelper.GetClassName(underlyingType);
+            var writersClass = GetWritersClass(underlyingType);
+
+            _sb.AppendIndentedLine($"if ({sourceVar} != null)");
+            _sb.StartNewBlock();
+            TagCodeHelper.WriteTag(_sb, 2, WireType.Len);
+            _sb.AppendIndentedLine("writer.BeginSubMessage();");
+            _sb.AppendIndentedLine($"{writersClass}.Write{valueClassName}Content(ref writer, {sourceVar}.Value);");
+            _sb.AppendIndentedLine("writer.EndSubMessage();");
+            _sb.EndBlock();
+        }
+
+        private void GenerateArrayValueWrite(VirtualMapEntryInfo virtualType, string sourceVar, TypeAnalysisInfo valueTypeInfo)
+        {
+            var elementType = valueTypeInfo.CollectionElementType;
+            var elemInfo = valueTypeInfo.CollectionElementTypeInfo;
+
+            _sb.AppendIndentedLine($"if ({sourceVar} != null)");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
+            _sb.StartNewBlock();
+
+            GenerateRepeatedElementWrite(elementType, elemInfo, "item", 2);
+
+            _sb.EndBlock();
+            _sb.EndBlock();
+        }
+
+        private void GenerateCollectionValueWrite(VirtualMapEntryInfo virtualType, string sourceVar, TypeAnalysisInfo valueTypeInfo)
+        {
+            var elementType = valueTypeInfo.CollectionElementType;
+            var elemInfo = valueTypeInfo.CollectionElementTypeInfo;
+
+            _sb.AppendIndentedLine($"if ({sourceVar} != null)");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
+            _sb.StartNewBlock();
+
+            GenerateRepeatedElementWrite(elementType, elemInfo, "item", 2);
+
+            _sb.EndBlock();
+            _sb.EndBlock();
+        }
+
+        private void GenerateDictionaryValueWrite(VirtualMapEntryInfo virtualType, string sourceVar, TypeAnalysisInfo valueTypeInfo)
+        {
+            var innerKeyType = valueTypeInfo.DictionaryKeyType;
+            var innerValueType = valueTypeInfo.DictionaryValueType;
+
+            // Check if key/value types are enums using the registry
+            bool keyIsEnum = _registry?.IsEnum(innerKeyType) ?? false;
+            bool valueIsEnum = _registry?.IsEnum(innerValueType) ?? false;
+
+            // Register nested map entry type
+            var nestedEntryInfo = _virtualMapRegistry.RegisterMapEntry(
+                innerKeyType, innerValueType,
+                keyIsEnum,
+                valueIsEnum);
+
+            _sb.AppendIndentedLine($"if ({sourceVar} != null)");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine($"foreach (var kvp in {sourceVar})");
+            _sb.StartNewBlock();
+
+            // Each nested dictionary entry is written as repeated field 2 with BeginSubMessage/EndSubMessage
+            TagCodeHelper.WriteTag(_sb, 2, WireType.Len);
+            _sb.AppendIndentedLine("writer.BeginSubMessage();");
+            _sb.AppendIndentedLine($"Write{nestedEntryInfo.TypeName}(ref writer, kvp.Key, kvp.Value);");
+            _sb.AppendIndentedLine("writer.EndSubMessage();");
+
+            _sb.EndBlock();
+            _sb.EndBlock();
+        }
+
+        private void GenerateTupleValueWrite(VirtualMapEntryInfo virtualType, string sourceVar)
+        {
+            var itemTypes = TupleHandler.ParseTupleTypes(virtualType.ValueType);
+            var tupleInfo = _virtualTupleRegistry.Register(virtualType.ValueType, itemTypes);
+
+            TagCodeHelper.WriteTag(_sb, 2, WireType.Len);
+            _sb.AppendIndentedLine("writer.BeginSubMessage();");
+            _sb.AppendIndentedLine($"Write{tupleInfo.SafeName}(ref writer, {sourceVar});");
+            _sb.AppendIndentedLine("writer.EndSubMessage();");
+        }
+
+        private void GenerateCustomTypeValueWrite(VirtualMapEntryInfo virtualType, string sourceVar, TypeAnalysisInfo valueTypeInfo)
+        {
+            var valueClassName = TypeNameHelper.GetClassName(virtualType.ValueType);
+            var writersClass = GetWritersClass(virtualType.ValueType);
+            bool needsNullCheck = valueTypeInfo != null && !valueTypeInfo.IsPrimitive && !valueTypeInfo.IsStruct;
+
+            if (needsNullCheck)
+            {
+                _sb.AppendIndentedLine($"if ({sourceVar} != null)");
+                _sb.StartNewBlock();
+            }
+
+            TagCodeHelper.WriteTag(_sb, 2, WireType.Len);
+            _sb.AppendIndentedLine("writer.BeginSubMessage();");
+            _sb.AppendIndentedLine($"{writersClass}.Write{valueClassName}Content(ref writer, {sourceVar});");
+            _sb.AppendIndentedLine("writer.EndSubMessage();");
+
+            if (needsNullCheck)
+            {
+                _sb.EndBlock();
+            }
+        }
+
+        /// <summary>
+        /// Generates write code for a single element in a repeated field (array or collection).
+        /// Handles primitives, enums, tuples, and custom types.
+        /// </summary>
+        private void GenerateRepeatedElementWrite(string elementType, TypeAnalysisInfo elemInfo, string itemVar, int fieldId)
+        {
+            // Primitive elements
+            if (_primitiveHandler.CanHandle(elementType))
+            {
+                _primitiveHandler.GenerateWrite(_sb, itemVar, elementType, DataFormat.Default, fieldId, false, false);
+                return;
+            }
+
+            // Enum elements
+            if (elemInfo?.IsEnum == true)
+            {
+                TagCodeHelper.WriteTag(_sb, fieldId, WireType.VarInt);
+                _sb.AppendIndentedLine($"writer.WriteVarInt32((int){itemVar});");
+                return;
+            }
+
+            // Tuple elements
+            if (TupleHandler.IsTupleType(elementType))
+            {
+                var itemTypes = TupleHandler.ParseTupleTypes(elementType);
+                var tupleInfo = _virtualTupleRegistry.Register(elementType, itemTypes);
+                TagCodeHelper.WriteTag(_sb, fieldId, WireType.Len);
+                _sb.AppendIndentedLine("writer.BeginSubMessage();");
+                _sb.AppendIndentedLine($"Write{tupleInfo.SafeName}(ref writer, {itemVar});");
+                _sb.AppendIndentedLine("writer.EndSubMessage();");
+                return;
+            }
+
+            // Nested dictionary elements
+            if (elemInfo?.IsDictionary == true)
+            {
+                var innerKeyType = elemInfo.DictionaryKeyType;
+                var innerValueType = elemInfo.DictionaryValueType;
+
+                // Check if key/value types are enums using the registry
+                bool keyIsEnum = _registry?.IsEnum(innerKeyType) ?? false;
+                bool valueIsEnum = _registry?.IsEnum(innerValueType) ?? false;
+
+                var nestedEntryInfo = _virtualMapRegistry.RegisterMapEntry(
+                    innerKeyType, innerValueType,
+                    keyIsEnum,
+                    valueIsEnum);
+
+                // Write the nested dictionary - all entries packed together
+                TagCodeHelper.WriteTag(_sb, fieldId, WireType.Len);
+                _sb.AppendIndentedLine("writer.BeginSubMessage();");
+                _sb.AppendIndentedLine($"if ({itemVar} != null)");
+                _sb.StartNewBlock();
+                _sb.AppendIndentedLine($"foreach (var innerKvp in {itemVar})");
+                _sb.StartNewBlock();
+                _sb.AppendIndentedLine($"Write{nestedEntryInfo.TypeName}(ref writer, innerKvp.Key, innerKvp.Value);");
+                _sb.EndBlock();
+                _sb.EndBlock();
+                _sb.AppendIndentedLine("writer.EndSubMessage();");
+                return;
+            }
+
+            // Custom type elements (ProtoContract classes)
+            var elementClassName = TypeNameHelper.GetClassName(elementType);
+            var writersClass = GetWritersClass(elementType);
+            _sb.AppendIndentedLine($"if ({itemVar} != null)");
+            _sb.StartNewBlock();
+            TagCodeHelper.WriteTag(_sb, fieldId, WireType.Len);
+            _sb.AppendIndentedLine("writer.BeginSubMessage();");
+            _sb.AppendIndentedLine($"{writersClass}.Write{elementClassName}Content(ref writer, {itemVar});");
+            _sb.AppendIndentedLine("writer.EndSubMessage();");
+            _sb.EndBlock();
         }
 
         /// <summary>
@@ -184,9 +498,33 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 var itemAccess = GetTupleItemAccessor("value", i);
                 var fieldId = i + 1;
 
+                // Analyze the element type
+                var elemTypeInfo = _virtualMapRegistry.AnalyzeType(elementType);
+
                 if (_primitiveHandler.CanHandle(elementType))
                 {
                     _primitiveHandler.GenerateWrite(_sb, itemAccess, elementType, DataFormat.Default, fieldId, false, false);
+                }
+                else if (elemTypeInfo?.IsEnum == true)
+                {
+                    // Enum element - write as VarInt
+                    TagCodeHelper.WriteTag(_sb, fieldId, WireType.VarInt);
+                    _sb.AppendIndentedLine($"writer.WriteVarInt32((int){itemAccess});");
+                }
+                else if (elemTypeInfo?.IsArray == true)
+                {
+                    // Array element - write each item as repeated field
+                    GenerateTupleArrayElementWrite(itemAccess, elemTypeInfo, fieldId);
+                }
+                else if (elemTypeInfo?.IsList == true || elemTypeInfo?.IsHashSet == true || elemTypeInfo?.IsCollection == true)
+                {
+                    // Collection element - write each item as repeated field
+                    GenerateTupleCollectionElementWrite(itemAccess, elemTypeInfo, fieldId);
+                }
+                else if (elemTypeInfo?.IsDictionary == true)
+                {
+                    // Dictionary element - write as nested map entries
+                    GenerateTupleDictionaryElementWrite(itemAccess, elemTypeInfo, fieldId);
                 }
                 else if (TupleHandler.IsTupleType(elementType))
                 {
@@ -200,17 +538,81 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 }
                 else
                 {
-                    // Complex element type
+                    // ProtoContract custom type element
                     var elementClassName = TypeNameHelper.GetClassName(elementType);
+                    var writersClass = GetWritersClass(elementType);
+                    _sb.AppendIndentedLine($"if ({itemAccess} != null)");
+                    _sb.StartNewBlock();
                     TagCodeHelper.WriteTag(_sb, fieldId, WireType.Len);
                     _sb.AppendIndentedLine("writer.BeginSubMessage();");
-                    _sb.AppendIndentedLine($"Write{elementClassName}Content(ref writer, {itemAccess});");
+                    _sb.AppendIndentedLine($"{writersClass}.Write{elementClassName}Content(ref writer, {itemAccess});");
                     _sb.AppendIndentedLine("writer.EndSubMessage();");
+                    _sb.EndBlock();
                 }
             }
 
             _sb.EndBlock();
             _sb.AppendNewLine();
+        }
+
+        /// <summary>
+        /// Gets the namespace-qualified OnePassStreamWriters class for a type.
+        /// </summary>
+        private string GetWritersClass(string typeName)
+        {
+            // Use NamespaceHelper to get the correct namespace-qualified writers class
+            return NamespaceHelper.GetWritersClass(typeName, ClassName, _registry);
+        }
+
+        private void GenerateTupleArrayElementWrite(string itemAccess, TypeAnalysisInfo elemTypeInfo, int fieldId)
+        {
+            var arrayElementType = elemTypeInfo.CollectionElementType;
+            var arrayElemInfo = elemTypeInfo.CollectionElementTypeInfo;
+
+            _sb.AppendIndentedLine($"if ({itemAccess} != null)");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine($"foreach (var arrayItem in {itemAccess})");
+            _sb.StartNewBlock();
+            GenerateRepeatedElementWrite(arrayElementType, arrayElemInfo, "arrayItem", fieldId);
+            _sb.EndBlock();
+            _sb.EndBlock();
+        }
+
+        private void GenerateTupleCollectionElementWrite(string itemAccess, TypeAnalysisInfo elemTypeInfo, int fieldId)
+        {
+            var collectionElementType = elemTypeInfo.CollectionElementType;
+            var collectionElemInfo = elemTypeInfo.CollectionElementTypeInfo;
+
+            _sb.AppendIndentedLine($"if ({itemAccess} != null)");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine($"foreach (var collItem in {itemAccess})");
+            _sb.StartNewBlock();
+            GenerateRepeatedElementWrite(collectionElementType, collectionElemInfo, "collItem", fieldId);
+            _sb.EndBlock();
+            _sb.EndBlock();
+        }
+
+        private void GenerateTupleDictionaryElementWrite(string itemAccess, TypeAnalysisInfo elemTypeInfo, int fieldId)
+        {
+            var dictKeyType = elemTypeInfo.DictionaryKeyType;
+            var dictValueType = elemTypeInfo.DictionaryValueType;
+
+            // Check if key/value types are enums
+            bool keyIsEnum = _registry?.IsEnum(dictKeyType) ?? false;
+            bool valueIsEnum = _registry?.IsEnum(dictValueType) ?? false;
+
+            var nestedEntryInfo = _virtualMapRegistry.RegisterMapEntry(dictKeyType, dictValueType, keyIsEnum, valueIsEnum);
+
+            _sb.AppendIndentedLine($"if ({itemAccess} != null)");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine($"foreach (var dictKvp in {itemAccess})");
+            _sb.StartNewBlock();
+            TagCodeHelper.WriteTag(_sb, fieldId, WireType.Len);
+            _sb.AppendIndentedLine("writer.BeginSubMessage();");
+            _sb.AppendIndentedLine($"Write{nestedEntryInfo.TypeName}(ref writer, dictKvp.Key, dictKvp.Value);");
+            _sb.AppendIndentedLine("writer.EndSubMessage();");
+            _sb.EndBlock();
+            _sb.EndBlock();
         }
 
         #region Write Method
@@ -583,11 +985,47 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 // Tuple collection
                 GenerateTupleCollectionWrite(member, sourceVar);
             }
+            else if (TypeMapping.IsSimpleType(normalizedType))
+            {
+                // BCL types like DateTime, Guid, TimeSpan that are "simple" but not primitive arrays
+                GenerateBclTypeCollectionWrite(member, sourceVar, normalizedType);
+            }
             else
             {
                 // Complex type collection - use BeginSubMessage/EndSubMessage
                 GenerateComplexCollectionWrite(member, sourceVar);
             }
+        }
+
+        /// <summary>
+        /// Generates write code for collections of BCL types like DateTime, Guid, TimeSpan.
+        /// These are simple types but not included in primitive array handling.
+        /// </summary>
+        private void GenerateBclTypeCollectionWrite(ProtoMemberAttribute member, string sourceVar, string normalizedType)
+        {
+            _sb.AppendIndentedLine($"if ({sourceVar} != null)");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
+            _sb.StartNewBlock();
+
+            // BCL types like DateTime, Guid, TimeSpan use WriteXXX methods directly
+            // No null check needed since these are value types
+            var wireType = TypeMapping.GetWireType(normalizedType);
+            TagCodeHelper.WriteTag(_sb, member.FieldId, wireType);
+
+            var writeExpr = TypeMapping.GetWriteExpression(normalizedType, "item", DataFormat.Default, "writer");
+            if (writeExpr != null)
+            {
+                _sb.AppendIndentedLine($"{writeExpr};");
+            }
+            else
+            {
+                // Fallback to generic handling
+                _sb.AppendIndentedLine($"// Warning: Unsupported BCL type {normalizedType}");
+            }
+
+            _sb.EndBlock();
+            _sb.EndBlock();
         }
 
         private void GenerateTupleFieldWrite(ProtoMemberAttribute member, string sourceVar)
@@ -623,18 +1061,35 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         {
             var elementClassName = TypeNameHelper.GetClassName(member.CollectionElementType);
 
+            // Check if element type is a struct (can't be null)
+            var normalizedType = TypeMapping.NormalizeTypeName(member.CollectionElementType);
+            var elementTypeDef = _registry?.GetByFullName(normalizedType) ?? _registry?.GetByFullName(member.CollectionElementType);
+            bool elementIsStruct = elementTypeDef != null && elementTypeDef.IsStruct;
+
+            // Get namespace-qualified writers class for cross-namespace calls
+            var writersClass = GetWritersClass(member.CollectionElementType);
+
             _sb.AppendIndentedLine($"if ({sourceVar} != null)");
             _sb.StartNewBlock();
             _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
             _sb.StartNewBlock();
 
-            _sb.AppendIndentedLine("if (item != null)");
-            _sb.StartNewBlock();
+            // Only add null check for reference types
+            if (!elementIsStruct)
+            {
+                _sb.AppendIndentedLine("if (item != null)");
+                _sb.StartNewBlock();
+            }
+
             TagCodeHelper.WriteTag(_sb, member.FieldId, WireType.Len);
             _sb.AppendIndentedLine("writer.BeginSubMessage();");
-            _sb.AppendIndentedLine($"Write{elementClassName}Content(ref writer, item);");
+            _sb.AppendIndentedLine($"{writersClass}.Write{elementClassName}Content(ref writer, item);");
             _sb.AppendIndentedLine("writer.EndSubMessage();");
-            _sb.EndBlock();
+
+            if (!elementIsStruct)
+            {
+                _sb.EndBlock();
+            }
 
             _sb.EndBlock();
             _sb.EndBlock();
@@ -642,9 +1097,30 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateComplexTypeWrite(ProtoMemberAttribute member, string sourceVar)
         {
-            var typeName = TypeNameHelper.GetClassName(member.Type);
-            var typeDef = _registry.GetByFullName(member.Type);
-            bool isNonNullableStruct = typeDef != null && typeDef.IsStruct && !member.IsNullable;
+            // Check if type is a nullable wrapper (System.Nullable<T> or T?)
+            // This only applies to VALUE types wrapped in Nullable<>
+            var underlyingType = GetNullableUnderlyingType(member.Type);
+
+            // Also check for nullable struct types (T? where T is a custom struct)
+            // GetNullableUnderlyingType only handles simple types, so we need TypeHelper for custom structs
+            if (underlyingType == null && TypeHelper.IsNullableType(member.Type))
+            {
+                var potentialUnderlyingType = TypeHelper.GetNullableUnderlyingType(member.Type);
+                var potentialTypeDef = _registry.GetByFullName(potentialUnderlyingType);
+                if (potentialTypeDef != null && potentialTypeDef.IsStruct)
+                {
+                    underlyingType = potentialUnderlyingType;
+                }
+            }
+
+            var actualType = underlyingType ?? member.Type;
+            var typeName = TypeNameHelper.GetClassName(actualType);
+            var typeDef = _registry.GetByFullName(actualType);
+
+            // Determine if this is a nullable VALUE type (struct wrapped in Nullable<T>)
+            // Only Nullable<T> wrappers need .Value accessor, not nullable reference types
+            bool isNullableValueType = underlyingType != null;
+            bool isNonNullableStruct = typeDef != null && typeDef.IsStruct && underlyingType == null && !member.IsNullable;
 
             if (!isNonNullableStruct)
             {
@@ -658,12 +1134,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine("writer.BeginSubMessage();");
 
             string valueArg = isNonNullableStruct ? sourceVar : "complexValue";
-            if (member.IsNullable && typeDef != null && typeDef.IsStruct)
+            if (isNullableValueType)
             {
                 valueArg += ".Value";
             }
 
-            var typeNamespace = _registry.GetNamespaceForType(member.Type);
+            var typeNamespace = _registry.GetNamespaceForType(actualType);
             var nsPrefix = GeneratorHelpers.GetNamespacePrefix(typeNamespace, _currentNamespace);
             _sb.AppendIndentedLine($"{nsPrefix}{ClassName}.Write{typeName}Content(ref writer, {valueArg});");
             _sb.AppendIndentedLine("writer.EndSubMessage();");
@@ -682,10 +1158,37 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// <summary>
         /// Converts a type name to its code-generation form.
         /// Uses C# keywords for primitives (int, string, etc.) and global:: prefix for custom types.
+        /// Handles arrays by recursively processing the element type.
+        /// Handles nullable types (System.Nullable&lt;T&gt; and T?) properly.
         /// </summary>
         private static string GetGlobalTypeName(string typeName)
         {
-            // Check if it's a primitive/simple type first
+            // Handle nullable types first (System.Nullable<T>)
+            if (typeName.StartsWith("System.Nullable<") && typeName.EndsWith(">"))
+            {
+                var innerType = typeName.Substring(16, typeName.Length - 17);
+                var innerTypeName = GetGlobalTypeName(innerType);
+                return $"{innerTypeName}?";
+            }
+
+            // Handle C# nullable shorthand (T?)
+            if (typeName.EndsWith("?"))
+            {
+                var innerType = typeName.Substring(0, typeName.Length - 1);
+                var innerTypeName = GetGlobalTypeName(innerType);
+                return $"{innerTypeName}?";
+            }
+
+            // Handle array types - recurse to get proper element type name
+            // Example: "System.Int32[]" -> "int[]", not "global::int[]"
+            if (typeName.EndsWith("[]"))
+            {
+                var elementType = typeName.Substring(0, typeName.Length - 2);
+                var elementTypeName = GetGlobalTypeName(elementType);
+                return $"{elementTypeName}[]";
+            }
+
+            // Check if it's a primitive/simple type
             if (TypeMapping.IsSimpleType(typeName))
             {
                 // Return C# keyword form (int, string, etc.)
@@ -699,26 +1202,94 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// <summary>
         /// Gets the correct accessor for a tuple item by index.
         /// For items 0-6, returns "variable.Item1" through "variable.Item7".
-        /// For items 7+, uses Rest property: "variable.Rest.Item1", "variable.Rest.Rest.Item1", etc.
+        /// For item 7 (8th element), returns "variable.Rest" (the whole TRest value).
+        /// For items 8+, when TupleTypeInfo.Arity > 8, the items are within the nested Rest tuple.
+        ///
+        /// C# Tuple structure: Tuple&lt;T1,T2,T3,T4,T5,T6,T7,TRest&gt;
+        /// - Items 1-7 are direct properties
+        /// - Rest is the entire TRest value (which may be a nested Tuple)
         /// </summary>
         private static string GetTupleItemAccessor(string variableName, int itemIndex)
         {
-            // Items 0-6 use Item1-Item7
+            // Items 0-6 use Item1-Item7 directly
             if (itemIndex < 7)
             {
                 return $"{variableName}.Item{itemIndex + 1}";
             }
 
-            // Items 7+ use Rest.ItemX, Rest.Rest.ItemX, etc.
-            var restDepth = (itemIndex - 7) / 7 + 1;
-            var itemInRest = (itemIndex - 7) % 7 + 1;
-
-            var accessor = variableName;
-            for (int i = 0; i < restDepth; i++)
+            // Item 7 (8th element, 0-indexed) is the Rest property itself
+            // In TupleTypeInfo where Arity = 8, ItemTypes[7] is the 8th element type (which is TRest)
+            // We return .Rest to get the whole TRest value
+            if (itemIndex == 7)
             {
-                accessor += ".Rest";
+                return $"{variableName}.Rest";
             }
-            return $"{accessor}.Item{itemInRest}";
+
+            // For Arity > 8, TupleTypeInfo represents a "flattened" view
+            // Items at index 8+ need to access within the nested Rest tuple
+            // Example: For a logical 9-element tuple represented as Tuple<T1..T7, Tuple<T8, T9>>
+            // - ItemTypes[7] = T8, accessed as .Rest.Item1
+            // - ItemTypes[8] = T9, accessed as .Rest.Item2
+
+            // Actually, for TupleTypeInfo with Arity > 8, the types are already flattened
+            // So itemIndex 8 means the 9th logical item, which is .Rest.Item2
+            // itemIndex 7 was the 8th item (.Rest or .Rest.Item1 depending on nesting)
+
+            // This case handles when Arity > 8 and we're accessing items 9+
+            var itemWithinRest = itemIndex - 6; // Maps index 7->1, 8->2, etc. for Rest.ItemX
+
+            // For deep nesting (15+ elements), we need nested Rest
+            if (itemWithinRest > 7)
+            {
+                var restDepth = (itemWithinRest - 1) / 7;
+                var finalItemIndex = ((itemWithinRest - 1) % 7) + 1;
+
+                var accessor = variableName + ".Rest";
+                for (int i = 0; i < restDepth; i++)
+                {
+                    accessor += ".Rest";
+                }
+
+                if (finalItemIndex == 1 && restDepth > 0)
+                {
+                    return accessor; // Return the nested Rest itself
+                }
+
+                return $"{accessor}.Item{finalItemIndex}";
+            }
+
+            return $"{variableName}.Rest.Item{itemWithinRest}";
+        }
+
+        /// <summary>
+        /// Gets the underlying type from a nullable VALUE type (System.Nullable&lt;T&gt; or primitive?).
+        /// Returns null if the type is not a Nullable&lt;T&gt; wrapper or nullable primitive.
+        /// For T? shorthand, only returns the underlying type if it's a known simple value type.
+        /// </summary>
+        private static string GetNullableUnderlyingType(string typeName)
+        {
+            if (string.IsNullOrEmpty(typeName))
+                return null;
+
+            // Handle System.Nullable<T> - only valid for value types
+            if (typeName.StartsWith("System.Nullable<") && typeName.EndsWith(">"))
+            {
+                return typeName.Substring(16, typeName.Length - 17);
+            }
+
+            // Handle T? shorthand ONLY for known simple value types (int?, long?, etc.)
+            // Reference types in C# 8+ can also use T? but they don't need .Value accessor
+            if (typeName.EndsWith("?"))
+            {
+                var underlyingType = typeName.Substring(0, typeName.Length - 1);
+                // Only treat as nullable value type if underlying is a simple type (primitives, DateTime, Guid, etc.)
+                if (TypeMapping.IsSimpleType(underlyingType))
+                {
+                    return underlyingType;
+                }
+            }
+
+            return null;
         }
 
         #endregion

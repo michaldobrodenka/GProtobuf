@@ -177,9 +177,15 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             // If value is a dictionary, register it as both a map entry and a collection type
             if (info.ValueTypeInfo.IsDictionary)
             {
+                // Analyze nested key/value types to detect enums
+                var nestedKeyTypeInfo = AnalyzeType(info.ValueTypeInfo.DictionaryKeyType);
+                var nestedValueTypeInfo = AnalyzeType(info.ValueTypeInfo.DictionaryValueType);
+
                 RegisterMapEntry(
                     info.ValueTypeInfo.DictionaryKeyType,
-                    info.ValueTypeInfo.DictionaryValueType);
+                    info.ValueTypeInfo.DictionaryValueType,
+                    nestedKeyTypeInfo?.IsEnum ?? false,
+                    nestedValueTypeInfo?.IsEnum ?? false);
                 // Also register as a collection type for virtual reader generation
                 RegisterCollectionType(info.ValueType, info.ValueTypeInfo);
             }
@@ -193,7 +199,15 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 if (info.ValueTypeInfo.CollectionElementTypeInfo?.IsDictionary == true)
                 {
                     var elemInfo = info.ValueTypeInfo.CollectionElementTypeInfo;
-                    RegisterMapEntry(elemInfo.DictionaryKeyType, elemInfo.DictionaryValueType);
+                    // Analyze nested key/value types to detect enums
+                    var elemKeyTypeInfo = AnalyzeType(elemInfo.DictionaryKeyType);
+                    var elemValueTypeInfo = AnalyzeType(elemInfo.DictionaryValueType);
+
+                    RegisterMapEntry(
+                        elemInfo.DictionaryKeyType,
+                        elemInfo.DictionaryValueType,
+                        elemKeyTypeInfo?.IsEnum ?? false,
+                        elemValueTypeInfo?.IsEnum ?? false);
                 }
             }
         }
