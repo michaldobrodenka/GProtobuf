@@ -1,4 +1,4 @@
-namespace GProtobuf.Generator
+namespace GProtobuf.Generator.CodeGeneration
 {
     /// <summary>
     /// Options extracted from [assembly: GProtobufOptions(...)] attribute.

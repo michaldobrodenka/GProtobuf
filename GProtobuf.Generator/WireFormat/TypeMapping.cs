@@ -1,6 +1,7 @@
 using System.Text;
+using GProtobuf.Generator.Attributes;
 
-namespace GProtobuf.Generator.V2
+namespace GProtobuf.Generator.WireFormat
 {
     /// <summary>
     /// Maps C# types to protobuf wire format operations.
@@ -698,7 +699,7 @@ namespace GProtobuf.Generator.V2
 
         /// <summary>
         /// Recursively normalizes generic type arguments.
-        /// Example: "KeyValuePair<int, string>" -> "System.Collections.Generic.KeyValuePair<System.Int32, System.String>"
+        /// Example: "KeyValuePair&lt;int, string&gt;" -> "System.Collections.Generic.KeyValuePair&lt;System.Int32, System.String&gt;"
         /// </summary>
         public static string NormalizeGenericTypeName(string typeName)
         {

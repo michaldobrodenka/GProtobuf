@@ -3,7 +3,7 @@ using GProtobuf.Generator.V2.Handlers.Core;
 using GProtobuf.Generator.V2.Helpers;
 
 // Use existing type mapping and helper classes for primitive type handling
-using static GProtobuf.Generator.V2.TypeMapping;
+using static GProtobuf.Generator.WireFormat.TypeMapping;
 
 namespace GProtobuf.Generator.V2.CodeGeneration
 {

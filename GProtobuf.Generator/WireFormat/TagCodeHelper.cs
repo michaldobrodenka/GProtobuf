@@ -1,6 +1,7 @@
-using GProtobuf.Generator.V2.CodeGeneration;
+using GProtobuf.Generator.Attributes;
+using GProtobuf.Generator.Utilities;
 
-namespace GProtobuf.Generator.V2.Handlers.Core
+namespace GProtobuf.Generator.WireFormat
 {
     /// <summary>
     /// Centralized tag generation for serialization code.

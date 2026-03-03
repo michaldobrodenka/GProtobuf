@@ -293,16 +293,16 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         {
             switch (collection.Kind)
             {
-                case GProtobuf.Generator.V2.Handlers.VirtualTypes.CollectionKind.List:
+                case GProtobuf.Generator.V2.Handlers.VirtualTypes.VirtualCollectionKind.List:
                     GenerateListReader(collection);
                     break;
-                case GProtobuf.Generator.V2.Handlers.VirtualTypes.CollectionKind.HashSet:
+                case GProtobuf.Generator.V2.Handlers.VirtualTypes.VirtualCollectionKind.HashSet:
                     GenerateHashSetReader(collection);
                     break;
-                case GProtobuf.Generator.V2.Handlers.VirtualTypes.CollectionKind.Dictionary:
+                case GProtobuf.Generator.V2.Handlers.VirtualTypes.VirtualCollectionKind.Dictionary:
                     GenerateDictionaryReader(collection);
                     break;
-                case GProtobuf.Generator.V2.Handlers.VirtualTypes.CollectionKind.Array:
+                case GProtobuf.Generator.V2.Handlers.VirtualTypes.VirtualCollectionKind.Array:
                     GenerateArrayReader(collection);
                     break;
             }
@@ -1448,7 +1448,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                         _sb.AppendIndentedLine("var nestedLength = reader.ReadVarInt32();");
                         _sb.AppendIndentedLine("var nestedOldLimit = reader.PushLimit(nestedLength);");
 
-                        var simpleName = Helpers.TypeNameHelper.GetClassName(member.Type);
+                        var simpleName = GProtobuf.Generator.Utilities.TypeNameHelper.GetClassName(member.Type);
                         var typeNs = _registry?.GetNamespaceForType(member.Type) ?? string.Empty;
                         var typeNsPrefix = GeneratorHelpers.GetNamespacePrefix(typeNs, _currentNamespace);
 

@@ -1014,7 +1014,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 _sb.AppendIndentedLine("var length = reader.ReadVarInt32();");
                 _sb.AppendIndentedLine("var nestedReader = new SpanReader(reader.GetSlice(length));");
 
-                var simpleName = Helpers.TypeNameHelper.GetClassName(member.Type);
+                var simpleName = GProtobuf.Generator.Utilities.TypeNameHelper.GetClassName(member.Type);
 
                 if (member.Namespace == _currentNamespace || string.IsNullOrEmpty(member.Namespace))
                 {

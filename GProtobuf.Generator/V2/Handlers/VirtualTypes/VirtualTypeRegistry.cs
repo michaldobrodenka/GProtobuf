@@ -120,19 +120,19 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
 
             if (typeInfo.IsList)
             {
-                info.Kind = CollectionKind.List;
+                info.Kind = VirtualCollectionKind.List;
                 info.ElementType = typeInfo.CollectionElementType;
                 info.ElementTypeInfo = typeInfo.CollectionElementTypeInfo ?? AnalyzeType(typeInfo.CollectionElementType);
             }
             else if (typeInfo.IsHashSet)
             {
-                info.Kind = CollectionKind.HashSet;
+                info.Kind = VirtualCollectionKind.HashSet;
                 info.ElementType = typeInfo.CollectionElementType;
                 info.ElementTypeInfo = typeInfo.CollectionElementTypeInfo ?? AnalyzeType(typeInfo.CollectionElementType);
             }
             else if (typeInfo.IsDictionary)
             {
-                info.Kind = CollectionKind.Dictionary;
+                info.Kind = VirtualCollectionKind.Dictionary;
                 info.DictionaryKeyType = typeInfo.DictionaryKeyType;
                 info.DictionaryValueType = typeInfo.DictionaryValueType;
                 info.DictionaryKeyTypeInfo = AnalyzeType(typeInfo.DictionaryKeyType);
@@ -140,14 +140,14 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             }
             else if (typeInfo.IsArray)
             {
-                info.Kind = CollectionKind.Array;
+                info.Kind = VirtualCollectionKind.Array;
                 info.ElementType = typeInfo.CollectionElementType;
                 info.ElementTypeInfo = typeInfo.CollectionElementTypeInfo ?? AnalyzeType(typeInfo.CollectionElementType);
             }
             else if (typeInfo.IsCollection)
             {
                 // Generic collection - treat as List
-                info.Kind = CollectionKind.List;
+                info.Kind = VirtualCollectionKind.List;
                 info.ElementType = typeInfo.CollectionElementType;
                 info.ElementTypeInfo = typeInfo.CollectionElementTypeInfo ?? AnalyzeType(typeInfo.CollectionElementType);
             }
@@ -544,7 +544,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
     {
         public string FullTypeName { get; set; }
         public string SafeName { get; set; }
-        public CollectionKind Kind { get; set; }
+        public VirtualCollectionKind Kind { get; set; }
         public string ElementType { get; set; }
         public TypeAnalysisInfo ElementTypeInfo { get; set; }
         // For nested dictionaries
@@ -554,7 +554,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         public TypeAnalysisInfo DictionaryValueTypeInfo { get; set; }
     }
 
-    internal enum CollectionKind
+    internal enum VirtualCollectionKind
     {
         List,
         HashSet,
