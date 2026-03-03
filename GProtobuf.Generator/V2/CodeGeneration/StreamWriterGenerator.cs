@@ -52,7 +52,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine($"public static class {_className}");
             _sb.StartNewBlock();
 
-            foreach (var type in types)
+            // Generate dictionary-based type dispatch for large type hierarchies
+            var typesList = types.ToList();
+            GenerateTypeDispatchDictionaries(typesList);
+
+            foreach (var type in typesList)
             {
                 GenerateWriteMethod(type);
 
@@ -132,6 +136,41 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             foreach (var tupleInfo in tupleTypes)
             {
                 generator.GenerateWriter(tupleInfo);
+            }
+        }
+
+        /// <summary>
+        /// Generates dictionary-based type dispatch fields for types with many derived classes.
+        /// This provides O(1) type lookup vs O(n) type pattern matching in switch statements.
+        /// </summary>
+        private void GenerateTypeDispatchDictionaries(List<TypeDefinition> types)
+        {
+            var generatedDictionaries = new HashSet<string>();
+
+            foreach (var type in types)
+            {
+                if (type.ProtoIncludes != null && type.ProtoIncludes.Count > 0)
+                {
+                    var allDerivedTypes = _registry.GetAllDerivedTypes(type.FullName);
+                    if (allDerivedTypes != null && allDerivedTypes.Count >= DictionaryDispatchThreshold)
+                    {
+                        // Sort by depth (most derived first)
+                        var sortedDerived = allDerivedTypes
+                            .OrderByDescending(d =>
+                            {
+                                var chain = _registry.GetInheritanceChain(d);
+                                return chain?.Count ?? 0;
+                            })
+                            .ToList();
+
+                        var className = TypeNameHelper.GetClassName(type.FullName);
+                        if (!generatedDictionaries.Contains(className))
+                        {
+                            TryGenerateDictionaryDispatch(className, type.FullName, sortedDerived);
+                            generatedDictionaries.Add(className);
+                        }
+                    }
+                }
             }
         }
 
@@ -749,75 +788,45 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 return;
             }
 
-            // Build list of (Type, ImmediateParentFieldId) for switch cases
-            var derivedCases = new List<(string Type, int FieldId)>();
-            foreach (var derivedType in allDerivedTypes)
-            {
-                // Find immediate parent's ProtoInclude field for this derived type
-                var parent = _registry.GetParent(derivedType);
-
-                // If parent is current type, use direct ProtoInclude field
-                // Otherwise, use parent's ProtoInclude field (for transitive derived)
-                int fieldId;
-                if (parent == type.FullName)
-                {
-                    // Direct child - use ProtoInclude from current type
-                    var protoInclude = type.ProtoIncludes?.FirstOrDefault(p => p.Type == derivedType);
-                    fieldId = protoInclude?.FieldId ?? 0;
-                }
-                else
-                {
-                    // Transitive child - find field ID that connects to immediate child of current type
-                    // Walk up from derivedType until we find immediate child of current type
-                    var current = derivedType;
-                    fieldId = 0; // Initialize to avoid uninitialized variable error
-                    while (current != null)
-                    {
-                        var currentParent = _registry.GetParent(current);
-                        if (currentParent == type.FullName)
-                        {
-                            // current is immediate child of type
-                            var protoInclude = type.ProtoIncludes?.FirstOrDefault(p => p.Type == current);
-                            if (protoInclude != null)
-                            {
-                                fieldId = protoInclude.FieldId;
-                            }
-                            break;
-                        }
-                        current = currentParent;
-                    }
-                }
-
-                derivedCases.Add((derivedType, fieldId));
-            }
-
             // Sort by depth (most derived first) to ensure C is checked before B
-            derivedCases = derivedCases
+            var sortedDerived = allDerivedTypes
                 .OrderByDescending(d =>
                 {
-                    var chain = _registry.GetInheritanceChain(d.Type);
+                    var chain = _registry.GetInheritanceChain(d);
                     return chain?.Count ?? 0;
                 })
                 .ToList();
 
-            // Generate switch with all derived types
-            _sb.AppendIndentedLine("switch (instance)");
-            _sb.StartNewBlock();
-
-            foreach (var (derivedType, fieldId) in derivedCases)
+            // Use dictionary-based dispatch for large type hierarchies (O(1) vs O(n) type checks)
+            if (sortedDerived.Count >= DictionaryDispatchThreshold)
             {
-                var derivedClassName = TypeNameHelper.GetClassName(derivedType);
-                _sb.AppendIndentedLine($"case global::{derivedType} derived:");
-                _sb.IncreaseIndent();
-
-                // Call Write{Type}_As{CurrentType} method
-                // For WriteA with derived C, call WriteC_AsA
-                _sb.AppendIndentedLine($"Write{derivedClassName}_As{className}(ref writer, derived);");
-                _sb.AppendIndentedLine("return;");
-                _sb.DecreaseIndent();
+                GenerateDictionaryBasedSwitch(className, "instance", sortedDerived, (index, derivedType, derivedClassName) =>
+                {
+                    _sb.AppendIndentedLine($"Write{derivedClassName}_As{className}(ref writer, (global::{derivedType})instance);");
+                    _sb.AppendIndentedLine("return;");
+                });
             }
+            else
+            {
+                // Generate switch with all derived types (standard pattern for small hierarchies)
+                _sb.AppendIndentedLine("switch (instance)");
+                _sb.StartNewBlock();
 
-            _sb.EndBlock();
+                foreach (var derivedType in sortedDerived)
+                {
+                    var derivedClassName = TypeNameHelper.GetClassName(derivedType);
+                    _sb.AppendIndentedLine($"case global::{derivedType} derived:");
+                    _sb.IncreaseIndent();
+
+                    // Call Write{Type}_As{CurrentType} method
+                    // For WriteA with derived C, call WriteC_AsA
+                    _sb.AppendIndentedLine($"Write{derivedClassName}_As{className}(ref writer, derived);");
+                    _sb.AppendIndentedLine("return;");
+                    _sb.DecreaseIndent();
+                }
+
+                _sb.EndBlock();
+            }
 
             // Default case - write base type fields (when instance is exactly the base type, not derived)
             _sb.AppendIndentedLine($"// Base type instance - write base fields only");

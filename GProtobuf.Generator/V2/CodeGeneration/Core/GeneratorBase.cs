@@ -171,5 +171,96 @@ namespace GProtobuf.Generator.V2.CodeGeneration.Core
                 }
             }
         }
+
+        #region Dictionary-Based Type Dispatch Optimization
+
+        /// <summary>
+        /// Threshold for using dictionary-based dispatch vs type switch.
+        /// For small numbers of derived types, the type switch is faster due to JIT optimization.
+        /// </summary>
+        protected const int DictionaryDispatchThreshold = 8;
+
+        /// <summary>
+        /// Set of base types that need dictionary dispatch generation.
+        /// Populated during type dispatch generation, used to generate dictionaries at class level.
+        /// </summary>
+        protected HashSet<string> _typesNeedingDictionaryDispatch = new HashSet<string>();
+
+        /// <summary>
+        /// Generates dictionary field and GetTypeIndex method for a polymorphic base type.
+        /// Returns true if dictionary dispatch should be used, false for regular type switch.
+        /// </summary>
+        /// <param name="className">The class name of the base type</param>
+        /// <param name="fullTypeName">The full type name</param>
+        /// <param name="derivedTypes">List of derived types (sorted by depth, most derived first)</param>
+        /// <returns>True if dictionary dispatch was generated and should be used</returns>
+        protected bool TryGenerateDictionaryDispatch(string className, string fullTypeName, List<string> derivedTypes)
+        {
+            if (derivedTypes == null || derivedTypes.Count < DictionaryDispatchThreshold)
+                return false;
+
+            // Generate dictionary field
+            _sb.AppendIndentedLine($"#region {className} Type Dispatch Dictionary");
+            _sb.AppendIndentedLine($"private static System.Collections.Generic.Dictionary<nint, int> _{className}TypeIndex;");
+            _sb.AppendNewLine();
+
+            // Generate lazy initializer
+            _sb.AppendIndentedLine($"private static System.Collections.Generic.Dictionary<nint, int> Get{className}TypeIndex()");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine($"if (_{className}TypeIndex != null) return _{className}TypeIndex;");
+            _sb.AppendNewLine();
+            _sb.AppendIndentedLine($"var dict = new System.Collections.Generic.Dictionary<nint, int>({derivedTypes.Count});");
+
+            for (int i = 0; i < derivedTypes.Count; i++)
+            {
+                _sb.AppendIndentedLine($"dict[typeof(global::{derivedTypes[i]}).TypeHandle.Value] = {i};");
+            }
+
+            _sb.AppendIndentedLine($"_{className}TypeIndex = dict;");
+            _sb.AppendIndentedLine("return dict;");
+            _sb.EndBlock();
+            _sb.AppendNewLine();
+            _sb.AppendIndentedLine("#endregion");
+            _sb.AppendNewLine();
+
+            _typesNeedingDictionaryDispatch.Add(fullTypeName);
+            return true;
+        }
+
+        /// <summary>
+        /// Generates the dictionary lookup and integer switch for type dispatch.
+        /// </summary>
+        /// <param name="className">The class name of the base type</param>
+        /// <param name="sourceVar">Source variable name (e.g., "obj", "instance")</param>
+        /// <param name="derivedTypes">List of derived types (sorted by depth, most derived first)</param>
+        /// <param name="generateCase">Action to generate code for each case (index, derivedType, derivedClassName)</param>
+        protected void GenerateDictionaryBasedSwitch(
+            string className,
+            string sourceVar,
+            List<string> derivedTypes,
+            Action<int, string, string> generateCase)
+        {
+            _sb.AppendIndentedLine($"// O(1) dictionary-based type dispatch (optimized for {derivedTypes.Count} types)");
+            _sb.AppendIndentedLine($"var typeDict = Get{className}TypeIndex();");
+            _sb.AppendIndentedLine($"if (typeDict.TryGetValue(System.Type.GetTypeHandle({sourceVar}).Value, out var typeIndex))");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine("switch (typeIndex)");
+            _sb.StartNewBlock();
+
+            for (int i = 0; i < derivedTypes.Count; i++)
+            {
+                var derivedType = derivedTypes[i];
+                var derivedClassName = TypeNameHelper.GetClassName(derivedType);
+                _sb.AppendIndentedLine($"case {i}:");
+                _sb.IncreaseIndent();
+                generateCase(i, derivedType, derivedClassName);
+                _sb.DecreaseIndent();
+            }
+
+            _sb.EndBlock();
+            _sb.EndBlock();
+        }
+
+        #endregion
     }
 }

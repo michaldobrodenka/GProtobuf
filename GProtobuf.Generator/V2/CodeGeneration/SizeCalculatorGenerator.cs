@@ -40,7 +40,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine("public static class SizeCalculators");
             _sb.StartNewBlock();
 
-            foreach (var type in types)
+            // Generate dictionary-based type dispatch for large type hierarchies
+            var typesList = types.ToList();
+            GenerateTypeDispatchDictionaries(typesList);
+
+            foreach (var type in typesList)
             {
                 GenerateCalculateSizeMethod(type);
                 GenerateCalculateContentSizeMethod(type);
@@ -130,6 +134,32 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             foreach (var tupleInfo in tupleTypes)
             {
                 generator.GenerateSizeCalculator(tupleInfo);
+            }
+        }
+
+        /// <summary>
+        /// Generates dictionary-based type dispatch fields for types with many derived classes.
+        /// This provides O(1) type lookup vs O(n) type pattern matching in switch statements.
+        /// </summary>
+        private void GenerateTypeDispatchDictionaries(List<TypeDefinition> types)
+        {
+            var generatedDictionaries = new HashSet<string>();
+
+            foreach (var type in types)
+            {
+                if (type.ProtoIncludes != null && type.ProtoIncludes.Count > 0)
+                {
+                    var sortedDerived = GeneratorHelpers.GetSortedDerivedTypes(type.FullName, _registry);
+                    if (sortedDerived != null && sortedDerived.Count >= DictionaryDispatchThreshold)
+                    {
+                        var className = TypeNameHelper.GetClassName(type.FullName);
+                        if (!generatedDictionaries.Contains(className))
+                        {
+                            TryGenerateDictionaryDispatch(className, type.FullName, sortedDerived);
+                            generatedDictionaries.Add(className);
+                        }
+                    }
+                }
             }
         }
 
@@ -328,6 +358,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// Generates ContentSize method with type dispatch for base types with ProtoInclude.
         /// For derived types: calls WrapperSize (wrapper + own fields).
         /// Then always calls BaseFieldsOnlySize (base fields).
+        /// Uses dictionary-based O(1) dispatch for types with many derived classes.
         /// </summary>
         private void GenerateCalculateContentSizeWithTypeDispatch(TypeDefinition type, string className)
         {
@@ -339,21 +370,35 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 return;
             }
 
-            _sb.AppendIndentedLine("// Dispatch to derived type wrapper calculation");
-            _sb.AppendIndentedLine("switch (obj)");
-            _sb.StartNewBlock();
-
-            foreach (var derivedType in sortedDerived)
+            // Use dictionary-based dispatch for large type hierarchies (O(1) vs O(n) type checks)
+            if (sortedDerived.Count >= DictionaryDispatchThreshold)
             {
-                var derivedClassName = TypeNameHelper.GetClassName(derivedType);
-                _sb.AppendIndentedLine($"case global::{derivedType} derived:");
-                _sb.IncreaseIndent();
-                _sb.AppendIndentedLine($"Calculate{derivedClassName}WrapperSize(ref calculator, derived);");
-                _sb.AppendIndentedLine("break;");  // break, NOT return - continue to base fields
-                _sb.DecreaseIndent();
+                _sb.AppendIndentedLine("// Dispatch to derived type wrapper calculation");
+                GenerateDictionaryBasedSwitch(className, "obj", sortedDerived, (index, derivedType, derivedClassName) =>
+                {
+                    _sb.AppendIndentedLine($"Calculate{derivedClassName}WrapperSize(ref calculator, (global::{derivedType})obj);");
+                    _sb.AppendIndentedLine("break;");
+                });
             }
+            else
+            {
+                // Use regular type switch for small hierarchies (JIT optimizes these well)
+                _sb.AppendIndentedLine("// Dispatch to derived type wrapper calculation");
+                _sb.AppendIndentedLine("switch (obj)");
+                _sb.StartNewBlock();
 
-            _sb.EndBlock();
+                foreach (var derivedType in sortedDerived)
+                {
+                    var derivedClassName = TypeNameHelper.GetClassName(derivedType);
+                    _sb.AppendIndentedLine($"case global::{derivedType} derived:");
+                    _sb.IncreaseIndent();
+                    _sb.AppendIndentedLine($"Calculate{derivedClassName}WrapperSize(ref calculator, derived);");
+                    _sb.AppendIndentedLine("break;");  // break, NOT return - continue to base fields
+                    _sb.DecreaseIndent();
+                }
+
+                _sb.EndBlock();
+            }
             _sb.AppendNewLine();
 
             // Base fields - always executed (for all types including derived)

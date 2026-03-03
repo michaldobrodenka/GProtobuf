@@ -579,6 +579,119 @@ namespace GProtobuf.Generator.V2
             return GetSizeExpression(elementTypeName, valueExpr, format, calculatorVar);
         }
 
+        /// <summary>
+        /// Checks if a type can use inline size calculation (no WriteSizeCalculator needed).
+        /// Returns true for primitive types with predictable wire sizes.
+        /// </summary>
+        public static bool CanUseInlineSizeCalculation(string typeName, bool isEnum = false)
+        {
+            if (isEnum) return true; // Enums are varint
+
+            var normalized = NormalizeTypeName(typeName);
+            return normalized switch
+            {
+                // Varint types - can use WireFormatHelpers.GetVarintSize
+                "System.Int32" or "System.Int64" or "System.Int16" or "System.SByte" => true,
+                "System.UInt32" or "System.UInt64" or "System.UInt16" or "System.Byte" => true,
+                // Fixed size types - constant size
+                "System.Single" or "System.Double" => true,
+                "System.Boolean" or "System.Char" => true,
+                _ => false
+            };
+        }
+
+        /// <summary>
+        /// Gets inline size expression that returns an int directly (no calculator needed).
+        /// Used for map entry optimization where we can calculate size inline.
+        /// Returns null for types that need WriteSizeCalculator.
+        /// </summary>
+        public static string GetInlineSizeExpression(
+            string typeName,
+            string valueExpr,
+            DataFormat format = DataFormat.Default,
+            bool isEnum = false)
+        {
+            if (isEnum)
+            {
+                // Enums are varint-encoded as int32
+                return $"global::GProtobuf.Core.WireFormatHelpers.GetVarintSize((uint)(int){valueExpr})";
+            }
+
+            var normalized = NormalizeTypeName(typeName);
+            return normalized switch
+            {
+                // Signed varint types - WriteVarInt32 casts to uint, so use GetVarintSize with cast
+                // Note: This matches the writer behavior which casts signed to unsigned before varint encoding
+                "System.Int32" => format switch
+                {
+                    DataFormat.FixedSize => "4",
+                    DataFormat.ZigZag => $"global::GProtobuf.Core.WireFormatHelpers.GetZigZagVarintSize({valueExpr})",
+                    _ => $"global::GProtobuf.Core.WireFormatHelpers.GetVarintSize((uint){valueExpr})"
+                },
+                "System.Int64" => format switch
+                {
+                    DataFormat.FixedSize => "8",
+                    DataFormat.ZigZag => $"global::GProtobuf.Core.WireFormatHelpers.GetZigZagVarintSize64({valueExpr})",
+                    _ => $"global::GProtobuf.Core.WireFormatHelpers.GetVarintSize64((ulong){valueExpr})"
+                },
+                "System.Int16" => format switch
+                {
+                    DataFormat.FixedSize => "4",
+                    DataFormat.ZigZag => $"global::GProtobuf.Core.WireFormatHelpers.GetZigZagVarintSize({valueExpr})",
+                    _ => $"global::GProtobuf.Core.WireFormatHelpers.GetVarintSize((uint){valueExpr})"
+                },
+                "System.SByte" => format switch
+                {
+                    DataFormat.ZigZag => $"global::GProtobuf.Core.WireFormatHelpers.GetZigZagVarintSize({valueExpr})",
+                    _ => $"global::GProtobuf.Core.WireFormatHelpers.GetVarintSize((uint){valueExpr})"
+                },
+                // Unsigned varint types
+                "System.UInt32" => format switch
+                {
+                    DataFormat.FixedSize => "4",
+                    _ => $"global::GProtobuf.Core.WireFormatHelpers.GetVarintSize({valueExpr})"
+                },
+                "System.UInt64" => format switch
+                {
+                    DataFormat.FixedSize => "8",
+                    _ => $"global::GProtobuf.Core.WireFormatHelpers.GetVarintSize64({valueExpr})"
+                },
+                "System.UInt16" => format switch
+                {
+                    DataFormat.FixedSize => "4",
+                    _ => $"global::GProtobuf.Core.WireFormatHelpers.GetVarintSize({valueExpr})"
+                },
+                "System.Byte" => $"global::GProtobuf.Core.WireFormatHelpers.GetVarintSize({valueExpr})", // Byte values 128-255 need 2 bytes
+                // Fixed size types - constant
+                "System.Single" => "4",
+                "System.Double" => "8",
+                "System.Boolean" => "1",
+                "System.Char" => $"global::GProtobuf.Core.WireFormatHelpers.GetVarintSize((uint){valueExpr})",
+                _ => null
+            };
+        }
+
+        /// <summary>
+        /// Gets the fixed wire size for a type, or -1 if the size is variable.
+        /// Used for compile-time size calculation optimization.
+        /// </summary>
+        public static int GetFixedWireSize(string typeName, DataFormat format = DataFormat.Default)
+        {
+            var normalized = NormalizeTypeName(typeName);
+            return normalized switch
+            {
+                "System.Single" => 4,
+                "System.Double" => 8,
+                "System.Boolean" => 1,
+                // Note: Byte is NOT fixed size - values 128-255 need 2 bytes as varint
+                "System.Int32" when format == DataFormat.FixedSize => 4,
+                "System.UInt32" when format == DataFormat.FixedSize => 4,
+                "System.Int64" when format == DataFormat.FixedSize => 8,
+                "System.UInt64" when format == DataFormat.FixedSize => 8,
+                _ => -1 // Variable size
+            };
+        }
+
         #endregion
 
         #region Type Name Utilities

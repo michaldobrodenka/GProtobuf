@@ -1261,13 +1261,22 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             _sb.AppendIndentedLine($"public static void {methodName}(ref {_writerType} writer, {keyType} key, {valueType} value)");
             _sb.StartNewBlock();
 
+            bool keyCanInline = TypeMapping.CanUseInlineSizeCalculation(info.KeyType, info.KeyIsEnum);
+            bool valueCanInline = TypeMapping.CanUseInlineSizeCalculation(info.ValueType, info.ValueIsEnum);
+            bool valueNeedsNullCheck = ValueNeedsNullCheck(info.ValueType, info.ValueTypeInfo, info.ValueIsEnum);
+
+            // If both are primitive types and value doesn't need null check, use optimized inline path
+            if (keyCanInline && valueCanInline && !valueNeedsNullCheck)
+            {
+                GenerateInlinePrimitiveMapEntryWriter(info, keyType, valueType);
+                _sb.EndBlock(); // method
+                _sb.AppendNewLine();
+                return;
+            }
+
             // Determine if we need to cache nested content lengths
             bool keyNeedsLengthCache = info.KeyTypeInfo.IsCustomType;
             bool valueNeedsLengthCache = info.ValueTypeInfo.IsCustomType;
-
-            // Check if value type is a reference type that can be null
-            // If so, we need to skip writing value field when value is null (matching protobuf-net behavior)
-            bool valueNeedsNullCheck = ValueNeedsNullCheck(info.ValueType, info.ValueTypeInfo, info.ValueIsEnum);
 
             // Declare length cache variables if needed
             // For value types that need null check, initialize to 0 (will only be assigned if value != null)
@@ -1332,6 +1341,51 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
 
             _sb.EndBlock(); // method
             _sb.AppendNewLine();
+        }
+
+        /// <summary>
+        /// Generates optimized inline map entry writer for primitive-only entries.
+        /// Eliminates WriteSizeCalculator allocation and method calls.
+        /// Size formula: tagBytes_key + keySize + tagBytes_value + valueSize
+        /// </summary>
+        private void GenerateInlinePrimitiveMapEntryWriter(VirtualMapEntryInfo info, string keyType, string valueType)
+        {
+            // Get tag bytes for key (field 1) and value (field 2)
+            var keyWireType = info.KeyIsEnum ? WireType.VarInt : GetWireType(info.KeyTypeInfo);
+            var valueWireType = info.ValueIsEnum ? WireType.VarInt : GetWireType(info.ValueTypeInfo);
+            var (_, keyTagBytes) = TypeMapping.PrecomputeTagBytes(1, keyWireType);
+            var (_, valueTagBytes) = TypeMapping.PrecomputeTagBytes(2, valueWireType);
+
+            // Get inline size expressions
+            var keySizeExpr = TypeMapping.GetInlineSizeExpression(info.KeyType, "key", DataFormat.Default, info.KeyIsEnum);
+            var valueSizeExpr = TypeMapping.GetInlineSizeExpression(info.ValueType, "value", DataFormat.Default, info.ValueIsEnum);
+
+            _sb.AppendIndentedLine("// OPTIMIZED: Inline size calculation for primitive map entry");
+
+            // Check if both sizes are fixed (compile-time constants)
+            int keyFixedSize = TypeMapping.GetFixedWireSize(info.KeyType);
+            int valueFixedSize = TypeMapping.GetFixedWireSize(info.ValueType);
+
+            if (keyFixedSize > 0 && valueFixedSize > 0 && !info.KeyIsEnum && !info.ValueIsEnum)
+            {
+                // Both sizes are compile-time constants - ultra-optimized path
+                int totalFixedSize = keyTagBytes + keyFixedSize + valueTagBytes + valueFixedSize;
+                _sb.AppendIndentedLine($"const int entrySize = {totalFixedSize}; // Compile-time constant: {keyTagBytes}+{keyFixedSize}+{valueTagBytes}+{valueFixedSize}");
+                _sb.AppendIndentedLine("writer.WriteVarUInt32(entrySize);");
+            }
+            else
+            {
+                // Calculate size inline at runtime
+                _sb.AppendIndentedLine($"int entrySize = {keyTagBytes} + {keySizeExpr} + {valueTagBytes} + {valueSizeExpr};");
+                _sb.AppendIndentedLine("writer.WriteVarUInt32((uint)entrySize);");
+            }
+            _sb.AppendNewLine();
+
+            // Write key (field 1)
+            GenerateFieldWrite("key", info.KeyType, info.KeyTypeInfo, info.KeyIsEnum, 1, null);
+
+            // Write value (field 2)
+            GenerateFieldWrite("value", info.ValueType, info.ValueTypeInfo, info.ValueIsEnum, 2, null);
         }
 
         private void GenerateFieldSizeCalculation(string sourceVar, string typeName, TypeAnalysisInfo typeInfo,
