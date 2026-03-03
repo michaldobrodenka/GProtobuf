@@ -181,6 +181,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             var className = TypeNameHelper.GetClassName(type.FullName);
 
+            _sb.AppendIndentedLine("[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
             _sb.AppendIndentedLine($"public static void Calculate{className}Size(ref global::GProtobuf.Core.WriteSizeCalculator calculator, global::{type.FullName} obj)");
             _sb.StartNewBlock();
 
@@ -268,6 +269,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         {
             var className = TypeNameHelper.GetClassName(type.FullName);
 
+            _sb.AppendIndentedLine("[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
             _sb.AppendIndentedLine($"public static void Calculate{className}ContentSize(ref global::GProtobuf.Core.WriteSizeCalculator calculator, global::{type.FullName} obj)");
             _sb.StartNewBlock();
 
@@ -337,6 +339,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine($"/// Calculates ONLY base {className} fields size without runtime type dispatch.");
             _sb.AppendIndentedLine($"/// Used for nested derived type size calculation after ProtoInclude wrapper.");
             _sb.AppendIndentedLine($"/// </summary>");
+            _sb.AppendIndentedLine("[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
             _sb.AppendIndentedLine($"public static void Calculate{className}BaseFieldsOnlySize(ref global::GProtobuf.Core.WriteSizeCalculator calculator, global::{type.FullName} obj)");
             _sb.StartNewBlock();
 
@@ -498,6 +501,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine($"/// <summary>");
             _sb.AppendIndentedLine($"/// Calculates size of {className}'s OWN fields (not inherited from base).");
             _sb.AppendIndentedLine($"/// </summary>");
+            _sb.AppendIndentedLine("[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
             _sb.AppendIndentedLine($"public static void Calculate{className}OwnFieldsSize(");
             _sb.IncreaseIndent();
             _sb.AppendIndentedLine($"ref global::GProtobuf.Core.WriteSizeCalculator calculator,");
@@ -546,6 +550,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine($"/// Calculates ProtoInclude wrapper size for {className}.");
             _sb.AppendIndentedLine($"/// Wrapper tag + length prefix + own fields.");
             _sb.AppendIndentedLine($"/// </summary>");
+            _sb.AppendIndentedLine("[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
             _sb.AppendIndentedLine($"private static void Calculate{className}WrapperSize(");
             _sb.IncreaseIndent();
             _sb.AppendIndentedLine($"ref global::GProtobuf.Core.WriteSizeCalculator calculator,");

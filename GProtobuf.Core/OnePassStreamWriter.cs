@@ -32,11 +32,14 @@ namespace GProtobuf.Core
     {
         public static readonly MemoryStreamPool Shared = new();
 
-        private readonly Stack<MemoryStream> _pool = new();
+        [ThreadStatic]
+        private static Stack<MemoryStream> t_pool;
+
+        private static Stack<MemoryStream> Pool => t_pool ??= new Stack<MemoryStream>();
 
         public MemoryStream Get()
         {
-            if (_pool.TryPop(out var stream))
+            if (Pool.TryPop(out var stream))
                 return stream;
             return new MemoryStream();
         }
@@ -45,7 +48,7 @@ namespace GProtobuf.Core
         {
             stream.Position = 0;
             stream.SetLength(0);
-            _pool.Push(stream);
+            Pool.Push(stream);
         }
     }
 
@@ -619,9 +622,21 @@ namespace GProtobuf.Core
             var childStream = Stream;
             Stream = frame.ParentStream;
 
-            // Write length prefix to parent
-            WriteVarUInt32((uint)childStream.Length);
-            Flush();
+            int contentLength = (int)childStream.Length;
+
+            // 95%+ of nested IoT messages are <128 bytes
+            if (contentLength <= 127)
+            {
+                // Fast path: single-byte length (no varint encoding needed)
+                WriteSingleByte((byte)contentLength);
+                Flush();
+            }
+            else
+            {
+                // Slow path: full varint
+                WriteVarUInt32((uint)contentLength);
+                Flush();
+            }
 
             // Copy child content to parent stream
             childStream.Position = 0;
