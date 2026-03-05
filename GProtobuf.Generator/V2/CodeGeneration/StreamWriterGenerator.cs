@@ -633,7 +633,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         /// <summary>
         /// Generates nested wrappers from currentIndex to targetIndex.
-        /// OPTIMIZED: Calculates all sizes once (innermost first), then writes using pre-calculated sizes.
+        /// Calculates all sizes once (innermost first), then writes using pre-calculated sizes.
         /// This avoids duplicate size calculations that occurred with the recursive approach.
         /// NOTE: Ancestor fields are written OUTSIDE the wrapper by the caller.
         /// </summary>
@@ -662,7 +662,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 wrapperInfos.Add((typeName, className, $"sz{i}", protoInclude.FieldId));
             }
 
-            // PHASE 1: Calculate ALL sizes (innermost first to avoid recalculation)
+            // Calculate ALL sizes (innermost first to avoid recalculation)
             // Innermost level - just own fields
             var innermost = wrapperInfos[wrapperInfos.Count - 1];
             _sb.AppendIndentedLine($"var {innermost.calcVar} = new global::GProtobuf.Core.WriteSizeCalculator();");
@@ -692,7 +692,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 }
             }
 
-            // PHASE 2: Write all wrappers (outermost first)
+            // Write all wrappers (outermost first)
             for (int i = 0; i < wrapperInfos.Count; i++)
             {
                 var info = wrapperInfos[i];
@@ -704,7 +704,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 _sb.AppendIndentedLine($"writer.WriteVarUInt32((uint){info.calcVar}.Length);");
             }
 
-            // PHASE 3: Write actual content (innermost first for correct wire format)
+            // Write actual content (innermost first for correct wire format)
             for (int i = wrapperInfos.Count - 1; i >= 0; i--)
             {
                 var info = wrapperInfos[i];
