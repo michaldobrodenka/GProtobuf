@@ -402,7 +402,24 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     var derivedClassName = TypeNameHelper.GetClassName(derivedType);
                     _sb.AppendIndentedLine($"case global::{derivedType} derived:");
                     _sb.IncreaseIndent();
-                    _sb.AppendIndentedLine($"Calculate{derivedClassName}WrapperSize(ref calculator, derived);");
+
+                    // Check for multi-level inheritance relative to current base type
+                    var fullChain = _registry.GetInheritanceChain(derivedType);
+                    var baseIndex = FindIndexInChain(fullChain, type.FullName);
+                    var levelsFromBase = fullChain.Count - 1 - baseIndex;
+
+                    if (baseIndex < 0 || levelsFromBase <= 1)
+                    {
+                        // Single-level inheritance - use existing wrapper calculation
+                        _sb.AppendIndentedLine($"Calculate{derivedClassName}WrapperSize(ref calculator, derived);");
+                    }
+                    else
+                    {
+                        // Multi-level inheritance - calculate ALL wrapper levels from base to derived
+                        _sb.AppendIndentedLine($"// Multi-level inheritance: {levelsFromBase} levels from {className}");
+                        GenerateMultiLevelWrapperSizeCalculation(fullChain, baseIndex + 1, fullChain.Count - 1, "derived");
+                    }
+
                     _sb.AppendIndentedLine("break;");  // break, NOT return - continue to base fields
                     _sb.DecreaseIndent();
                 }
@@ -582,6 +599,96 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             _sb.EndBlock();
             _sb.AppendNewLine();
+        }
+
+        /// <summary>
+        /// Generates inline size calculation code for multi-level inheritance wrappers.
+        /// For chain [Base, Mid, Derived] with startIndex=1 and targetIndex=2:
+        /// Calculates: Mid wrapper (containing Derived wrapper + Mid fields)
+        /// </summary>
+        private void GenerateMultiLevelWrapperSizeCalculation(
+            IReadOnlyList<string> chain,
+            int startIndex,
+            int targetIndex,
+            string instanceVar)
+        {
+            // Generate outermost wrapper calculation
+            var startTypeName = chain[startIndex];
+            var startClassName = TypeNameHelper.GetClassName(startTypeName);
+            var parentTypeName = chain[startIndex - 1];
+            var parentType = _registry.GetByFullName(parentTypeName);
+
+            // Find ProtoInclude field ID for start type in parent
+            var protoInclude = parentType?.ProtoIncludes?.FirstOrDefault(p => p.Type == startTypeName);
+            if (protoInclude == null)
+            {
+                _sb.AppendIndentedLine($"// WARNING: No ProtoInclude found for {startTypeName} in {parentTypeName}");
+                return;
+            }
+
+            // Tag size for outermost wrapper
+            TagCodeHelper.AddTagSize(_sb, protoInclude.FieldId, WireType.Len);
+
+            // Calculate outermost wrapper content
+            var outerCalcVar = GetNextNestedCalcVar();
+            _sb.AppendIndentedLine($"var {outerCalcVar} = new global::GProtobuf.Core.WriteSizeCalculator();");
+
+            // Recursively calculate nested wrappers
+            GenerateNestedWrapperSizeCalculationRecursive(chain, startIndex, targetIndex, outerCalcVar, instanceVar);
+
+            // Add length prefix and content to main calculator
+            _sb.AppendIndentedLine($"calculator.WriteVarUInt32((uint){outerCalcVar}.Length);");
+            _sb.AppendIndentedLine($"calculator.AddByteLength({outerCalcVar}.Length);");
+        }
+
+        /// <summary>
+        /// Recursively generates size calculation for nested wrappers.
+        /// Each level adds: nested wrapper tag + length + content, then own fields.
+        /// </summary>
+        private void GenerateNestedWrapperSizeCalculationRecursive(
+            IReadOnlyList<string> chain,
+            int currentIndex,
+            int targetIndex,
+            string calcVar,
+            string instanceVar)
+        {
+            var currentTypeName = chain[currentIndex];
+            var currentClassName = TypeNameHelper.GetClassName(currentTypeName);
+            var currentType = _registry.GetByFullName(currentTypeName);
+            var currentNamespace = _registry.GetNamespaceForType(currentTypeName);
+            var nsPrefix = GeneratorHelpers.GetNamespacePrefix(currentNamespace, _currentNamespace);
+
+            if (currentIndex == targetIndex)
+            {
+                // Innermost level - just own fields
+                _sb.AppendIndentedLine($"{nsPrefix}SizeCalculators.Calculate{currentClassName}OwnFieldsSize(ref {calcVar}, {instanceVar});");
+            }
+            else
+            {
+                // Intermediate level - add nested wrapper FIRST, then own fields
+                var nextTypeName = chain[currentIndex + 1];
+                var nextProtoInclude = currentType?.ProtoIncludes?.FirstOrDefault(p => p.Type == nextTypeName);
+
+                if (nextProtoInclude != null)
+                {
+                    // Add nested wrapper tag size
+                    TagCodeHelper.AddTagSize(_sb, nextProtoInclude.FieldId, WireType.Len, calcVar);
+
+                    // Calculate nested content
+                    var nestedCalcVar = GetNextNestedCalcVar();
+                    _sb.AppendIndentedLine($"var {nestedCalcVar} = new global::GProtobuf.Core.WriteSizeCalculator();");
+
+                    // Recursively calculate nested size
+                    GenerateNestedWrapperSizeCalculationRecursive(chain, currentIndex + 1, targetIndex, nestedCalcVar, instanceVar);
+
+                    // Add length prefix + content size
+                    _sb.AppendIndentedLine($"{calcVar}.WriteVarUInt32((uint){nestedCalcVar}.Length);");
+                    _sb.AppendIndentedLine($"{calcVar}.AddByteLength({nestedCalcVar}.Length);");
+                }
+
+                // Add current level's OWN fields AFTER nested wrapper
+                _sb.AppendIndentedLine($"{nsPrefix}SizeCalculators.Calculate{currentClassName}OwnFieldsSize(ref {calcVar}, {instanceVar});");
+            }
         }
 
         /// <summary>
@@ -1006,6 +1113,20 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 _sb.AppendIndentedLine($"calculator.WriteVarUInt32({wrapperTag}u);");
                 _sb.AppendIndentedLine("calculator.WriteVarUInt32(0); // Empty wrapper marker");
             }
+        }
+
+        /// <summary>
+        /// Finds the index of a type name in an inheritance chain.
+        /// Returns -1 if not found.
+        /// </summary>
+        private static int FindIndexInChain(IReadOnlyList<string> chain, string typeName)
+        {
+            for (int i = 0; i < chain.Count; i++)
+            {
+                if (chain[i] == typeName)
+                    return i;
+            }
+            return -1;
         }
 
         #endregion

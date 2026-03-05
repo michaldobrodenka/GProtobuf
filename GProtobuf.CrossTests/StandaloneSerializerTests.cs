@@ -3,10 +3,14 @@ using System.Collections.Generic;
 using System.IO;
 using GProtobuf.Core;
 using GProtobuf.Tests.TestModel;
+using GProtobuf.CrossTests.TestModel;
 using Xunit;
 
 // Register standalone serializers for List<BasicTypesModel>
 [assembly: GenerateSerializer(typeof(List<BasicTypesModel>))]
+
+// Register standalone serializer for List<ModelBase> (polymorphic list with inheritance)
+[assembly: GenerateSerializer(typeof(List<ModelBase>))]
 
 // Register standalone serializers for primitive collections
 [assembly: GenerateSerializer(typeof(List<int>))]
@@ -553,6 +557,165 @@ namespace GProtobuf.CrossTests
             {
                 Assert.Equal(original[i], deserialized[i]);
             }
+        }
+
+        #endregion
+
+        #region List<ModelBase> Polymorphic Tests
+
+        /// <summary>
+        /// Test that protobuf-net serialized List of base class with derived instances
+        /// can be deserialized by GProtobuf.
+        /// </summary>
+        [Fact]
+        public void Test_PG_ListOfModelBase_Polymorphic()
+        {
+            // Arrange: Create list with mixed derived types and serialize with protobuf-net
+            var original = new List<ModelBase>
+            {
+                new ModelInh1 { Id = 1, Description = "First", Guid = Guid.NewGuid() },
+                new ModelInh2 { Id = 2, Description1 = "Second", Guid1 = Guid.NewGuid() },
+                new ModelInh3 { Id = 3, Description2 = "Third", Guid2 = Guid.NewGuid() }
+            };
+
+            using var ms = new MemoryStream();
+            ProtoBuf.Serializer.Serialize(ms, original);
+            var bytes = ms.ToArray();
+
+            // Act: Deserialize with GProtobuf
+            var deserialized = global::GProtobuf.CrossTests.TestModel.Serialization.Deserializers.DeserializeListOfModelBase(bytes);
+
+            // Assert
+            Assert.NotNull(deserialized);
+            Assert.Equal(3, deserialized.Count);
+
+            Assert.IsType<ModelInh1>(deserialized[0]);
+            var item1 = (ModelInh1)deserialized[0];
+            Assert.Equal(1, item1.Id);
+            Assert.Equal("First", item1.Description);
+
+            Assert.IsType<ModelInh2>(deserialized[1]);
+            var item2 = (ModelInh2)deserialized[1];
+            Assert.Equal(2, item2.Id);
+            Assert.Equal("Second", item2.Description1);
+
+            Assert.IsType<ModelInh3>(deserialized[2]);
+            var item3 = (ModelInh3)deserialized[2];
+            Assert.Equal(3, item3.Id);
+            Assert.Equal("Third", item3.Description2);
+        }
+
+        /// <summary>
+        /// Test that GProtobuf serialized List of base class with derived instances
+        /// can be deserialized by GProtobuf.
+        /// </summary>
+        [Fact]
+        public void Test_GG_ListOfModelBase_Polymorphic()
+        {
+            // Arrange: Create list with mixed derived types and serialize with GProtobuf
+            var original = new List<ModelBase>
+            {
+                new ModelInh1 { Id = 10, Description = "Hello", Guid = Guid.NewGuid() },
+                new ModelInh2 { Id = 20, Description1 = "World", Guid1 = Guid.NewGuid() }
+            };
+
+            using var ms = new MemoryStream();
+            global::GProtobuf.CrossTests.TestModel.Serialization.Serializers.SerializeListOfModelBase(ms, original);
+            var bytes = ms.ToArray();
+
+            // Act: Deserialize with GProtobuf
+            var deserialized = global::GProtobuf.CrossTests.TestModel.Serialization.Deserializers.DeserializeListOfModelBase(bytes);
+
+            // Assert
+            Assert.NotNull(deserialized);
+            Assert.Equal(2, deserialized.Count);
+
+            Assert.IsType<ModelInh1>(deserialized[0]);
+            var item1 = (ModelInh1)deserialized[0];
+            Assert.Equal(10, item1.Id);
+            Assert.Equal("Hello", item1.Description);
+
+            Assert.IsType<ModelInh2>(deserialized[1]);
+            var item2 = (ModelInh2)deserialized[1];
+            Assert.Equal(20, item2.Id);
+            Assert.Equal("World", item2.Description1);
+        }
+
+        /// <summary>
+        /// Test that GProtobuf serialized List of base class with derived instances
+        /// can be deserialized by protobuf-net (cross-compatibility).
+        /// This tests the ProtoInclude wrapper fix.
+        /// </summary>
+        [Fact]
+        public void Test_GP_ListOfModelBase_Polymorphic()
+        {
+            // Arrange: Create list with mixed derived types and serialize with GProtobuf
+            var original = new List<ModelBase>
+            {
+                new ModelInh1 { Id = 100, Description = "Test1", Guid = Guid.NewGuid() },
+                new ModelInh2 { Id = 200, Description1 = "Test2", Guid1 = Guid.NewGuid() },
+                new ModelInh3 { Id = 300, Description2 = "Test3", Guid2 = Guid.NewGuid() }
+            };
+
+            using var ms = new MemoryStream();
+            global::GProtobuf.CrossTests.TestModel.Serialization.Serializers.SerializeListOfModelBase(ms, original);
+            var bytes = ms.ToArray();
+
+            // Act: Deserialize with protobuf-net
+            ms.Position = 0;
+            var deserialized = ProtoBuf.Serializer.Deserialize<List<ModelBase>>(ms);
+
+            // Assert
+            Assert.NotNull(deserialized);
+            Assert.Equal(3, deserialized.Count);
+
+            Assert.IsType<ModelInh1>(deserialized[0]);
+            var item1 = (ModelInh1)deserialized[0];
+            Assert.Equal(100, item1.Id);
+            Assert.Equal("Test1", item1.Description);
+
+            Assert.IsType<ModelInh2>(deserialized[1]);
+            var item2 = (ModelInh2)deserialized[1];
+            Assert.Equal(200, item2.Id);
+            Assert.Equal("Test2", item2.Description1);
+
+            Assert.IsType<ModelInh3>(deserialized[2]);
+            var item3 = (ModelInh3)deserialized[2];
+            Assert.Equal(300, item3.Id);
+            Assert.Equal("Test3", item3.Description2);
+        }
+
+        /// <summary>
+        /// Test serialization roundtrip for multi-level inheritance (Model15 extends ModelInh1 extends ModelBase).
+        /// NOTE: Multi-level inheritance has a separate issue with nested wrapper calculation.
+        /// This test is skipped until that issue is fixed.
+        /// </summary>
+        [Fact]
+        public void Test_GP_ListOfModelBase_MultiLevelInheritance()
+        {
+            // Arrange: Create list with multi-level inheritance and serialize with GProtobuf
+            var original = new List<ModelBase>
+            {
+                new Model15 { Id = 42, Description = "Parent", Guid = Guid.NewGuid(), Description15 = "Child", Guid15 = Guid.NewGuid() }
+            };
+
+            using var ms = new MemoryStream();
+            global::GProtobuf.CrossTests.TestModel.Serialization.Serializers.SerializeListOfModelBase(ms, original);
+            var bytes = ms.ToArray();
+
+            // Act: Deserialize with protobuf-net
+            ms.Position = 0;
+            var deserialized = ProtoBuf.Serializer.Deserialize<List<ModelBase>>(ms);
+
+            // Assert
+            Assert.NotNull(deserialized);
+            Assert.Single(deserialized);
+
+            Assert.IsType<Model15>(deserialized[0]);
+            var item = (Model15)deserialized[0];
+            Assert.Equal(42, item.Id);
+            Assert.Equal("Parent", item.Description);
+            Assert.Equal("Child", item.Description15);
         }
 
         #endregion

@@ -342,6 +342,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 return;
             }
 
+            // Type dispatch for polymorphic types:
+            // For derived types: call Write{DerivedClassName}_As{BaseClassName} which handles:
+            //   1. ProtoInclude wrapper tag + length
+            //   2. Derived-specific fields inside the wrapper
+            //   3. Base fields OUTSIDE the wrapper
+            // For base type instance: just write base fields directly
             _sb.AppendIndentedLine("switch (instance)");
             _sb.StartNewBlock();
 
@@ -350,14 +356,16 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 var derivedClassName = TypeNameHelper.GetClassName(derivedType);
                 _sb.AppendIndentedLine($"case global::{derivedType} derived:");
                 _sb.IncreaseIndent();
-                _sb.AppendIndentedLine($"Write{derivedClassName}Content(ref writer, derived);");
+                // Call Write{DerivedClassName}_As{BaseClassName} which includes ProtoInclude wrapper
+                _sb.AppendIndentedLine($"Write{derivedClassName}_As{className}(ref writer, derived);");
                 _sb.AppendIndentedLine("return;");
                 _sb.DecreaseIndent();
             }
 
             _sb.EndBlock();
 
-            // Default case - base type fields
+            // Default case - base type instance (not a derived type)
+            // Just write base type fields directly
             ForEachProtoMember(type.ProtoMembers, "instance", (member, src) => GenerateFieldWrite(member, src));
         }
 
@@ -624,7 +632,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         }
 
         /// <summary>
-        /// Recursively generates nested wrappers from currentIndex to targetIndex.
+        /// Generates nested wrappers from currentIndex to targetIndex.
+        /// OPTIMIZED: Calculates all sizes once (innermost first), then writes using pre-calculated sizes.
+        /// This avoids duplicate size calculations that occurred with the recursive approach.
         /// NOTE: Ancestor fields are written OUTSIDE the wrapper by the caller.
         /// </summary>
         private void GenerateNestedWrappersForAsParent(
@@ -636,83 +646,69 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             if (currentIndex > targetIndex)
                 return;
 
-            var currentTypeName = chain[currentIndex];
-            var currentClassName = TypeNameHelper.GetClassName(currentTypeName);
-            var parentTypeName = chain[currentIndex - 1];
-            var parentType = _registry.GetByFullName(parentTypeName);
+            // Collect wrapper info for all levels
+            var wrapperInfos = new List<(string typeName, string className, string calcVar, int protoIncludeFieldId)>();
 
-            // Find ProtoInclude field ID for current type in parent
-            var protoInclude = parentType?.ProtoIncludes?.FirstOrDefault(p => p.Type == currentTypeName);
-            if (protoInclude == null)
-                return;
-
-            // Write tag for wrapper
-            TagCodeHelper.WriteTag(_sb, protoInclude.FieldId, WireType.Len);
-
-            // Calculate size for this wrapper (ONLY derived fields, not ancestor)
-            var calcVar = $"calc{currentIndex}";
-            _sb.AppendIndentedLine($"var {calcVar} = new global::GProtobuf.Core.WriteSizeCalculator();");
-
-            // If this is the target type, calculate own fields
-            // Otherwise, calculate nested wrapper + own fields (ProtoInclude first!)
-            if (currentIndex == targetIndex)
+            for (int i = currentIndex; i <= targetIndex; i++)
             {
-                // This is the innermost level - calculate own fields only
-                _sb.AppendIndentedLine($"SizeCalculators.Calculate{currentClassName}OwnFieldsSize(ref {calcVar}, instance);");
+                var typeName = chain[i];
+                var className = TypeNameHelper.GetClassName(typeName);
+                var parentTypeName = chain[i - 1];
+                var parentType = _registry.GetByFullName(parentTypeName);
+                var protoInclude = parentType?.ProtoIncludes?.FirstOrDefault(p => p.Type == typeName);
+                if (protoInclude == null)
+                    return;
+
+                wrapperInfos.Add((typeName, className, $"sz{i}", protoInclude.FieldId));
             }
-            else
+
+            // PHASE 1: Calculate ALL sizes (innermost first to avoid recalculation)
+            // Innermost level - just own fields
+            var innermost = wrapperInfos[wrapperInfos.Count - 1];
+            _sb.AppendIndentedLine($"var {innermost.calcVar} = new global::GProtobuf.Core.WriteSizeCalculator();");
+            _sb.AppendIndentedLine($"SizeCalculators.Calculate{innermost.className}OwnFieldsSize(ref {innermost.calcVar}, instance);");
+
+            // Outer wrappers (from second-innermost to outermost)
+            for (int i = wrapperInfos.Count - 2; i >= 0; i--)
             {
-                // This is intermediate level - calculate nested wrapper FIRST, then own fields
-                var currentType = _registry.GetByFullName(currentTypeName);
+                var info = wrapperInfos[i];
+                var innerInfo = wrapperInfos[i + 1];
 
-                // Add nested wrapper size FIRST (ProtoInclude before own fields)
-                var nextTypeName = chain[currentIndex + 1];
-                var nextProtoInclude = currentType?.ProtoIncludes?.FirstOrDefault(p => p.Type == nextTypeName);
-                if (nextProtoInclude != null)
-                {
-                    // Add tag size
-                    TagCodeHelper.AddTagSize(_sb, nextProtoInclude.FieldId, WireType.Len, calcVar);
+                _sb.AppendIndentedLine($"var {info.calcVar} = new global::GProtobuf.Core.WriteSizeCalculator();");
 
-                    // Calculate nested content
-                    var nestedCalcVar = $"nested{currentIndex}";
-                    _sb.AppendIndentedLine($"var {nestedCalcVar} = new global::GProtobuf.Core.WriteSizeCalculator();");
+                // Add nested wrapper: tag + length prefix + content
+                TagCodeHelper.AddTagSize(_sb, innerInfo.protoIncludeFieldId, WireType.Len, info.calcVar);
+                _sb.AppendIndentedLine($"{info.calcVar}.WriteVarUInt32((uint){innerInfo.calcVar}.Length);");
+                _sb.AppendIndentedLine($"{info.calcVar}.AddByteLength({innerInfo.calcVar}.Length);");
 
-                    // Recursively calculate nested size
-                    GenerateNestedSizeCalculationForAsParent(chain, currentIndex + 1, targetIndex, nestedCalcVar, ancestorIndex);
-
-                    // Add length prefix + content size
-                    _sb.AppendIndentedLine($"{calcVar}.WriteVarUInt32((uint){nestedCalcVar}.Length);");
-                    _sb.AppendIndentedLine($"{calcVar}.AddByteLength({nestedCalcVar}.Length);");
-                }
-
-                // Calculate current level's OWN fields AFTER nested wrapper
-                var ownMembers = _registry.GetOwnProtoMembers(currentTypeName);
+                // Add current level's OWN fields
+                var ownMembers = _registry.GetOwnProtoMembers(info.typeName);
                 if (ownMembers != null && ownMembers.Count > 0)
                 {
                     foreach (var member in ownMembers)
                     {
-                        GenerateFieldSizeCalculation(member, "instance", calcVar);
+                        GenerateFieldSizeCalculation(member, "instance", info.calcVar);
                     }
                 }
             }
-            // NOTE: Ancestor fields are NOT included here - they're written OUTSIDE the wrapper
 
-            // Write length prefix
-            _sb.AppendIndentedLine($"writer.WriteVarUInt32((uint){calcVar}.Length);");
-
-            // Write content
-            if (currentIndex == targetIndex)
+            // PHASE 2: Write all wrappers (outermost first)
+            for (int i = 0; i < wrapperInfos.Count; i++)
             {
-                // Write own fields only
-                _sb.AppendIndentedLine($"Write{currentClassName}OwnFields(ref writer, instance);");
+                var info = wrapperInfos[i];
+
+                // Write tag
+                TagCodeHelper.WriteTag(_sb, info.protoIncludeFieldId, WireType.Len);
+
+                // Write length prefix using pre-calculated size
+                _sb.AppendIndentedLine($"writer.WriteVarUInt32((uint){info.calcVar}.Length);");
             }
-            else
-            {
-                // Write nested wrapper FIRST (ProtoInclude before own fields)
-                GenerateNestedWrappersForAsParent(chain, currentIndex + 1, targetIndex, ancestorIndex);
 
-                // Write OWN fields (not inherited) AFTER nested wrapper using helper method
-                _sb.AppendIndentedLine($"Write{currentClassName}OwnFields(ref writer, instance);");
+            // PHASE 3: Write actual content (innermost first for correct wire format)
+            for (int i = wrapperInfos.Count - 1; i >= 0; i--)
+            {
+                var info = wrapperInfos[i];
+                _sb.AppendIndentedLine($"Write{info.className}OwnFields(ref writer, instance);");
             }
             // NOTE: Ancestor fields are NOT written here - they're written OUTSIDE the wrapper by the caller
         }
