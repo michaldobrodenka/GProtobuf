@@ -1503,6 +1503,101 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine("reader.ReadWireTypeAndFieldId(out var wireType, out var fieldId);");
             _sb.AppendNewLine();
 
+            int protoIncludeCount = type.ProtoIncludes?.Count ?? 0;
+            bool useBinaryDispatch = BinaryDispatchAnalyzer.ShouldUseBinaryDispatch(protoIncludeCount);
+
+            if (useBinaryDispatch && protoIncludeCount > 0)
+            {
+                // Use binary dispatch for ProtoIncludes (O(log n) comparisons)
+                GenerateStreamReadContentWithBinaryDispatch(type, nsPrefix);
+            }
+            else
+            {
+                // Fall back to switch-based dispatch
+                GenerateStreamReadContentWithSwitchDispatch(type, nsPrefix);
+            }
+
+            _sb.EndBlock(); // while
+
+            // Convert temp lists to arrays if needed
+            if (fieldsNeedingTempList != null && fieldsNeedingTempList.Count > 0)
+            {
+                _sb.AppendNewLine();
+                foreach (var member in fieldsNeedingTempList)
+                {
+                    _sb.AppendIndentedLine($"if (_tempList_{member.Name} != null)");
+                    _sb.StartNewBlock();
+                    if (member.CollectionKind == CollectionKind.Array)
+                    {
+                        _sb.AppendIndentedLine($"result.{member.Name} = _tempList_{member.Name}.ToArray();");
+                    }
+                    else
+                    {
+                        _sb.AppendIndentedLine($"result.{member.Name} = _tempList_{member.Name};");
+                    }
+                    _sb.EndBlock();
+                }
+            }
+
+            _sb.AppendIndentedLine("return result;");
+        }
+
+        /// <summary>
+        /// Generates binary dispatch for ProtoIncludes in StreamReader ReadContent method.
+        /// </summary>
+        private void GenerateStreamReadContentWithBinaryDispatch(TypeDefinition type, string nsPrefix)
+        {
+            var protoIncludeTree = BinaryDispatchAnalyzer.BuildTree(type.ProtoIncludes);
+            var binaryDispatch = new BinaryDispatchGenerator(_sb, "fieldId");
+
+            bool hasProtoMembers = type.ProtoMembers != null && type.ProtoMembers.Count > 0;
+
+            // Optimized range-separated dispatch:
+            // - ProtoIncludes checked first (binary dispatch)
+            // - Regular fields switch appears ONCE (not duplicated in every branch)
+            binaryDispatch.GenerateRangeSeparatedDispatch(
+                protoIncludeTree,
+                generateProtoIncludeCase: (fieldId, typeName) =>
+                {
+                    GenerateStreamProtoIncludeReadCaseBody(type, fieldId, typeName, nsPrefix);
+                },
+                generateRegularFieldsSwitch: () =>
+                {
+                    // Generate switch for regular fields - appears ONCE
+                    _sb.AppendIndentedLine("// Regular fields switch");
+                    _sb.AppendIndentedLine("switch (fieldId)");
+                    _sb.StartNewBlock();
+
+                    if (type.ProtoMembers != null)
+                    {
+                        foreach (var member in type.ProtoMembers)
+                        {
+                            GenerateFieldReadCase(member, nsPrefix);
+                        }
+                    }
+
+                    // Default - skip unknown fields
+                    _sb.AppendIndentedLine("default:");
+                    _sb.IncreaseIndent();
+                    _sb.AppendIndentedLine("reader.SkipField(wireType);");
+                    _sb.AppendIndentedLine("break;");
+                    _sb.DecreaseIndent();
+
+                    _sb.EndBlock();
+                },
+                generateSkipField: () =>
+                {
+                    // Unknown ProtoInclude field ID - skip it
+                    _sb.AppendIndentedLine("reader.SkipField(wireType);");
+                }
+            );
+        }
+
+        /// <summary>
+        /// Generates traditional switch dispatch for StreamReader ReadContent method.
+        /// </summary>
+        private void GenerateStreamReadContentWithSwitchDispatch(TypeDefinition type, string nsPrefix)
+        {
             _sb.AppendIndentedLine("switch (fieldId)");
             _sb.StartNewBlock();
 
@@ -1529,29 +1624,30 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.DecreaseIndent();
 
             _sb.EndBlock();
-            _sb.EndBlock();
+        }
 
-            // Convert temp lists to arrays if needed
-            if (fieldsNeedingTempList != null && fieldsNeedingTempList.Count > 0)
-            {
-                _sb.AppendNewLine();
-                foreach (var member in fieldsNeedingTempList)
-                {
-                    _sb.AppendIndentedLine($"if (_tempList_{member.Name} != null)");
-                    _sb.StartNewBlock();
-                    if (member.CollectionKind == CollectionKind.Array)
-                    {
-                        _sb.AppendIndentedLine($"result.{member.Name} = _tempList_{member.Name}.ToArray();");
-                    }
-                    else
-                    {
-                        _sb.AppendIndentedLine($"result.{member.Name} = _tempList_{member.Name};");
-                    }
-                    _sb.EndBlock();
-                }
-            }
+        /// <summary>
+        /// Generates the body of a StreamReader ProtoInclude case (without case X: prefix).
+        /// Used by binary dispatch generator.
+        /// </summary>
+        private void GenerateStreamProtoIncludeReadCaseBody(TypeDefinition parentType, int fieldId, string derivedTypeName, string nsPrefix)
+        {
+            var derivedClassName = TypeNameHelper.GetClassName(derivedTypeName);
+            var derivedNs = _registry.GetNamespaceForType(derivedTypeName);
+            var derivedNsPrefix = GeneratorHelpers.GetNamespacePrefix(derivedNs, _currentNamespace);
 
-            _sb.AppendIndentedLine("return result;");
+            // Use PushLimit for zero-allocation nested message reading
+            _sb.AppendIndentedLine("var length = reader.ReadVarInt32();");
+            _sb.AppendIndentedLine("var oldLimit = reader.PushLimit(length);");
+
+            // Use StreamReaders for derived content reading
+            _sb.AppendIndentedLine($"result = {derivedNsPrefix}StreamReaders.Read{derivedClassName}Content(ref reader);");
+
+            // Pop limit after reading derived content
+            _sb.AppendIndentedLine("reader.PopLimit(oldLimit);");
+
+            // Continue to next iteration
+            _sb.AppendIndentedLine("continue;");
         }
 
         #endregion

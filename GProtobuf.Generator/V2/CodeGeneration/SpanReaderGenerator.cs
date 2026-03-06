@@ -390,6 +390,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// <summary>
         /// Generates Read method for base type with ProtoIncludes.
         /// Returns the appropriate derived type based on ProtoInclude field.
+        /// Uses binary dispatch for O(log n) performance when there are many ProtoIncludes.
         /// </summary>
         private void GenerateReadMethodForBaseWithIncludes(TypeDefinition type, string className)
         {
@@ -400,6 +401,110 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine("reader.ReadWireTypeAndFieldId(out var wireType, out var fieldId);");
             _sb.AppendNewLine();
 
+            int protoIncludeCount = type.ProtoIncludes?.Count ?? 0;
+            int protoMemberCount = type.ProtoMembers?.Count ?? 0;
+            bool useBinaryDispatch = BinaryDispatchAnalyzer.ShouldUseBinaryDispatch(protoIncludeCount);
+
+            if (useBinaryDispatch && protoIncludeCount > 0)
+            {
+                // Use binary dispatch for ProtoIncludes
+                GenerateReadMethodWithBinaryDispatch(type, className);
+            }
+            else
+            {
+                // Fall back to switch-based dispatch
+                GenerateReadMethodWithSwitchDispatch(type, className);
+            }
+
+            _sb.EndBlock(); // while
+
+            if (!type.IsAbstract)
+            {
+                _sb.AppendNewLine();
+                _sb.AppendIndentedLine("// Fallback: if no ProtoInclude field found, create base type instance");
+                _sb.AppendIndentedLine("if (result == null)");
+                _sb.StartNewBlock();
+                _sb.AppendIndentedLine($"result = new global::{type.FullName}();");
+                _sb.EndBlock();
+            }
+
+            _sb.AppendIndentedLine("return result;");
+        }
+
+        /// <summary>
+        /// Generates the dispatch logic using binary search for ProtoIncludes.
+        /// O(log n) comparisons instead of O(n) with linear switch.
+        /// </summary>
+        private void GenerateReadMethodWithBinaryDispatch(TypeDefinition type, string className)
+        {
+            var protoIncludeTree = BinaryDispatchAnalyzer.BuildTree(type.ProtoIncludes);
+            var binaryDispatch = new BinaryDispatchGenerator(_sb, "fieldId");
+
+            string lazyInit = type.IsAbstract ? null : $"result ??= new global::{type.FullName}();";
+            bool hasProtoMembers = type.ProtoMembers != null && type.ProtoMembers.Count > 0;
+
+            if (hasProtoMembers)
+            {
+                // Optimized range-separated dispatch:
+                // - ProtoIncludes checked first (binary dispatch)
+                // - Regular fields switch appears ONCE (not duplicated in every branch)
+                binaryDispatch.GenerateRangeSeparatedDispatch(
+                    protoIncludeTree,
+                    generateProtoIncludeCase: (fieldId, typeName) =>
+                    {
+                        GenerateProtoIncludeReadCaseBody(type, fieldId, typeName);
+                    },
+                    generateRegularFieldsSwitch: () =>
+                    {
+                        // Generate switch for ProtoMembers - appears ONCE
+                        _sb.AppendIndentedLine("// Regular fields switch");
+                        _sb.AppendIndentedLine("switch (fieldId)");
+                        _sb.StartNewBlock();
+
+                        foreach (var member in type.ProtoMembers)
+                        {
+                            GenerateFieldReadCaseWithLazyInit(member, lazyInit);
+                        }
+
+                        // Default - skip unknown fields
+                        _sb.AppendIndentedLine("default:");
+                        _sb.IncreaseIndent();
+                        _sb.AppendIndentedLine("reader.SkipField(wireType);");
+                        _sb.AppendIndentedLine("break;");
+                        _sb.DecreaseIndent();
+
+                        _sb.EndBlock();
+                    },
+                    generateSkipField: () =>
+                    {
+                        // Unknown ProtoInclude field ID - skip it
+                        _sb.AppendIndentedLine("reader.SkipField(wireType);");
+                    }
+                );
+            }
+            else
+            {
+                // Pure ProtoIncludes - binary dispatch only
+                binaryDispatch.Generate(
+                    protoIncludeTree,
+                    generateCaseBody: (fieldId, typeName) =>
+                    {
+                        GenerateProtoIncludeReadCaseBody(type, fieldId, typeName);
+                    },
+                    generateDefault: () =>
+                    {
+                        _sb.AppendIndentedLine("reader.SkipField(wireType);");
+                    }
+                );
+            }
+        }
+
+        /// <summary>
+        /// Generates the traditional switch-based dispatch for ProtoIncludes.
+        /// Used when the number of cases is below the threshold.
+        /// </summary>
+        private void GenerateReadMethodWithSwitchDispatch(TypeDefinition type, string className)
+        {
             // Generate switch for all fields
             _sb.AppendIndentedLine("switch (fieldId)");
             _sb.StartNewBlock();
@@ -441,19 +546,25 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.DecreaseIndent();
 
             _sb.EndBlock();
-            _sb.EndBlock();
+        }
 
-            if (!type.IsAbstract)
-            {
-                _sb.AppendNewLine();
-                _sb.AppendIndentedLine("// Fallback: if no ProtoInclude field found, create base type instance");
-                _sb.AppendIndentedLine("if (result == null)");
-                _sb.StartNewBlock();
-                _sb.AppendIndentedLine($"result = new global::{type.FullName}();");
-                _sb.EndBlock();
-            }
+        /// <summary>
+        /// Generates the body of a ProtoInclude case (without case X: prefix).
+        /// Used by binary dispatch generator.
+        /// </summary>
+        private void GenerateProtoIncludeReadCaseBody(TypeDefinition parentType, int fieldId, string derivedTypeName)
+        {
+            var derivedClassName = TypeNameHelper.GetClassName(derivedTypeName);
 
-            _sb.AppendIndentedLine("return result;");
+            // ProtoInclude always expects WireType.Len
+            _sb.AppendIndentedLine("var length = reader.ReadVarInt32();");
+            _sb.AppendIndentedLine("var nestedReader = new SpanReader(reader.GetSlice(length));");
+
+            // Read derived content (derived fields from nested reader)
+            _sb.AppendIndentedLine($"result = Read{derivedClassName}Content(ref nestedReader);");
+
+            // Continue to next iteration
+            _sb.AppendIndentedLine("continue;");
         }
 
         /// <summary>
@@ -1092,6 +1203,142 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine("reader.ReadWireTypeAndFieldId(out var wireType, out var fieldId);");
             _sb.AppendNewLine();
 
+            int protoIncludeCount = type.ProtoIncludes?.Count ?? 0;
+            bool useBinaryDispatch = BinaryDispatchAnalyzer.ShouldUseBinaryDispatch(protoIncludeCount);
+
+            if (useBinaryDispatch && protoIncludeCount > 0)
+            {
+                // Use binary dispatch for ProtoIncludes (O(log n) comparisons)
+                GenerateReadContentWithBinaryDispatch(type, hasFlatInheritance);
+            }
+            else
+            {
+                // Fall back to switch-based dispatch
+                GenerateReadContentWithSwitchDispatch(type, hasFlatInheritance);
+            }
+
+            _sb.EndBlock(); // while
+
+            // Convert temp lists to arrays or assign to IEnumerable properties
+            if (fieldsNeedingTempList != null && fieldsNeedingTempList.Count > 0)
+            {
+                _sb.AppendNewLine();
+                foreach (var member in fieldsNeedingTempList)
+                {
+                    _sb.AppendIndentedLine($"if (_tempList_{member.Name} != null)");
+                    _sb.StartNewBlock();
+
+                    if (member.CollectionKind == CollectionKind.Array)
+                    {
+                        // Arrays need ToArray() conversion
+                        _sb.AppendIndentedLine($"result.{member.Name} = _tempList_{member.Name}.ToArray();");
+                    }
+                    else
+                    {
+                        // IEnumerable can be assigned List directly (List implements IEnumerable)
+                        _sb.AppendIndentedLine($"result.{member.Name} = _tempList_{member.Name};");
+                    }
+
+                    _sb.EndBlock();
+                }
+            }
+
+
+            _sb.AppendIndentedLine("return result;");
+        }
+
+        /// <summary>
+        /// Generates binary dispatch for ProtoIncludes in ReadContent method.
+        /// </summary>
+        private void GenerateReadContentWithBinaryDispatch(TypeDefinition type, bool hasFlatInheritance)
+        {
+            var protoIncludeTree = BinaryDispatchAnalyzer.BuildTree(type.ProtoIncludes);
+            var binaryDispatch = new BinaryDispatchGenerator(_sb, "fieldId");
+
+            // Determine which fields to include in the fallback switch
+            System.Collections.Generic.List<ProtoMemberAttribute> fieldsToInclude;
+            if (hasFlatInheritance && (type.ProtoIncludes == null || type.ProtoIncludes.Count == 0))
+            {
+                var mergedFields = _registry.GetMergedFields(type.FullName);
+                fieldsToInclude = mergedFields.Select(mf => mf.Field).ToList();
+            }
+            else
+            {
+                fieldsToInclude = type.ProtoMembers?.ToList() ?? new System.Collections.Generic.List<ProtoMemberAttribute>();
+            }
+
+            bool hasRegularFields = fieldsToInclude.Count > 0 || (type.CustomBufferMembers?.Count ?? 0) > 0;
+
+            // Optimized range-separated dispatch:
+            // - ProtoIncludes checked first (binary dispatch)
+            // - Regular fields switch appears ONCE (not duplicated in every branch)
+            binaryDispatch.GenerateRangeSeparatedDispatch(
+                protoIncludeTree,
+                generateProtoIncludeCase: (fieldId, typeName) =>
+                {
+                    GenerateProtoIncludeReadCaseBody(type, fieldId, typeName);
+                },
+                generateRegularFieldsSwitch: () =>
+                {
+                    // Generate switch for regular fields - appears ONCE
+                    _sb.AppendIndentedLine("// Regular fields switch");
+                    _sb.AppendIndentedLine("switch (fieldId)");
+                    _sb.StartNewBlock();
+
+                    if (hasFlatInheritance && (type.ProtoIncludes == null || type.ProtoIncludes.Count == 0))
+                    {
+                        var mergedFields = _registry.GetMergedFields(type.FullName);
+                        if (mergedFields.Count > 0)
+                        {
+                            _sb.AppendIndentedLine($"// Merged fields from inheritance chain (derived shadows base)");
+                            foreach (var mergedField in mergedFields)
+                            {
+                                GenerateFieldReadCase(mergedField.Field);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        if (type.ProtoMembers != null)
+                        {
+                            foreach (var member in type.ProtoMembers)
+                            {
+                                GenerateFieldReadCase(member);
+                            }
+                        }
+                    }
+
+                    // Custom buffer fields
+                    if (type.CustomBufferMembers != null)
+                    {
+                        foreach (var customMember in type.CustomBufferMembers)
+                        {
+                            GenerateCustomBufferFieldReadCase(customMember, "result");
+                        }
+                    }
+
+                    // Default - skip unknown fields
+                    _sb.AppendIndentedLine("default:");
+                    _sb.IncreaseIndent();
+                    _sb.AppendIndentedLine("reader.SkipField(wireType);");
+                    _sb.AppendIndentedLine("break;");
+                    _sb.DecreaseIndent();
+
+                    _sb.EndBlock();
+                },
+                generateSkipField: () =>
+                {
+                    // Unknown ProtoInclude field ID - skip it
+                    _sb.AppendIndentedLine("reader.SkipField(wireType);");
+                }
+            );
+        }
+
+        /// <summary>
+        /// Generates traditional switch dispatch for ReadContent method.
+        /// </summary>
+        private void GenerateReadContentWithSwitchDispatch(TypeDefinition type, bool hasFlatInheritance)
+        {
             // Generate switch for all fields including ProtoIncludes
             _sb.AppendIndentedLine("switch (fieldId)");
             _sb.StartNewBlock();
@@ -1105,7 +1352,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 }
             }
 
-            // Check if this is flat inheritance (without ProtoInclude) - hasFlatInheritance already declared above
+            // Check if this is flat inheritance (without ProtoInclude)
             if (hasFlatInheritance && (type.ProtoIncludes == null || type.ProtoIncludes.Count == 0))
             {
                 // Flat inheritance: generate merged switch (base + derived fields with shadowing)
@@ -1149,34 +1396,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.DecreaseIndent();
 
             _sb.EndBlock();
-            _sb.EndBlock();
-
-            // Convert temp lists to arrays or assign to IEnumerable properties
-            if (fieldsNeedingTempList != null && fieldsNeedingTempList.Count > 0)
-            {
-                _sb.AppendNewLine();
-                foreach (var member in fieldsNeedingTempList)
-                {
-                    _sb.AppendIndentedLine($"if (_tempList_{member.Name} != null)");
-                    _sb.StartNewBlock();
-
-                    if (member.CollectionKind == CollectionKind.Array)
-                    {
-                        // Arrays need ToArray() conversion
-                        _sb.AppendIndentedLine($"result.{member.Name} = _tempList_{member.Name}.ToArray();");
-                    }
-                    else
-                    {
-                        // IEnumerable can be assigned List directly (List implements IEnumerable)
-                        _sb.AppendIndentedLine($"result.{member.Name} = _tempList_{member.Name};");
-                    }
-
-                    _sb.EndBlock();
-                }
-            }
-
-
-            _sb.AppendIndentedLine("return result;");
         }
 
         #endregion
