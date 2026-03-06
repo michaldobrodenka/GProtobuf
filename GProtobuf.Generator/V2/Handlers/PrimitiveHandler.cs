@@ -206,11 +206,22 @@ namespace GProtobuf.Generator.V2.Handlers
                         sb.AppendIndentedLine($"{targetVar} = new global::{collectionTypeName}();");
                         sb.AppendIndentedLine($"foreach (var item in tempList) {targetVar}.Add(item);");
                     }
+                    else if (isSystemList)
+                    {
+                        // tempList is already a List<T>, assign directly
+                        sb.AppendIndentedLine($"{targetVar} = tempList;");
+                    }
                     else
                     {
+                        // HashSet case
                         var assignment = GenerateCollectionAssignment(targetVar, elementTypeName, collectionKind, collectionTypeName, "tempList.ToArray()");
                         sb.AppendIndentedLine(assignment);
                     }
+                }
+                else if (collectionKind == CollectionKind.InterfaceCollection)
+                {
+                    // Interface collections (IList<T>, ICollection<T>, IEnumerable<T>) - tempList is already List<T>
+                    sb.AppendIndentedLine($"{targetVar} = tempList;");
                 }
                 else
                 {
@@ -253,11 +264,23 @@ namespace GProtobuf.Generator.V2.Handlers
                         sb.AppendIndentedLine($"{targetVar} = new global::{collectionTypeName}();");
                         sb.AppendIndentedLine($"foreach (var item in resultCollector.ToArray()) {targetVar}.Add(item);");
                     }
+                    else if (isSystemList)
+                    {
+                        // Use ToList() directly - avoids intermediate array allocation
+                        sb.AppendIndentedLine($"{targetVar} = resultCollector.ToList();");
+                    }
                     else
                     {
+                        // HashSet case
                         var assignment = GenerateCollectionAssignment(targetVar, elementTypeName, collectionKind, collectionTypeName, "resultCollector.ToArray()");
                         sb.AppendIndentedLine(assignment);
                     }
+                }
+                else if (collectionKind == CollectionKind.InterfaceCollection)
+                {
+                    // Interface collections (IList<T>, ICollection<T>, IEnumerable<T>) use List<T> internally
+                    // Use ToList() directly - avoids intermediate array allocation
+                    sb.AppendIndentedLine($"{targetVar} = resultCollector.ToList();");
                 }
                 else
                 {
