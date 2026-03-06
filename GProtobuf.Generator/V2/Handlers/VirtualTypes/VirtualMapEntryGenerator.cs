@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using GProtobuf.Generator.V2.CodeGeneration.Core;
 using GProtobuf.Generator.V2.Handlers.Core;
 using GProtobuf.Generator.V2.Helpers;
 
@@ -395,7 +396,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                     else
                     {
                         _sb.AppendIndentedLine($"var {fieldPrefix}Item = new global::{elementType}();");
-                        _sb.AppendIndentedLine($"{spanReadersClass}.Populate{elemInfo.ShortTypeName}(ref {fieldPrefix}ScopedReader, {fieldPrefix}Item);");
+                        _sb.AppendIndentedLine($"{spanReadersClass}.Populate{elemInfo.ShortTypeName}(ref {fieldPrefix}ScopedReader, {GeneratorHelpers.GetPopulateInstanceArgument(elemInfo.IsStruct, $"{fieldPrefix}Item")});");
                     }
                     _sb.AppendIndentedLine($"{tempListVar}.Add({fieldPrefix}Item);");
                 }
@@ -452,13 +453,13 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 {
                     var nonNullableType = typeName.Substring(0, typeName.Length - 1);
                     _sb.AppendIndentedLine($"var {fieldPrefix}Temp = new global::{nonNullableType}();");
-                    _sb.AppendIndentedLine($"{spanReadersClass}.Populate{sanitizedName}(ref {fieldPrefix}ScopedReader, {fieldPrefix}Temp);");
+                    _sb.AppendIndentedLine($"{spanReadersClass}.Populate{sanitizedName}(ref {fieldPrefix}ScopedReader, {GeneratorHelpers.GetPopulateInstanceArgument(typeInfo.IsStruct, $"{fieldPrefix}Temp")});");
                     _sb.AppendIndentedLine($"{targetVar} = {fieldPrefix}Temp;");
                 }
                 else
                 {
                     _sb.AppendIndentedLine($"{targetVar} = new global::{typeName}();");
-                    _sb.AppendIndentedLine($"{spanReadersClass}.Populate{sanitizedName}(ref {fieldPrefix}ScopedReader, {targetVar});");
+                    _sb.AppendIndentedLine($"{spanReadersClass}.Populate{sanitizedName}(ref {fieldPrefix}ScopedReader, {GeneratorHelpers.GetPopulateInstanceArgument(typeInfo.IsStruct, targetVar)});");
                 }
                 return;
             }
@@ -802,7 +803,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 else
                 {
                     _sb.AppendIndentedLine($"var {fieldPrefix}Item = new global::{elementType}();");
-                    _sb.AppendIndentedLine($"{spanReadersClass}.Populate{elemInfo.ShortTypeName}(ref {fieldPrefix}ScopedReader, {fieldPrefix}Item);");
+                    _sb.AppendIndentedLine($"{spanReadersClass}.Populate{elemInfo.ShortTypeName}(ref {fieldPrefix}ScopedReader, {GeneratorHelpers.GetPopulateInstanceArgument(elemInfo.IsStruct, $"{fieldPrefix}Item")});");
                 }
                 _sb.AppendIndentedLine($"{targetVar}.Add({fieldPrefix}Item);");
             }

@@ -243,5 +243,54 @@ namespace GProtobuf.Generator.V2.CodeGeneration.Core
             }
             return "";
         }
+
+        /// <summary>
+        /// Gets the instance parameter declaration for Populate methods.
+        /// </summary>
+        /// <param name="type">The type definition</param>
+        /// <returns>Parameter declaration like "ref global::Namespace.Type instance" or "global::Namespace.Type instance"</returns>
+        public static string GetPopulateInstanceParameter(TypeDefinition type)
+        {
+            if (type.IsStruct)
+                return $"ref global::{type.FullName} instance";
+            return $"global::{type.FullName} instance";
+        }
+
+        /// <summary>
+        /// Gets the instance argument for calling Populate methods.
+        /// </summary>
+        /// <param name="type">The type definition</param>
+        /// <param name="variableName">The variable name to pass</param>
+        /// <returns>Argument like "ref instance" or "instance"</returns>
+        public static string GetPopulateInstanceArgument(TypeDefinition type, string variableName)
+        {
+            return GetPopulateInstanceArgument(type.IsStruct, variableName);
+        }
+
+        /// <summary>
+        /// Gets the instance argument for calling Populate methods.
+        /// </summary>
+        /// <param name="isStruct">True if the type is a struct</param>
+        /// <param name="variableName">The variable name to pass</param>
+        /// <returns>Argument like "ref instance" or "instance"</returns>
+        public static string GetPopulateInstanceArgument(bool isStruct, string variableName)
+        {
+            if (isStruct)
+                return $"ref {variableName}";
+            return variableName;
+        }
+
+        /// <summary>
+        /// Gets the instance argument for calling Populate methods, looking up the type from registry.
+        /// </summary>
+        /// <param name="registry">The type registry to look up the type</param>
+        /// <param name="typeName">The full type name</param>
+        /// <param name="variableName">The variable name to pass</param>
+        /// <returns>Argument like "ref instance" or "instance"</returns>
+        public static string GetPopulateInstanceArgument(TypeRegistry registry, string typeName, string variableName)
+        {
+            var isStruct = registry?.GetByFullName(typeName)?.IsStruct ?? false;
+            return GetPopulateInstanceArgument(isStruct, variableName);
+        }
     }
 }

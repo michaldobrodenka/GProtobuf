@@ -1,4 +1,5 @@
 using System;
+using GProtobuf.Generator.V2.CodeGeneration.Core;
 using GProtobuf.Generator.V2.Handlers.Core;
 using GProtobuf.Generator.V2.Handlers.VirtualTypes;
 using GProtobuf.Generator.V2.Helpers;
@@ -361,7 +362,7 @@ namespace GProtobuf.Generator.V2.Handlers
                 _sb.AppendIndentedLine($"var valueLength = {readerVar}.ReadVarUInt32();");
                 _sb.AppendIndentedLine($"var valueEnd = {readerVar}.Position + (int)valueLength;");
                 _sb.AppendIndentedLine($"value = new global::{valueType}();");
-                _sb.AppendIndentedLine($"{_writerClassName}.Populate{sanitizedName}(ref {readerVar}, value);");
+                _sb.AppendIndentedLine($"{_writerClassName}.Populate{sanitizedName}(ref {readerVar}, {GeneratorHelpers.GetPopulateInstanceArgument(_typeRegistry, valueType, "value")});");
                 _sb.AppendIndentedLine($"{readerVar}.Position = valueEnd;");
             }
         }

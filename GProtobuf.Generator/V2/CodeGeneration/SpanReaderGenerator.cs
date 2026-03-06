@@ -970,7 +970,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
 
             GenerateObjectCreation(type, "result");
-            _sb.AppendIndentedLine($"Populate{className}(ref reader, result);");
+            _sb.AppendIndentedLine($"Populate{className}(ref reader, {GeneratorHelpers.GetPopulateInstanceArgument(type, "result")});");
             _sb.AppendIndentedLine("return result;");
         }
 
@@ -1433,7 +1433,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
 
             // Generate Populate method signature
-            _sb.AppendIndentedLine($"public static void Populate{className}(ref SpanReader reader, global::{type.FullName} instance)");
+            _sb.AppendIndentedLine($"public static void Populate{className}(ref SpanReader reader, {GeneratorHelpers.GetPopulateInstanceParameter(type)})");
             _sb.StartNewBlock();
 
             if (isReadonlyStruct)
@@ -1494,7 +1494,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine($"/// <summary>");
             _sb.AppendIndentedLine($"/// Populates {className}'s OWN fields (not inherited from base).");
             _sb.AppendIndentedLine($"/// </summary>");
-            _sb.AppendIndentedLine($"public static void Populate{className}OwnFields(ref SpanReader reader, global::{type.FullName} instance)");
+            _sb.AppendIndentedLine($"public static void Populate{className}OwnFields(ref SpanReader reader, {GeneratorHelpers.GetPopulateInstanceParameter(type)})");
             _sb.StartNewBlock();
 
             if (ownMembers == null || ownMembers.Count == 0)
@@ -1814,15 +1814,14 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                         _sb.StartNewBlock();
                         _sb.AppendIndentedLine($"instance.{member.Name} = new global::{instanceType}();");
                         _sb.EndBlock();
+                        _sb.AppendIndentedLine($"{nsPrefix}SpanReaders.Populate{typeName}(ref complexReader_{member.FieldId}, instance.{member.Name});");
                     }
                     else
                     {
-                        // For structs, always create a new instance (no null check needed)
-                        _sb.AppendIndentedLine($"instance.{member.Name} = new global::{instanceType}();");
+                        _sb.AppendIndentedLine($"var _temp_{member.Name} = new global::{instanceType}();");
+                        _sb.AppendIndentedLine($"{nsPrefix}SpanReaders.Populate{typeName}(ref complexReader_{member.FieldId}, ref _temp_{member.Name});");
+                        _sb.AppendIndentedLine($"instance.{member.Name} = _temp_{member.Name};");
                     }
-                    // For nullable value types, use .Value to get the underlying value
-                    var propertyAccess = member.IsNullable ? $"instance.{member.Name}.Value" : $"instance.{member.Name}";
-                    _sb.AppendIndentedLine($"{nsPrefix}SpanReaders.Populate{typeName}(ref complexReader_{member.FieldId}, {propertyAccess});");
                 }
             }
 
@@ -2092,15 +2091,14 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                         _sb.StartNewBlock();
                         _sb.AppendIndentedLine($"instance.{member.Name} = new global::{instanceType}();");
                         _sb.EndBlock();
+                        _sb.AppendIndentedLine($"{nsPrefix}SpanReaders.Populate{typeName}(ref nestedReader, instance.{member.Name});");
                     }
                     else
                     {
-                        // For structs, always create a new instance (no null check needed)
-                        _sb.AppendIndentedLine($"instance.{member.Name} = new global::{instanceType}();");
+                        _sb.AppendIndentedLine($"var _temp_{member.Name} = new global::{instanceType}();");
+                        _sb.AppendIndentedLine($"{nsPrefix}SpanReaders.Populate{typeName}(ref nestedReader, ref _temp_{member.Name});");
+                        _sb.AppendIndentedLine($"instance.{member.Name} = _temp_{member.Name};");
                     }
-                    // For nullable value types, use .Value to get the underlying value
-                    var propertyAccess = member.IsNullable ? $"instance.{member.Name}.Value" : $"instance.{member.Name}";
-                    _sb.AppendIndentedLine($"{nsPrefix}SpanReaders.Populate{typeName}(ref nestedReader, {propertyAccess});");
                 }
             }
 

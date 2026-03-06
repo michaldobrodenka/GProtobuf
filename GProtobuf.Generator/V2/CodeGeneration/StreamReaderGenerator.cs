@@ -1255,7 +1255,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
 
             GenerateObjectCreation(type, "result");
-            _sb.AppendIndentedLine($"Populate{className}(ref reader, result);");
+            _sb.AppendIndentedLine($"Populate{className}(ref reader, {GeneratorHelpers.GetPopulateInstanceArgument(type, "result")});");
             _sb.AppendIndentedLine("return result;");
         }
 
@@ -2332,7 +2332,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
 
             // Generate Populate method signature
-            _sb.AppendIndentedLine($"public static void Populate{className}(ref {ReaderType} reader, global::{type.FullName} instance)");
+            _sb.AppendIndentedLine($"public static void Populate{className}(ref {ReaderType} reader, {GeneratorHelpers.GetPopulateInstanceParameter(type)})");
             _sb.StartNewBlock();
 
             if (isReadonlyStruct)
@@ -2700,15 +2700,14 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     _sb.StartNewBlock();
                     _sb.AppendIndentedLine($"instance.{member.Name} = new global::{instanceType}();");
                     _sb.EndBlock();
+                    _sb.AppendIndentedLine($"{typeNsPrefix}StreamReaders.Populate{typeName}(ref reader, instance.{member.Name});");
                 }
                 else
                 {
-                    // For structs, always create a new instance (no null check needed)
-                    _sb.AppendIndentedLine($"instance.{member.Name} = new global::{instanceType}();");
+                    _sb.AppendIndentedLine($"var _temp_{member.Name} = new global::{instanceType}();");
+                    _sb.AppendIndentedLine($"{typeNsPrefix}StreamReaders.Populate{typeName}(ref reader, ref _temp_{member.Name});");
+                    _sb.AppendIndentedLine($"instance.{member.Name} = _temp_{member.Name};");
                 }
-                // For nullable value types, use .Value to get the underlying value
-                var propertyAccess = member.IsNullable ? $"instance.{member.Name}.Value" : $"instance.{member.Name}";
-                _sb.AppendIndentedLine($"{typeNsPrefix}StreamReaders.Populate{typeName}(ref reader, {propertyAccess});");
             }
 
             _sb.AppendIndentedLine("reader.PopLimit(oldLimit);");

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using GProtobuf.Generator.V2.CodeGeneration.Core;
 using GProtobuf.Generator.V2.Handlers.Core;
 using GProtobuf.Generator.V2.Helpers;
 
@@ -146,7 +147,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 // Type has ProtoInclude inheritance - need to use Populate which handles base class wrapper
                 _sb.AppendIndentedLine($"var instance = new {GetGlobalTypeName(elementType)}();");
-                _sb.AppendIndentedLine($"{spanReadersClass}.Populate{elementClassName}(ref subReader, instance);");
+                _sb.AppendIndentedLine($"{spanReadersClass}.Populate{elementClassName}(ref subReader, {GeneratorHelpers.GetPopulateInstanceArgument(_registry, elementType, "instance")});");
                 _sb.AppendIndentedLine($"{addMethod}(instance);");
             }
             else

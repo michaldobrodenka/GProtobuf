@@ -406,10 +406,10 @@ namespace GProtobuf.Generator.V2
                 {
                     if (_options.GenerateSpanReader)
                     {
-                        sb.AppendIndentedLine($"public static void Populate{className}(ReadOnlySpan<byte> data, global::{type.FullName} instance)");
+                        sb.AppendIndentedLine($"public static void Populate{className}(ReadOnlySpan<byte> data, {GeneratorHelpers.GetPopulateInstanceParameter(type)})");
                         sb.StartNewBlock();
                         sb.AppendIndentedLine("var reader = new SpanReader(data);");
-                        sb.AppendIndentedLine($"SpanReaders.Populate{className}(ref reader, instance);");
+                        sb.AppendIndentedLine($"SpanReaders.Populate{className}(ref reader, {GeneratorHelpers.GetPopulateInstanceArgument(type, "instance")});");
                         sb.EndBlock();
                         sb.AppendNewLine();
                     }
@@ -417,18 +417,18 @@ namespace GProtobuf.Generator.V2
                     if (_options.GenerateStreamReader)
                     {
                         // Populate method - Stream overload (allocates default buffer)
-                        sb.AppendIndentedLine($"public static void Populate{className}(Stream stream, global::{type.FullName} instance)");
+                        sb.AppendIndentedLine($"public static void Populate{className}(Stream stream, {GeneratorHelpers.GetPopulateInstanceParameter(type)})");
                         sb.StartNewBlock();
                         sb.AppendIndentedLine("Span<byte> buffer = stackalloc byte[global::GProtobuf.Core.StreamReader.DefaultBufferSize];");
-                        sb.AppendIndentedLine($"Populate{className}(stream, buffer, instance);");
+                        sb.AppendIndentedLine($"Populate{className}(stream, buffer, {GeneratorHelpers.GetPopulateInstanceArgument(type, "instance")});");
                         sb.EndBlock();
                         sb.AppendNewLine();
 
                         // Populate method - Stream overload with custom buffer - true streaming using PushLimit/PopLimit
-                        sb.AppendIndentedLine($"public static void Populate{className}(Stream stream, Span<byte> buffer, global::{type.FullName} instance)");
+                        sb.AppendIndentedLine($"public static void Populate{className}(Stream stream, Span<byte> buffer, {GeneratorHelpers.GetPopulateInstanceParameter(type)})");
                         sb.StartNewBlock();
                         sb.AppendIndentedLine("var reader = new global::GProtobuf.Core.StreamReader(stream, buffer);");
-                        sb.AppendIndentedLine($"StreamReaders.Populate{className}(ref reader, instance);");
+                        sb.AppendIndentedLine($"StreamReaders.Populate{className}(ref reader, {GeneratorHelpers.GetPopulateInstanceArgument(type, "instance")});");
                         sb.EndBlock();
                         sb.AppendNewLine();
                     }
