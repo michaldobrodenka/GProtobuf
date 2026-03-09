@@ -603,7 +603,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             // Separate fields into ObjectArrayBuilder (for classes) and List<T> (for structs/primitives)
             var fieldsUsingObjectBuilder = fieldsNeedingTempList.Where(m => ObjectArrayBuilderHelper.ShouldUseObjectArrayBuilder(m, _registry)).ToList();
-            var fieldsUsingTempList = fieldsNeedingTempList.Where(m => !ObjectArrayBuilderHelper.ShouldUseObjectArrayBuilder(m, _registry)).ToList();
+            var fieldsUsingTempList = fieldsNeedingTempList.Where(m => ObjectArrayBuilderHelper.NeedsTempListDeclaration(m, _registry)).ToList();
 
             // Declare ObjectArrayBuilder for class element collections
             ObjectArrayBuilderHelper.GenerateDeclarations(_sb, fieldsUsingObjectBuilder,
@@ -1195,7 +1195,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             // Separate fields into ObjectArrayBuilder (for classes) and List<T> (for structs/primitives)
             var fieldsUsingObjectBuilder = fieldsNeedingTempList?.Where(m => ObjectArrayBuilderHelper.ShouldUseObjectArrayBuilder(m, _registry)).ToList() ?? new List<ProtoMemberAttribute>();
-            var fieldsUsingTempList = fieldsNeedingTempList?.Where(m => !ObjectArrayBuilderHelper.ShouldUseObjectArrayBuilder(m, _registry)).ToList() ?? new List<ProtoMemberAttribute>();
+            var fieldsUsingTempList = fieldsNeedingTempList?.Where(m => ObjectArrayBuilderHelper.NeedsTempListDeclaration(m, _registry)).ToList() ?? new List<ProtoMemberAttribute>();
 
             // Declare ObjectArrayBuilder for class element collections
             ObjectArrayBuilderHelper.GenerateDeclarations(_sb, fieldsUsingObjectBuilder,
@@ -1532,7 +1532,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
                 // Separate fields into ObjectArrayBuilder (for classes) and List<T> (for structs/primitives)
                 var fieldsUsingObjectBuilder = fieldsNeedingTempList.Where(m => ObjectArrayBuilderHelper.ShouldUseObjectArrayBuilder(m, _registry)).ToList();
-                var fieldsUsingTempList = fieldsNeedingTempList.Where(m => !ObjectArrayBuilderHelper.ShouldUseObjectArrayBuilder(m, _registry)).ToList();
+                var fieldsUsingTempList = fieldsNeedingTempList.Where(m => ObjectArrayBuilderHelper.NeedsTempListDeclaration(m, _registry)).ToList();
 
                 // Declare ObjectArrayBuilder for class element collections
                 ObjectArrayBuilderHelper.GenerateDeclarations(_sb, fieldsUsingObjectBuilder,
@@ -1636,7 +1636,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             // Separate fields into ObjectArrayBuilder (for classes) and List<T> (for structs/primitives)
             var fieldsUsingObjectBuilder = fieldsNeedingTempList.Where(m => ObjectArrayBuilderHelper.ShouldUseObjectArrayBuilder(m, _registry)).ToList();
-            var fieldsUsingTempList = fieldsNeedingTempList.Where(m => !ObjectArrayBuilderHelper.ShouldUseObjectArrayBuilder(m, _registry)).ToList();
+            var fieldsUsingTempList = fieldsNeedingTempList.Where(m => ObjectArrayBuilderHelper.NeedsTempListDeclaration(m, _registry)).ToList();
 
             // Declare ObjectArrayBuilder for class element collections
             ObjectArrayBuilderHelper.GenerateDeclarations(_sb, fieldsUsingObjectBuilder,
@@ -1943,7 +1943,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             // Separate fields into ObjectArrayBuilder (for classes) and List<T> (for structs/primitives)
             var fieldsUsingObjectBuilder = fieldsNeedingTempList?.Where(m => ObjectArrayBuilderHelper.ShouldUseObjectArrayBuilder(m, _registry)).ToList() ?? new List<ProtoMemberAttribute>();
-            var fieldsUsingTempList = fieldsNeedingTempList?.Where(m => !ObjectArrayBuilderHelper.ShouldUseObjectArrayBuilder(m, _registry)).ToList() ?? new List<ProtoMemberAttribute>();
+            var fieldsUsingTempList = fieldsNeedingTempList?.Where(m => ObjectArrayBuilderHelper.NeedsTempListDeclaration(m, _registry)).ToList() ?? new List<ProtoMemberAttribute>();
 
             // Declare ObjectArrayBuilder for class element collections
             ObjectArrayBuilderHelper.GenerateDeclarations(_sb, fieldsUsingObjectBuilder,

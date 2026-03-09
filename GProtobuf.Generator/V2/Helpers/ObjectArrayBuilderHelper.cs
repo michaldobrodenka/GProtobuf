@@ -68,6 +68,42 @@ namespace GProtobuf.Generator.V2.Helpers
         }
 
         /// <summary>
+        /// Determines if a collection member needs a class-level _tempList_ declaration.
+        /// Returns true only for element types that are handled by CollectionHandler or TupleHandler
+        /// (structs, tuples, DateTime arrays).
+        /// Returns false for:
+        /// - Classes (use ObjectArrayBuilder via _builder_)
+        /// - Primitives (PrimitiveHandler uses local storage)
+        /// - Enums (PrimitiveHandler uses local storage)
+        /// </summary>
+        /// <param name="member">The proto member attribute describing the collection.</param>
+        /// <param name="registry">The type registry for looking up type information.</param>
+        /// <returns>True if _tempList_ declaration is needed, false otherwise.</returns>
+        internal static bool NeedsTempListDeclaration(ProtoMemberAttribute member, TypeRegistry registry)
+        {
+            if (member?.CollectionElementType == null)
+                return false;
+
+            // Classes use ObjectArrayBuilder, not _tempList_
+            if (ShouldUseObjectArrayBuilder(member, registry))
+                return false;
+
+            // Primitives: PrimitiveHandler uses local storage (UnmanagedArrayBuilder or local tempList)
+            // This includes: int, long, string, Guid, TimeSpan, byte, etc.
+            if (TypeMapping.IsNonPackedArrayType(member.CollectionElementType))
+                return false;
+
+            // Enums: PrimitiveHandler uses local storage
+            var normalizedType = TypeMapping.NormalizeTypeName(member.CollectionElementType);
+            if (registry?.IsEnum(member.CollectionElementType) == true ||
+                registry?.IsEnum(normalizedType) == true)
+                return false;
+
+            // Remaining types need _tempList_: structs, tuples, DateTime, etc.
+            return true;
+        }
+
+        /// <summary>
         /// Generates declaration code for ObjectArrayBuilder fields.
         /// </summary>
         /// <param name="sb">The string builder to write to.</param>
