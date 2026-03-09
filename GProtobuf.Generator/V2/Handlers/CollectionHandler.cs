@@ -125,13 +125,18 @@ namespace GProtobuf.Generator.V2.Handlers
         /// Generates read code for List&lt;ComplexType&gt;.
         /// Lazy-initializes collection, reads length-prefixed item, adds to collection.
         /// </summary>
+        /// <param name="useObjectArrayBuilder">
+        /// When true, uses ObjectArrayBuilder pattern (_builder_{fieldName}.Add) instead of List&lt;T&gt; pattern.
+        /// ObjectArrayBuilder must be pre-declared and disposed by caller.
+        /// </param>
         public void GenerateComplexCollectionRead(
             string targetVar,
             string elementTypeName,
             string elementClassName,
             CollectionKind collectionKind,
             string collectionTypeName,
-            string readerVar = "reader")
+            string readerVar = "reader",
+            bool useObjectArrayBuilder = false)
         {
             var shortElementType = TypeMapping.GetShortTypeName(elementTypeName);
 
@@ -158,31 +163,40 @@ namespace GProtobuf.Generator.V2.Handlers
             {
                 if (collectionKind == CollectionKind.Array)
                 {
-                    actualTargetVar = $"_tempList_{fieldName}";
-                    needsTempList = true;
+                    // Arrays need temp storage - either _tempList_ or _builder_
+                    actualTargetVar = useObjectArrayBuilder ? $"_builder_{fieldName}" : $"_tempList_{fieldName}";
+                    needsTempList = !useObjectArrayBuilder; // Only need temp list pattern for List<T>
                 }
                 else if (collectionKind == CollectionKind.InterfaceCollection && collectionTypeName != null)
                 {
                     // Check if it's IEnumerable (not ICollection, IList, etc.)
-                    // For IEnumerable collections, we can't call Add() directly, need temp list
+                    // For IEnumerable collections, we can't call Add() directly, need temp storage
                     if (collectionTypeName.Contains("IEnumerable<") &&
                         !collectionTypeName.Contains("ICollection") &&
                         !collectionTypeName.Contains("IList"))
                     {
-                        actualTargetVar = $"_tempList_{fieldName}";
-                        needsTempList = true;
+                        actualTargetVar = useObjectArrayBuilder ? $"_builder_{fieldName}" : $"_tempList_{fieldName}";
+                        needsTempList = !useObjectArrayBuilder;
                     }
                 }
             }
 
-            // Lazy init collection
-            _sb.AppendIndentedLine($"if ({actualTargetVar} == null)");
-            _sb.StartNewBlock();
+            // Check if we're actually using ObjectArrayBuilder (target starts with _builder_)
+            bool actuallyUsingObjectBuilder = actualTargetVar.StartsWith("_builder_");
 
-            var initExpr = GenerateCollectionInitialization(shortElementType, collectionKind, collectionTypeName);
-            _sb.AppendIndentedLine($"{actualTargetVar} = {initExpr};");
+            // For ObjectArrayBuilder, skip lazy init - it's always pre-initialized
+            // For all other cases (instance.Property, _tempList_), we need lazy init
+            if (!actuallyUsingObjectBuilder)
+            {
+                // Lazy init collection (List<T> pattern)
+                _sb.AppendIndentedLine($"if ({actualTargetVar} == null)");
+                _sb.StartNewBlock();
 
-            _sb.EndBlock();
+                var initExpr = GenerateCollectionInitialization(shortElementType, collectionKind, collectionTypeName);
+                _sb.AppendIndentedLine($"{actualTargetVar} = {initExpr};");
+
+                _sb.EndBlock();
+            }
 
             // Check if element is a simple BCL type (DateTime, Guid, TimeSpan, etc.)
             bool isSimpleBclType = TypeMapping.IsSimpleType(elementTypeName);

@@ -891,42 +891,49 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 }
             }
 
-            // Declare temp lists for all collection fields from inheritance chain
+            // Separate fields into ObjectArrayBuilder (for classes) and List<T> (for structs/primitives)
+            var fieldsUsingObjectBuilder = fieldsNeedingTempList.Where(m => ObjectArrayBuilderHelper.ShouldUseObjectArrayBuilder(m, _registry)).ToList();
+            var fieldsUsingTempList = fieldsNeedingTempList.Where(m => !ObjectArrayBuilderHelper.ShouldUseObjectArrayBuilder(m, _registry)).ToList();
+
+            // Declare ObjectArrayBuilder for class element collections
+            ObjectArrayBuilderHelper.GenerateDeclarations(_sb, fieldsUsingObjectBuilder,
+                m => TypeMapping.GetShortTypeName(m.CollectionElementType));
+
+            // Declare temp lists for non-class collection fields from inheritance chain
+            foreach (var member in fieldsUsingTempList)
+            {
+                var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType);
+                _sb.AppendIndentedLine($"global::System.Collections.Generic.List<{elementType}> _tempList_{member.Name} = null;");
+            }
+
             if (fieldsNeedingTempList.Count > 0)
             {
-                foreach (var member in fieldsNeedingTempList)
-                {
-                    var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType);
-                    _sb.AppendIndentedLine($"global::System.Collections.Generic.List<{elementType}> _tempList_{member.Name} = null;");
-                }
                 _sb.AppendNewLine();
+            }
+
+            // Wrap in try/finally for exception safety (ObjectArrayBuilder must be disposed)
+            if (fieldsUsingObjectBuilder.Count > 0)
+            {
+                _sb.AppendIndentedLine("try");
+                _sb.StartNewBlock();
             }
 
             // Generate nested reading for each level using PushLimit/PopLimit
             GenerateNestedReading(chain, 0, "reader");
 
+            // Convert ObjectArrayBuilder fields to arrays/lists
+            ObjectArrayBuilderHelper.GenerateConversion(_sb, fieldsUsingObjectBuilder, "result");
+
             // Convert temp lists to arrays or assign to IEnumerable properties
-            if (fieldsNeedingTempList.Count > 0)
+            ObjectArrayBuilderHelper.GenerateTempListFinalization(_sb, fieldsUsingTempList, "result");
+
+            if (fieldsUsingObjectBuilder.Count > 0)
             {
-                _sb.AppendNewLine();
-                foreach (var member in fieldsNeedingTempList)
-                {
-                    _sb.AppendIndentedLine($"if (_tempList_{member.Name} != null)");
-                    _sb.StartNewBlock();
-
-                    if (member.CollectionKind == CollectionKind.Array)
-                    {
-                        // Arrays need ToArray() conversion
-                        _sb.AppendIndentedLine($"result.{member.Name} = _tempList_{member.Name}.ToArray();");
-                    }
-                    else
-                    {
-                        // IEnumerable can be assigned List directly (List implements IEnumerable)
-                        _sb.AppendIndentedLine($"result.{member.Name} = _tempList_{member.Name};");
-                    }
-
-                    _sb.EndBlock();
-                }
+                _sb.EndBlock();
+                _sb.AppendIndentedLine("finally");
+                _sb.StartNewBlock();
+                ObjectArrayBuilderHelper.GenerateDispose(_sb, fieldsUsingObjectBuilder);
+                _sb.EndBlock();
             }
 
             _sb.AppendIndentedLine("return result;");
@@ -1153,7 +1160,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     elementClassName,
                     member.CollectionKind,
                     member.Type,
-                    readerVar);
+                    readerVar,
+                    useObjectArrayBuilder: ObjectArrayBuilderHelper.ShouldUseObjectArrayBuilder(member, _registry));
             }
         }
 
@@ -1488,14 +1496,31 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 ))
                 .ToList();
 
-            if (fieldsNeedingTempList != null && fieldsNeedingTempList.Count > 0)
+            // Separate fields into ObjectArrayBuilder (for classes) and List<T> (for structs/primitives)
+            var fieldsUsingObjectBuilder = fieldsNeedingTempList?.Where(m => ObjectArrayBuilderHelper.ShouldUseObjectArrayBuilder(m, _registry)).ToList() ?? new List<ProtoMemberAttribute>();
+            var fieldsUsingTempList = fieldsNeedingTempList?.Where(m => !ObjectArrayBuilderHelper.ShouldUseObjectArrayBuilder(m, _registry)).ToList() ?? new List<ProtoMemberAttribute>();
+
+            // Declare ObjectArrayBuilder for class element collections
+            ObjectArrayBuilderHelper.GenerateDeclarations(_sb, fieldsUsingObjectBuilder,
+                m => TypeMapping.GetShortTypeName(m.CollectionElementType));
+
+            // Declare temp lists for non-class collection fields
+            foreach (var member in fieldsUsingTempList)
             {
-                foreach (var member in fieldsNeedingTempList)
-                {
-                    var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType);
-                    _sb.AppendIndentedLine($"global::System.Collections.Generic.List<{elementType}> _tempList_{member.Name} = null;");
-                }
+                var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType);
+                _sb.AppendIndentedLine($"global::System.Collections.Generic.List<{elementType}> _tempList_{member.Name} = null;");
+            }
+
+            if ((fieldsNeedingTempList != null && fieldsNeedingTempList.Count > 0))
+            {
                 _sb.AppendNewLine();
+            }
+
+            // Wrap in try/finally for exception safety (ObjectArrayBuilder must be disposed)
+            if (fieldsUsingObjectBuilder.Count > 0)
+            {
+                _sb.AppendIndentedLine("try");
+                _sb.StartNewBlock();
             }
 
             _sb.AppendIndentedLine("while (!reader.IsEnd)");
@@ -1519,24 +1544,19 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             _sb.EndBlock(); // while
 
+            // Convert ObjectArrayBuilder fields to arrays/lists
+            ObjectArrayBuilderHelper.GenerateConversion(_sb, fieldsUsingObjectBuilder, "result");
+
             // Convert temp lists to arrays if needed
-            if (fieldsNeedingTempList != null && fieldsNeedingTempList.Count > 0)
+            ObjectArrayBuilderHelper.GenerateTempListFinalization(_sb, fieldsUsingTempList, "result");
+
+            if (fieldsUsingObjectBuilder.Count > 0)
             {
-                _sb.AppendNewLine();
-                foreach (var member in fieldsNeedingTempList)
-                {
-                    _sb.AppendIndentedLine($"if (_tempList_{member.Name} != null)");
-                    _sb.StartNewBlock();
-                    if (member.CollectionKind == CollectionKind.Array)
-                    {
-                        _sb.AppendIndentedLine($"result.{member.Name} = _tempList_{member.Name}.ToArray();");
-                    }
-                    else
-                    {
-                        _sb.AppendIndentedLine($"result.{member.Name} = _tempList_{member.Name};");
-                    }
-                    _sb.EndBlock();
-                }
+                _sb.EndBlock();
+                _sb.AppendIndentedLine("finally");
+                _sb.StartNewBlock();
+                ObjectArrayBuilderHelper.GenerateDispose(_sb, fieldsUsingObjectBuilder);
+                _sb.EndBlock();
             }
 
             _sb.AppendIndentedLine("return result;");
@@ -2171,6 +2191,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 (member.CollectionKind == CollectionKind.InterfaceCollection &&
                  normalizedMemberType.StartsWith("System.Collections.Generic.IEnumerable<")));
 
+            // Check if we should use ObjectArrayBuilder for class elements
+            bool useObjectArrayBuilder = needsTempList && ObjectArrayBuilderHelper.ShouldUseObjectArrayBuilder(member, _registry);
+
             // Determine collection type name for initialization
             string collectionTypeName;
             if (isCustomCollection)
@@ -2186,9 +2209,29 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     : $"global::System.Collections.Generic.List<{elementType}>";
             }
 
-            string targetCollection = needsTempList ? $"_tempList_{member.Name}" : $"result.{member.Name}";
+            string targetCollection;
+            if (useObjectArrayBuilder)
+            {
+                // ObjectArrayBuilder is always pre-initialized, no lazy init needed
+                targetCollection = $"_builder_{member.Name}";
+            }
+            else if (needsTempList)
+            {
+                targetCollection = $"_tempList_{member.Name}";
+            }
+            else
+            {
+                targetCollection = $"result.{member.Name}";
+            }
 
-            if (needsTempList)
+            // For ObjectArrayBuilder, skip lazy init - it's already initialized before the loop
+            // For _tempList_, lazy init as before
+            // For result.Property, lazy init the property
+            if (useObjectArrayBuilder)
+            {
+                // No lazy init needed - ObjectArrayBuilder is pre-initialized
+            }
+            else if (needsTempList)
             {
                 _sb.AppendIndentedLine($"if ({targetCollection} == null)");
                 _sb.StartNewBlock();
@@ -2364,14 +2407,32 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         {
             // For array and IEnumerable fields, declare temp lists before the while loop
             var tempListMembers = type.ProtoMembers?.Where(m => NeedsTempList(m.Type)).ToList() ?? new List<ProtoMemberAttribute>();
-            foreach (var member in tempListMembers)
+
+            // Separate fields into ObjectArrayBuilder (for classes) and List<T> (for structs/primitives)
+            var fieldsUsingObjectBuilder = tempListMembers.Where(m => ObjectArrayBuilderHelper.ShouldUseObjectArrayBuilder(m, _registry)).ToList();
+            var fieldsUsingTempList = tempListMembers.Where(m => !ObjectArrayBuilderHelper.ShouldUseObjectArrayBuilder(m, _registry)).ToList();
+
+            // Declare ObjectArrayBuilder for class element collections
+            ObjectArrayBuilderHelper.GenerateDeclarations(_sb, fieldsUsingObjectBuilder,
+                m => TypeMapping.GetShortTypeName(m.CollectionElementType ?? GetArrayElementType(m.Type)));
+
+            // Declare temp lists for non-class collection fields
+            foreach (var member in fieldsUsingTempList)
             {
                 var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType ?? GetArrayElementType(member.Type));
                 _sb.AppendIndentedLine($"global::System.Collections.Generic.List<{elementType}> _tempList_{member.Name} = null;");
             }
+
             if (tempListMembers.Count > 0)
             {
                 _sb.AppendNewLine();
+            }
+
+            // Wrap in try/finally for exception safety (ObjectArrayBuilder must be disposed)
+            if (fieldsUsingObjectBuilder.Count > 0)
+            {
+                _sb.AppendIndentedLine("try");
+                _sb.StartNewBlock();
             }
 
             // Use 'instance' instead of 'result' for Populate methods
@@ -2405,20 +2466,18 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             _sb.EndBlock();
 
+            // Convert ObjectArrayBuilder fields to arrays/lists
+            ObjectArrayBuilderHelper.GenerateConversion(_sb, fieldsUsingObjectBuilder, "instance", m => IsArrayType(m.Type));
+
             // After the while loop, assign temp lists to fields
-            foreach (var member in tempListMembers)
+            ObjectArrayBuilderHelper.GenerateTempListFinalization(_sb, fieldsUsingTempList, "instance", m => IsArrayType(m.Type));
+
+            if (fieldsUsingObjectBuilder.Count > 0)
             {
-                _sb.AppendIndentedLine($"if (_tempList_{member.Name} != null)");
+                _sb.EndBlock();
+                _sb.AppendIndentedLine("finally");
                 _sb.StartNewBlock();
-                if (IsArrayType(member.Type))
-                {
-                    _sb.AppendIndentedLine($"instance.{member.Name} = _tempList_{member.Name}.ToArray();");
-                }
-                else
-                {
-                    // IEnumerable - assign the list directly (it implements IEnumerable<T>)
-                    _sb.AppendIndentedLine($"instance.{member.Name} = _tempList_{member.Name};");
-                }
+                ObjectArrayBuilderHelper.GenerateDispose(_sb, fieldsUsingObjectBuilder);
                 _sb.EndBlock();
             }
         }
@@ -2766,11 +2825,24 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // For arrays, pre-declare temp list to accumulate elements (handles both packed and non-packed)
             string arrayElementType = null;
             string shortArrayElementType = null;
+            bool useObjectArrayBuilderForMapValue = false;
             if (isArrayValue)
             {
                 arrayElementType = member.MapValueType.Substring(0, member.MapValueType.Length - 2);
                 shortArrayElementType = TypeMapping.GetShortTypeName(arrayElementType);
-                _sb.AppendIndentedLine($"global::System.Collections.Generic.List<{shortArrayElementType}> _tempList_value = null;");
+
+                // Check if element type is a class (should use ObjectArrayBuilder)
+                var elementTypeDef = _registry?.GetByFullName(arrayElementType);
+                useObjectArrayBuilderForMapValue = elementTypeDef != null && !elementTypeDef.IsStruct && !elementTypeDef.IsEnum;
+
+                if (useObjectArrayBuilderForMapValue)
+                {
+                    _sb.AppendIndentedLine($"var _builder_value = new global::GProtobuf.Core.ObjectArrayBuilder<{shortArrayElementType}>({ObjectArrayBuilderHelper.InitialCapacity});");
+                }
+                else
+                {
+                    _sb.AppendIndentedLine($"global::System.Collections.Generic.List<{shortArrayElementType}> _tempList_value = null;");
+                }
             }
 
             _sb.AppendIndentedLine("while (!reader.IsEnd)");
@@ -2800,7 +2872,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             else if (isArrayValue)
             {
                 // For arrays, handle both packed and non-packed formats
-                GeneratePopulateMapArrayValueReadWithWireType("_tempList_value", arrayElementType, shortArrayElementType, "reader", "entryWireType");
+                var targetVar = useObjectArrayBuilderForMapValue ? "_builder_value" : "_tempList_value";
+                GeneratePopulateMapArrayValueReadWithWireType(targetVar, arrayElementType, shortArrayElementType, "reader", "entryWireType", useObjectArrayBuilderForMapValue);
             }
             else
             {
@@ -2820,17 +2893,32 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             _sb.AppendIndentedLine("reader.PopLimit(mapOldLimit);");
 
-            // For arrays, convert temp list to array after entry loop
+            // For arrays, convert temp list/builder to array after entry loop
             if (isArrayValue)
             {
-                _sb.AppendIndentedLine("if (_tempList_value != null)");
-                _sb.StartNewBlock();
-                _sb.AppendIndentedLine("value = _tempList_value.ToArray();");
-                _sb.EndBlock();
-                _sb.AppendIndentedLine("else");
-                _sb.StartNewBlock();
-                _sb.AppendIndentedLine($"value = global::System.Array.Empty<{shortArrayElementType}>();");
-                _sb.EndBlock();
+                if (useObjectArrayBuilderForMapValue)
+                {
+                    _sb.AppendIndentedLine("if (_builder_value.Count > 0)");
+                    _sb.StartNewBlock();
+                    _sb.AppendIndentedLine("value = _builder_value.ToArray();");
+                    _sb.EndBlock();
+                    _sb.AppendIndentedLine("else");
+                    _sb.StartNewBlock();
+                    _sb.AppendIndentedLine($"value = global::System.Array.Empty<{shortArrayElementType}>();");
+                    _sb.EndBlock();
+                    _sb.AppendIndentedLine("_builder_value.Dispose();");
+                }
+                else
+                {
+                    _sb.AppendIndentedLine("if (_tempList_value != null)");
+                    _sb.StartNewBlock();
+                    _sb.AppendIndentedLine("value = _tempList_value.ToArray();");
+                    _sb.EndBlock();
+                    _sb.AppendIndentedLine("else");
+                    _sb.StartNewBlock();
+                    _sb.AppendIndentedLine($"value = global::System.Array.Empty<{shortArrayElementType}>();");
+                    _sb.EndBlock();
+                }
             }
 
             if (isKeyValuePairCollection)
@@ -3323,11 +3411,15 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// <summary>
         /// Generates code to read array elements in a map entry, handling both packed and non-packed formats.
         /// </summary>
-        private void GeneratePopulateMapArrayValueReadWithWireType(string tempListVar, string elementType, string shortElementType, string readerVar, string wireTypeVar)
+        private void GeneratePopulateMapArrayValueReadWithWireType(string tempListVar, string elementType, string shortElementType, string readerVar, string wireTypeVar, bool useObjectArrayBuilder = false)
         {
             var normalizedElementType = TypeMapping.NormalizeTypeName(elementType);
 
-            _sb.AppendIndentedLine($"{tempListVar} ??= new global::System.Collections.Generic.List<{shortElementType}>();");
+            // For ObjectArrayBuilder, skip lazy init - it's already initialized before the loop
+            if (!useObjectArrayBuilder)
+            {
+                _sb.AppendIndentedLine($"{tempListVar} ??= new global::System.Collections.Generic.List<{shortElementType}>();");
+            }
             _sb.AppendIndentedLine($"if ({wireTypeVar} == global::GProtobuf.Core.WireType.Len)");
             _sb.StartNewBlock();
             // Packed format - read all elements from length-prefixed blob
@@ -3718,9 +3810,17 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // Check if this needs a temp list (array or IEnumerable)
             bool needsTempListForType = NeedsTempList(member.Type);
 
+            // Check if we should use ObjectArrayBuilder for class elements
+            bool useObjectArrayBuilder = needsTempListForType && ObjectArrayBuilderHelper.ShouldUseObjectArrayBuilder(member, _registry);
+
             // For arrays and IEnumerable, use temp list; for other collections, use instance directly
             string targetCollection;
-            if (needsTempListForType)
+            if (useObjectArrayBuilder)
+            {
+                // ObjectArrayBuilder is always pre-initialized, no lazy init needed
+                targetCollection = $"_builder_{member.Name}";
+            }
+            else if (needsTempListForType)
             {
                 targetCollection = $"_tempList_{member.Name}";
                 _sb.AppendIndentedLine($"if ({targetCollection} == null)");

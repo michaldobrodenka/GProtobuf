@@ -126,7 +126,7 @@ namespace GProtobuf.Generator.V2.Handlers
 
         /// <summary>
         /// Generates read code for non-packed repeated primitive field.
-        /// Uses UnmanagedCollectionCollector for efficiency.
+        /// Uses UnmanagedArrayBuilder for efficiency (unified byte[] pool).
         /// </summary>
         public void GenerateNonPackedArrayRead(
             StringBuilderWithIndent sb,
@@ -231,8 +231,8 @@ namespace GProtobuf.Generator.V2.Handlers
             }
             else
             {
-                // For unmanaged types, use UnmanagedCollectionCollector
-                sb.AppendIndentedLine($"using var resultCollector = new global::GProtobuf.Core.UnmanagedCollectionCollector<{shortType}>(stackalloc {shortType}[256 / sizeof({shortType})], 1024);");
+                // For unmanaged types, use UnmanagedArrayBuilder (unified byte[] pool)
+                sb.AppendIndentedLine($"using var resultCollector = new global::GProtobuf.Core.UnmanagedArrayBuilder<{shortType}>(stackalloc {shortType}[256 / sizeof({shortType})], 1024);");
                 sb.AppendIndentedLine($"var {wireTypeLoopVar} = {wireTypeVar};");
                 sb.AppendIndentedLine($"var {fieldIdLoopVar} = {fieldIdVar};");
                 sb.AppendIndentedLine($"while ({fieldIdLoopVar} == {fieldId} && {wireTypeLoopVar} == {expectedWireType})");

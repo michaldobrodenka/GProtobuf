@@ -10,7 +10,7 @@ using System.Threading.Tasks;
 
 namespace GProtobuf.Core
 {
-    public ref struct UnmanagedCollectionCollector<T> where T : unmanaged
+    public ref struct UnmanagedArrayBuilder<T> where T : unmanaged
     {
         private Span<T> stage;            // stackalloc staging buffer
         private int stageCount;
@@ -23,7 +23,7 @@ namespace GProtobuf.Core
         private readonly int pooledInitialElements;
         private static readonly int SizeOfT = Unsafe.SizeOf<T>();
 
-        public UnmanagedCollectionCollector(scoped Span<T> initialBuffer, int pooledInitialElements = 64)
+        public UnmanagedArrayBuilder(scoped Span<T> initialBuffer, int pooledInitialElements = 64)
         {
             unsafe
             {
