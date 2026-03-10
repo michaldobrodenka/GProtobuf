@@ -190,7 +190,7 @@ namespace GProtobuf.Generator.V2
                 {
                     try
                     {
-                        var spanReaderGenerator = new SpanReaderGenerator(sb, _registry, globalMapRegistry, globalTupleRegistry);
+                        var spanReaderGenerator = new SpanReaderGenerator(sb, _registry, globalMapRegistry, globalTupleRegistry, _options);
                         spanReaderGenerator.GenerateAll(types, ns);
                     }
                     catch (System.Exception ex)
@@ -251,8 +251,21 @@ namespace GProtobuf.Generator.V2
                     }
                 }
 
+                // Generate StackBufferWriters class (zero-allocation IoT-optimized serialization)
+                if (_options.GenerateStackBufferWriter)
+                {
+                    try
+                    {
+                        new StackBufferWriterGenerator(sb, _registry, globalMapRegistry, globalTupleRegistry).GenerateAll(types, ns);
+                    }
+                    catch (System.Exception ex)
+                    {
+                        throw new System.Exception($"Error in StackBufferWriterGenerator for namespace '{ns}'", ex);
+                    }
+                }
+
                 // Generate SizeCalculators class - needed when any writer is enabled (except OnePass which doesn't need size calculation)
-                if (_options.GenerateStreamWriter || _options.GenerateBufferWriter)
+                if (_options.GenerateStreamWriter || _options.GenerateBufferWriter || _options.GenerateStackBufferWriter)
                 {
                     try
                     {
@@ -453,7 +466,7 @@ namespace GProtobuf.Generator.V2
         private void GenerateSerializers(StringBuilderWithIndent sb, List<TypeDefinition> types, List<StandaloneTypeInfo> standaloneTypes)
         {
             // Only generate if at least one writer is enabled
-            if (!_options.GenerateStreamWriter && !_options.GenerateBufferWriter && !_options.GenerateOnePassStreamWriter)
+            if (!_options.GenerateStreamWriter && !_options.GenerateBufferWriter && !_options.GenerateOnePassStreamWriter && !_options.GenerateStackBufferWriter)
             {
                 return;
             }
@@ -497,6 +510,59 @@ namespace GProtobuf.Generator.V2
                     sb.AppendIndentedLine("var writer = new global::GProtobuf.Core.OnePassStreamWriter(stream, stackalloc byte[256]);");
                     sb.AppendIndentedLine($"OnePassStreamWriters.Write{className}(ref writer, obj);");
                     sb.AppendIndentedLine("writer.Flush();");
+                    sb.EndBlock();
+                    sb.AppendNewLine();
+                }
+
+                if (_options.GenerateStackBufferWriter)
+                {
+                    // SerializeTo - Zero-allocation stack-only serializer for IoT
+                    // Returns number of bytes written
+                    sb.AppendIndentedLine("/// <summary>");
+                    sb.AppendIndentedLine("/// Zero-allocation serialization directly to Span&lt;byte&gt;. Ideal for IoT devices.");
+                    sb.AppendIndentedLine("/// </summary>");
+                    sb.AppendIndentedLine("/// <returns>Number of bytes written.</returns>");
+                    sb.AppendIndentedLine($"public static int SerializeTo{className}(Span<byte> buffer, global::{type.FullName} obj)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine("var writer = new global::GProtobuf.Core.StackBufferWriter(buffer);");
+                    sb.AppendIndentedLine($"StackBufferWriters.Write{className}(ref writer, obj);");
+                    sb.AppendIndentedLine("return writer.Written;");
+                    sb.EndBlock();
+                    sb.AppendNewLine();
+
+                    // SerializeToArray - Convenience method that allocates and returns byte[]
+                    sb.AppendIndentedLine("/// <summary>");
+                    sb.AppendIndentedLine("/// Serializes to a new byte array. Uses stack buffer for small messages.");
+                    sb.AppendIndentedLine("/// </summary>");
+                    sb.AppendIndentedLine($"public static byte[] SerializeToArray{className}(global::{type.FullName} obj)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine("// Calculate size first (ContentSize handles polymorphism for inheritance hierarchies)");
+                    sb.AppendIndentedLine("var sizeCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+                    sb.AppendIndentedLine($"SizeCalculators.Calculate{className}ContentSize(ref sizeCalc, obj);");
+                    sb.AppendIndentedLine("int size = sizeCalc.Length;");
+                    sb.AppendNewLine();
+                    sb.AppendIndentedLine("// Use stackalloc for small messages, ArrayPool for larger");
+                    sb.AppendIndentedLine("if (size <= 512)");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine("Span<byte> buffer = stackalloc byte[size];");
+                    sb.AppendIndentedLine("var writer = new global::GProtobuf.Core.StackBufferWriter(buffer);");
+                    sb.AppendIndentedLine($"StackBufferWriters.Write{className}(ref writer, obj);");
+                    sb.AppendIndentedLine("return buffer.Slice(0, writer.Written).ToArray();");
+                    sb.EndBlock();
+                    sb.AppendIndentedLine("else");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine("byte[] buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(size);");
+                    sb.AppendIndentedLine("try");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine("var writer = new global::GProtobuf.Core.StackBufferWriter(buffer);");
+                    sb.AppendIndentedLine($"StackBufferWriters.Write{className}(ref writer, obj);");
+                    sb.AppendIndentedLine("return buffer.AsSpan(0, writer.Written).ToArray();");
+                    sb.EndBlock();
+                    sb.AppendIndentedLine("finally");
+                    sb.StartNewBlock();
+                    sb.AppendIndentedLine("System.Buffers.ArrayPool<byte>.Shared.Return(buffer);");
+                    sb.EndBlock();
+                    sb.EndBlock();
                     sb.EndBlock();
                     sb.AppendNewLine();
                 }

@@ -446,6 +446,7 @@ namespace GProtobuf.Core
         /// Optimized for unsigned values (lengths, byte, ushort, uint).
         /// Tolerates incomplete varints at EOF (treats last byte as final, ignores continuation bit).
         /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public uint ReadVarUInt32()
         {
             if (position >= buffer.Length)

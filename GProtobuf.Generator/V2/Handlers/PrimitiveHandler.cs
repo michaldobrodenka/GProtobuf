@@ -51,15 +51,23 @@ namespace GProtobuf.Generator.V2.Handlers
         /// <summary>
         /// Generates read code for a single primitive value.
         /// </summary>
+        /// <param name="sb">String builder for code output.</param>
+        /// <param name="targetVar">Target variable to assign to.</param>
+        /// <param name="typeName">The type name.</param>
+        /// <param name="format">Data format (default, zigzag, fixed).</param>
+        /// <param name="readerVar">Reader variable name.</param>
+        /// <param name="wireTypeVar">Wire type variable name.</param>
+        /// <param name="useStringPooling">If true, use StringPool for string deduplication.</param>
         public void GenerateRead(
             StringBuilderWithIndent sb,
             string targetVar,
             string typeName,
             DataFormat format,
             string readerVar = "reader",
-            string wireTypeVar = "wireType")
+            string wireTypeVar = "wireType",
+            bool useStringPooling = false)
         {
-            var readExpr = TypeMapping.GetReadExpression(typeName, format, readerVar, wireTypeVar);
+            var readExpr = TypeMapping.GetReadExpression(typeName, format, readerVar, wireTypeVar, useStringPooling);
             if (readExpr != null)
             {
                 sb.AppendIndentedLine($"{targetVar} = {readExpr};");

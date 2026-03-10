@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using GProtobuf.Generator.CodeGeneration;
 using GProtobuf.Generator.V2.CodeGeneration.Core;
 using GProtobuf.Generator.V2.Handlers;
 using GProtobuf.Generator.V2.Handlers.Core;
@@ -14,18 +15,18 @@ namespace GProtobuf.Generator.V2.CodeGeneration
     /// </summary>
     internal class SpanReaderGenerator : GeneratorBase
     {
-        public SpanReaderGenerator(StringBuilderWithIndent sb, TypeRegistry registry)
-            : base(sb, registry)
+        public SpanReaderGenerator(StringBuilderWithIndent sb, TypeRegistry registry, GeneratorOptions options = null)
+            : base(sb, registry, options)
         {
         }
 
-        public SpanReaderGenerator(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry)
-            : base(sb, registry, virtualMapRegistry)
+        public SpanReaderGenerator(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry, GeneratorOptions options = null)
+            : base(sb, registry, virtualMapRegistry, options)
         {
         }
 
-        public SpanReaderGenerator(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry, VirtualTupleTypeRegistry virtualTupleRegistry)
-            : base(sb, registry, virtualMapRegistry, virtualTupleRegistry, passRegistryToPrimitiveHandler: true)
+        public SpanReaderGenerator(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry, VirtualTupleTypeRegistry virtualTupleRegistry, GeneratorOptions options = null)
+            : base(sb, registry, virtualMapRegistry, virtualTupleRegistry, passRegistryToPrimitiveHandler: true, options)
         {
         }
 
@@ -457,11 +458,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     generateRegularFieldsSwitch: () =>
                     {
                         // Generate switch for ProtoMembers - appears ONCE
-                        _sb.AppendIndentedLine("// Regular fields switch");
+                        _sb.AppendIndentedLine("// Regular fields switch (sorted by field ID for optimal branch prediction)");
                         _sb.AppendIndentedLine("switch (fieldId)");
                         _sb.StartNewBlock();
 
-                        foreach (var member in type.ProtoMembers)
+                        // Use sorted dispatch for optimal branch prediction (PGO heuristic)
+                        foreach (var member in GeneratorHelpers.GetSortedFieldsForDispatch(type.ProtoMembers))
                         {
                             GenerateFieldReadCaseWithLazyInit(member, lazyInit);
                         }
@@ -764,7 +766,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
             else if (_primitiveHandler.CanHandle(member.Type))
             {
-                _primitiveHandler.GenerateRead(_sb, $"result.{member.Name}", member.Type, member.DataFormat, readerVar, wireTypeVar);
+                _primitiveHandler.GenerateRead(_sb, $"result.{member.Name}", member.Type, member.DataFormat, readerVar, wireTypeVar, UseStringPooling);
             }
             else if (member.IsProtoVarint)
             {
@@ -1008,13 +1010,13 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine("reader.ReadWireTypeAndFieldId(out var wireType, out var fieldId);");
             _sb.AppendNewLine();
 
-            // Generate switch for fields
+            // Generate switch for fields (sorted by field ID for optimal branch prediction)
             if (type.ProtoMembers != null && type.ProtoMembers.Count > 0)
             {
                 _sb.AppendIndentedLine("switch (fieldId)");
                 _sb.StartNewBlock();
 
-                foreach (var member in type.ProtoMembers)
+                foreach (var member in GeneratorHelpers.GetSortedFieldsForDispatch(type.ProtoMembers))
                 {
                     // Find mapping for this field
                     var mapping = mappings.FirstOrDefault(m => m.FieldName == member.Name);
@@ -1310,9 +1312,10 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     }
                     else
                     {
+                        // Use sorted dispatch for optimal branch prediction (PGO heuristic)
                         if (type.ProtoMembers != null)
                         {
-                            foreach (var member in type.ProtoMembers)
+                            foreach (var member in GeneratorHelpers.GetSortedFieldsForDispatch(type.ProtoMembers))
                             {
                                 GenerateFieldReadCase(member);
                             }
@@ -1381,9 +1384,10 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             else
             {
                 // ProtoInclude inheritance or no inheritance: use own fields only
+                // Use sorted dispatch for optimal branch prediction (PGO heuristic)
                 if (type.ProtoMembers != null)
                 {
-                    foreach (var member in type.ProtoMembers)
+                    foreach (var member in GeneratorHelpers.GetSortedFieldsForDispatch(type.ProtoMembers))
                     {
                         GenerateFieldReadCase(member);
                     }
@@ -1693,12 +1697,13 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine("protoIncludeReader.ReadWireTypeAndFieldId(out var derivedWireType, out var derivedFieldId);");
             _sb.AppendNewLine();
 
+            // Use sorted dispatch for optimal branch prediction (PGO heuristic)
             if (type.ProtoMembers != null && type.ProtoMembers.Count > 0)
             {
                 _sb.AppendIndentedLine("switch (derivedFieldId)");
                 _sb.StartNewBlock();
 
-                foreach (var member in type.ProtoMembers)
+                foreach (var member in GeneratorHelpers.GetSortedFieldsForDispatch(type.ProtoMembers))
                 {
                     GenerateFieldPopulateCaseWithReader(member, "protoIncludeReader", "derivedWireType");
                 }
@@ -1790,7 +1795,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
             else if (_primitiveHandler.CanHandle(member.Type))
             {
-                _primitiveHandler.GenerateRead(_sb, $"instance.{member.Name}", member.Type, member.DataFormat, readerVar, wireTypeVar);
+                _primitiveHandler.GenerateRead(_sb, $"instance.{member.Name}", member.Type, member.DataFormat, readerVar, wireTypeVar, UseStringPooling);
             }
             else if (member.IsProtoVarint)
             {
@@ -1981,9 +1986,10 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 _sb.AppendIndentedLine("switch (fieldId)");
                 _sb.StartNewBlock();
 
+                // Use sorted dispatch for optimal branch prediction (PGO heuristic)
                 if (hasProtoMembers)
                 {
-                    foreach (var member in type.ProtoMembers)
+                    foreach (var member in GeneratorHelpers.GetSortedFieldsForDispatch(type.ProtoMembers))
                     {
                         GenerateFieldPopulateCase(member);
                     }
@@ -2073,7 +2079,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
             else if (_primitiveHandler.CanHandle(member.Type))
             {
-                _primitiveHandler.GenerateRead(_sb, $"instance.{member.Name}", member.Type, member.DataFormat);
+                _primitiveHandler.GenerateRead(_sb, $"instance.{member.Name}", member.Type, member.DataFormat, "reader", "wireType", UseStringPooling);
             }
             else if (member.IsProtoVarint)
             {
@@ -2357,7 +2363,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
             else if (_primitiveHandler.CanHandle(member.Type))
             {
-                _primitiveHandler.GenerateRead(_sb, $"result.{member.Name}", member.Type, member.DataFormat);
+                _primitiveHandler.GenerateRead(_sb, $"result.{member.Name}", member.Type, member.DataFormat, "reader", "wireType", UseStringPooling);
             }
             else if (member.IsProtoVarint)
             {
@@ -2425,7 +2431,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     _tupleHandler.GenerateTupleRead($"result.{member.Name}", member.Type);
                     break;
                 case FieldCategory.Primitive:
-                    _primitiveHandler.GenerateRead(_sb, $"result.{member.Name}", member.Type, member.DataFormat);
+                    _primitiveHandler.GenerateRead(_sb, $"result.{member.Name}", member.Type, member.DataFormat, "reader", "wireType", UseStringPooling);
                     break;
                 case FieldCategory.ProtoVarint:
                     ProtoVarintTypeSupport.GenerateRead(_sb, member, $"result.{member.Name}");

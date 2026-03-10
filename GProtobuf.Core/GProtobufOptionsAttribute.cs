@@ -79,5 +79,41 @@ namespace GProtobuf.Core
         /// - OnePassStreamWriter (1-pass): uses memory pooling for nested messages (BeginSubMessage/EndSubMessage)
         /// </remarks>
         public bool GenerateOnePassStreamWriter { get; set; } = false;
+
+        /// <summary>
+        /// Enable generation of StackBufferWriter-based serialization methods.
+        /// Default: true
+        /// </summary>
+        /// <remarks>
+        /// When enabled, generates:
+        /// - SerializeTo{Type}(Span&lt;byte&gt; buffer, T obj) methods - zero-allocation
+        /// - SerializeToArray{Type}(T obj) methods - uses stackalloc for small messages
+        /// - StackBufferWriters.Write{Type}(ref StackBufferWriter writer, T obj) extension methods
+        ///
+        /// IoT Optimization:
+        /// - Zero heap allocations for messages &lt;512 bytes
+        /// - Writes directly to Span&lt;byte&gt;
+        /// - Ideal for battery-powered devices
+        /// - Deterministic timing (no GC pauses)
+        /// </remarks>
+        public bool GenerateStackBufferWriter { get; set; } = true;
+
+        /// <summary>
+        /// Enable string pooling for deserialization to reduce allocations.
+        /// Default: false
+        /// </summary>
+        /// <remarks>
+        /// When enabled, uses StringPool for string field deserialization.
+        /// Reduces allocations by 60-85% for repeated string values (device IDs, sensor types, status codes).
+        ///
+        /// Best for:
+        /// - IoT telemetry with limited value sets
+        /// - High-frequency messages with repeated strings
+        ///
+        /// Not recommended for:
+        /// - Unique/random strings (UUIDs, timestamps)
+        /// - Short-lived processes (pool never warms up)
+        /// </remarks>
+        public bool UseStringPooling { get; set; } = false;
     }
 }

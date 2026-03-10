@@ -11,14 +11,22 @@ namespace GProtobuf.Generator.V2.Handlers.Core
         /// Tries to generate read code for special types (String, Guid).
         /// Returns true if the type was handled, false otherwise.
         /// </summary>
-        public static bool TryGenerateRead(StringBuilderWithIndent sb, string targetVar, string typeName, string readerVar = "reader")
+        public static bool TryGenerateRead(StringBuilderWithIndent sb, string targetVar, string typeName, string readerVar = "reader", bool useStringPooling = false)
         {
             var normalized = TypeMapping.NormalizeTypeName(typeName);
 
             switch (normalized)
             {
                 case "System.String":
-                    sb.AppendIndentedLine($"{targetVar} = global::GProtobuf.Core.SpanReaders.ReadString(ref {readerVar}, global::GProtobuf.Core.WireType.Len);");
+                    if (useStringPooling)
+                    {
+                        // Use StringPool for deduplication (60-85% allocation reduction)
+                        sb.AppendIndentedLine($"{targetVar} = {readerVar}.ReadStringPooled();");
+                    }
+                    else
+                    {
+                        sb.AppendIndentedLine($"{targetVar} = global::GProtobuf.Core.SpanReaders.ReadString(ref {readerVar}, global::GProtobuf.Core.WireType.Len);");
+                    }
                     return true;
 
                 case "System.Guid":

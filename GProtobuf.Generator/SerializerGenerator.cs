@@ -163,6 +163,8 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                         bool generateStreamWriter = true;
                         bool generateBufferWriter = true;
                         bool generateOnePassStreamWriter = false;
+                        bool generateStackBufferWriter = true;
+                        bool useStringPooling = false;
 
                         foreach (var namedArg in attr.NamedArguments)
                         {
@@ -183,6 +185,12 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                                 case "GenerateOnePassStreamWriter":
                                     generateOnePassStreamWriter = namedArg.Value.Value is bool v5 && v5;
                                     break;
+                                case "GenerateStackBufferWriter":
+                                    generateStackBufferWriter = namedArg.Value.Value is bool v6 && v6;
+                                    break;
+                                case "UseStringPooling":
+                                    useStringPooling = namedArg.Value.Value is bool v7 && v7;
+                                    break;
                             }
                         }
 
@@ -192,7 +200,9 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                             GenerateStreamReader = generateStreamReader,
                             GenerateStreamWriter = generateStreamWriter,
                             GenerateBufferWriter = generateBufferWriter,
-                            GenerateOnePassStreamWriter = generateOnePassStreamWriter
+                            GenerateOnePassStreamWriter = generateOnePassStreamWriter,
+                            GenerateStackBufferWriter = generateStackBufferWriter,
+                            UseStringPooling = useStringPooling
                         };
                     }
                 }

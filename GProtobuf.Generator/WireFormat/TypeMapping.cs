@@ -182,11 +182,17 @@ namespace GProtobuf.Generator.WireFormat
         /// <summary>
         /// Gets read expression for a primitive type.
         /// </summary>
+        /// <param name="typeName">The type name.</param>
+        /// <param name="format">Data format (default, zigzag, fixed).</param>
+        /// <param name="readerVar">Reader variable name.</param>
+        /// <param name="wireTypeVar">Wire type variable name.</param>
+        /// <param name="useStringPooling">If true, use StringPool for string deduplication (SpanReader only).</param>
         public static string GetReadExpression(
             string typeName,
             DataFormat format = DataFormat.Default,
             string readerVar = "reader",
-            string wireTypeVar = "wireType")
+            string wireTypeVar = "wireType",
+            bool useStringPooling = false)
         {
             var normalized = NormalizeTypeName(typeName);
 
@@ -235,7 +241,9 @@ namespace GProtobuf.Generator.WireFormat
                 "System.Double" => $"{readerVar}.ReadDouble({wireTypeVar})",
                 "System.Boolean" => $"{readerVar}.ReadBool({wireTypeVar})",
                 "System.Char" => $"(char){readerVar}.ReadVarUInt32()",
-                "System.String" => $"{readerVar}.ReadString({wireTypeVar})",
+                "System.String" => useStringPooling
+                    ? $"{readerVar}.ReadStringPooled()"
+                    : $"{readerVar}.ReadString({wireTypeVar})",
                 "System.Byte[]" => $"{readerVar}.ReadByteArray()",
                 "System.Guid" => $"{readerVar}.ReadGuid({wireTypeVar})",
                 "System.TimeSpan" => $"{readerVar}.ReadTimeSpan({wireTypeVar})",

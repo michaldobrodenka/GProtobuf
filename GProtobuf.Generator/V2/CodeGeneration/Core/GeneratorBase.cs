@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using GProtobuf.Generator.CodeGeneration;
 using GProtobuf.Generator.V2.Handlers;
 using GProtobuf.Generator.V2.Handlers.Core;
 using GProtobuf.Generator.V2.Handlers.VirtualTypes;
@@ -21,6 +22,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration.Core
         protected readonly TupleHandler _tupleHandler;
         protected readonly VirtualMapTypeRegistry _virtualMapRegistry;
         protected readonly VirtualTupleTypeRegistry _virtualTupleRegistry;
+        protected readonly GeneratorOptions _options;
         protected string _currentNamespace;
         protected int _nestedCalcCounter;
 
@@ -34,13 +36,18 @@ namespace GProtobuf.Generator.V2.CodeGeneration.Core
         /// </summary>
         public VirtualTupleTypeRegistry VirtualTupleRegistry => _virtualTupleRegistry;
 
-        protected GeneratorBase(StringBuilderWithIndent sb, TypeRegistry registry)
-            : this(sb, registry, null, null, false)
+        /// <summary>
+        /// Gets whether string pooling is enabled for this generator.
+        /// </summary>
+        protected bool UseStringPooling => _options?.UseStringPooling ?? false;
+
+        protected GeneratorBase(StringBuilderWithIndent sb, TypeRegistry registry, GeneratorOptions options = null)
+            : this(sb, registry, null, null, false, options)
         {
         }
 
-        protected GeneratorBase(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry)
-            : this(sb, registry, virtualMapRegistry, null, false)
+        protected GeneratorBase(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry, GeneratorOptions options = null)
+            : this(sb, registry, virtualMapRegistry, null, false, options)
         {
         }
 
@@ -49,10 +56,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration.Core
             TypeRegistry registry,
             VirtualMapTypeRegistry virtualMapRegistry,
             VirtualTupleTypeRegistry virtualTupleRegistry,
-            bool passRegistryToPrimitiveHandler = false)
+            bool passRegistryToPrimitiveHandler = false,
+            GeneratorOptions options = null)
         {
             _sb = sb;
             _registry = registry;
+            _options = options ?? GeneratorOptions.Default;
             _primitiveHandler = passRegistryToPrimitiveHandler ? new PrimitiveHandler(registry) : new PrimitiveHandler();
             _collectionHandler = new CollectionHandler(sb, registry);
             _virtualTupleRegistry = virtualTupleRegistry ?? new VirtualTupleTypeRegistry();

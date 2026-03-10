@@ -1295,13 +1295,13 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine("reader.ReadWireTypeAndFieldId(out var wireType, out var fieldId);");
             _sb.AppendNewLine();
 
-            // Generate switch for fields
+            // Generate switch for fields (sorted by field ID for optimal branch prediction)
             if (type.ProtoMembers != null && type.ProtoMembers.Count > 0)
             {
                 _sb.AppendIndentedLine("switch (fieldId)");
                 _sb.StartNewBlock();
 
-                foreach (var member in type.ProtoMembers)
+                foreach (var member in GeneratorHelpers.GetSortedFieldsForDispatch(type.ProtoMembers))
                 {
                     // Find mapping for this field
                     var mapping = mappings.FirstOrDefault(m => m.FieldName == member.Name);
@@ -1583,14 +1583,15 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 },
                 generateRegularFieldsSwitch: () =>
                 {
-                    // Generate switch for regular fields - appears ONCE
+                    // Generate switch for regular fields (sorted by field ID for optimal branch prediction)
                     _sb.AppendIndentedLine("// Regular fields switch");
                     _sb.AppendIndentedLine("switch (fieldId)");
                     _sb.StartNewBlock();
 
+                    // Use sorted dispatch for optimal branch prediction (PGO heuristic)
                     if (type.ProtoMembers != null)
                     {
-                        foreach (var member in type.ProtoMembers)
+                        foreach (var member in GeneratorHelpers.GetSortedFieldsForDispatch(type.ProtoMembers))
                         {
                             GenerateFieldReadCase(member, nsPrefix);
                         }
@@ -1629,9 +1630,10 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 }
             }
 
+            // Use sorted dispatch for optimal branch prediction (PGO heuristic)
             if (type.ProtoMembers != null)
             {
-                foreach (var member in type.ProtoMembers)
+                foreach (var member in GeneratorHelpers.GetSortedFieldsForDispatch(type.ProtoMembers))
                 {
                     GenerateFieldReadCase(member, nsPrefix);
                 }
@@ -2441,12 +2443,13 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine("reader.ReadWireTypeAndFieldId(out var wireType, out var fieldId);");
             _sb.AppendNewLine();
 
+            // Use sorted dispatch for optimal branch prediction (PGO heuristic)
             if (type.ProtoMembers != null && type.ProtoMembers.Count > 0)
             {
                 _sb.AppendIndentedLine("switch (fieldId)");
                 _sb.StartNewBlock();
 
-                foreach (var member in type.ProtoMembers)
+                foreach (var member in GeneratorHelpers.GetSortedFieldsForDispatch(type.ProtoMembers))
                 {
                     GeneratePopulateFieldReadCase(member, nsPrefix);
                 }
@@ -3971,11 +3974,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
             else
             {
+                // Use sorted dispatch for optimal branch prediction (PGO heuristic)
                 _sb.AppendIndentedLine($"// Read ONLY base fields (no type dispatch) - {type.ProtoMembers.Count} field(s)");
                 _sb.AppendIndentedLine("switch (fieldId)");
                 _sb.StartNewBlock();
 
-                foreach (var member in type.ProtoMembers)
+                foreach (var member in GeneratorHelpers.GetSortedFieldsForDispatch(type.ProtoMembers))
                 {
                     GeneratePopulateFieldReadCase(member, nsPrefix);
                 }
