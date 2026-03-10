@@ -2,6 +2,7 @@ using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace GProtobuf.Core
 {
@@ -95,10 +96,15 @@ namespace GProtobuf.Core
             if (buffer == null)
                 throw new ObjectDisposedException(nameof(ObjectArrayBuilder<T>));
 
+            if (count == 0)
+                return new List<T>();
+
             var list = new List<T>(count);
+            CollectionsMarshal.SetCount(list, count);
+            var span = CollectionsMarshal.AsSpan(list);
             for (int i = 0; i < count; i++)
             {
-                list.Add((T)buffer[i]);
+                span[i] = (T)buffer[i];
             }
             return list;
         }
