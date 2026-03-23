@@ -1,0 +1,51 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet build)",
+      "Bash(dotnet build:*)",
+      "Bash(dotnet test:*)",
+      "Bash(Remove-Item:*)",
+      "Bash(rm:*)",
+      "Bash(dotnet run:*)",
+      "Bash(powershell:*)",
+      "mcp__serena__list_dir",
+      "mcp__serena__find_symbol",
+      "mcp__serena__search_for_pattern",
+      "Bash(dotnet --version)",
+      "mcp__serena__write_memory",
+      "mcp__serena__think_about_collected_information",
+      "mcp__serena__think_about_whether_you_are_done",
+      "Bash(dotnet clean:*)",
+      "mcp__serena__replace_symbol_body",
+      "mcp__serena__activate_project",
+      "mcp__serena__insert_after_symbol",
+      "mcp__serena__find_referencing_symbols",
+      "Read(E:\\work\\GProtobuf\\GProtobuf.Generator/**)",
+      "Read(E:\\work\\GProtobuf\\GProtobuf.Generator/**)",
+      "mcp__serena__insert_before_symbol",
+      "Read(E:\\work\\GProtobuf\\GProtobuf.CrossTests\\obj\\Generated\\GProtobuf.Generator\\GProtobuf.Generator.SerializerGenerator/**)",
+      "Read(E:\\work\\GProtobuf\\GProtobuf.CrossTests\\obj\\Generated\\GProtobuf.Generator\\GProtobuf.Generator.SerializerGenerator/**)",
+      "Bash(sed:*)",
+      "Bash(grep:*)",
+      "Read(E:\\work\\GProtobuf\\GProtobuf.CrossTests\\obj\\Generated/**)",
+      "Read(E:\\work\\GProtobuf\\GProtobuf.CrossTests\\obj\\Generated/**)",
+      "Read(E:\\work\\GProtobuf\\GProtobuf.CrossTests\\obj\\Generated/**)",
+      "Read(E:\\work\\GProtobuf\\GProtobuf.CrossTests\\obj\\Generated\\GProtobuf.Generator\\GProtobuf.Generator.SerializerGenerator/**)",
+      "Read(E:\\work\\GProtobuf\\GProtobuf.CrossTests\\obj\\Generated\\GProtobuf.Generator\\GProtobuf.Generator.SerializerGenerator/**)",
+      "Read(E:\\work\\GProtobuf\\GProtobuf.CrossTests\\obj\\Generated\\GProtobuf.Generator\\GProtobuf.Generator.SerializerGenerator/**)",
+      "Read(E:\\work\\GProtobuf\\GProtobuf.CrossTests\\obj\\Generated\\GProtobuf.Generator\\GProtobuf.Generator.SerializerGenerator/**)",
+      "Read(E:\\work\\GProtobuf\\GProtobuf.CrossTests\\obj\\Generated\\GProtobuf.Generator\\GProtobuf.Generator.SerializerGenerator/**)",
+      "Read(E:\\work\\GProtobuf\\GProtobuf.CrossTests\\obj\\Generated\\GProtobuf.Generator\\GProtobuf.Generator.SerializerGenerator/**)",
+      "Read(E:\\work\\GProtobuf\\GProtobuf.CrossTests\\obj\\Generated\\GProtobuf.Generator\\GProtobuf.Generator.SerializerGenerator/**)",
+      "mcp__serena__find_file",
+      "mcp__serena__get_symbols_overview",
+      "mcp__serena__get_symbols_overview",
+      "Bash(dir:*)"
+    ],
+    "deny": [],
+    "ask": [],
+    "additionalDirectories": [
+      "E:\\work\\GProtobuf"
+    ]
+  }
+}

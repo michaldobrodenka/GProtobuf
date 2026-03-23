@@ -9,3 +9,6 @@ bin
 
 /.idea
 *.user
+
+# Generated files
+GeneratedFiles/

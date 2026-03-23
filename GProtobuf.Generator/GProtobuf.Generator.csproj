@@ -25,4 +25,25 @@
 		<None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
 	</ItemGroup>
 
+	<ItemGroup>
+	  <Compile Update="DeserializerCodeGenerator.cs">
+	    <DependentUpon>CodeGenerator.cs</DependentUpon>
+	  </Compile>
+	  <Compile Update="SerializerCodeGenerator.cs">
+	    <DependentUpon>CodeGenerator.cs</DependentUpon>
+	  </Compile>
+	  <Compile Update="SpanReaderCodeGenerator.cs">
+	    <DependentUpon>CodeGenerator.cs</DependentUpon>
+	  </Compile>
+	  <Compile Update="StreamWriterCodeGenerator.cs">
+	    <DependentUpon>CodeGenerator.cs</DependentUpon>
+	  </Compile>
+	  <Compile Update="BufferWriterCodeGenerator.cs">
+	    <DependentUpon>CodeGenerator.cs</DependentUpon>
+	  </Compile>
+	  <Compile Update="SizeCalculatorsCodeGenerator.cs">
+	    <DependentUpon>CodeGenerator.cs</DependentUpon>
+	  </Compile>
+	</ItemGroup>
+
 </Project>

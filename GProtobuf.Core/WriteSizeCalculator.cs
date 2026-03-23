@@ -1,34 +1,39 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Tasks;
 
 namespace GProtobuf.Core
 {
+    [SkipLocalsInit]
     public ref struct WriteSizeCalculator
     {
-        public long Length { get; private set; }
+        public int Length { get; private set; }
 
         public WriteSizeCalculator()
         {
             Length = 0;
         }
 
-        public void WriteTag(int fieldId, WireType wireType)
+        /// <summary>
+        /// Optimized varint size calculation with hybrid approach:
+        /// - Threshold checks for 1-3 byte varints (90%+ of values) - branch prediction friendly
+        /// - BitOperations fallback for 4-5 byte varints (rare)
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteVarUInt32(uint value)
         {
-            int tag = (fieldId << 3) | (int)wireType;
-            WriteVarint32(tag);
-        }
+            // Fast path: threshold checks for most common values (1-3 bytes)
+            if (value < 0x80u) { Length++; return; }
+            if (value < 0x4000u) { Length += 2; return; }
+            if (value < 0x200000u) { Length += 3; return; }
 
-        public void WriteVarint32(uint value)
-        {
-            while (value > 0x7F)
-            {
-                Length++;
-                value >>= 7;
-            }
-            Length++;
+            // Fallback to BitOperations for rare cases (4-5 byte varints)
+            int nbits = 32 - BitOperations.LeadingZeroCount(value);
+            Length += (nbits + 6) / 7;
         }
 
         public void WriteFixedSizeInt32(int intValue)
@@ -36,35 +41,20 @@ namespace GProtobuf.Core
             Length += sizeof(int);
         }
 
-        public void WriteVarint32(int intValue)
+        public void WriteVarInt32(int value)
         {
-            var value = (uint)intValue; // Convert int to uint for proper Varint encoding for int32 in Protobuf
-            while (value > 0x7F)
-            {
-                Length++;
-                value >>= 7;
-            }
-            Length++;
-        }
-
-        public void WriteVarint64(long value)
-        {
-            while (value > 0x7F)
-            {
-                Length++;
-                value >>= 7;
-            }
-            Length++;
+            int nbits = 32 - BitOperations.LeadingZeroCount((uint)value);
+            this.Length += nbits == 0 ? 1 : (nbits + 6) / 7;
         }
 
         public void WriteZigZag32(int value)
         {
-            WriteVarint32((value << 1) ^ (value >> 31));
+            WriteVarUInt32(WireFormatHelpers.EncodeZigZag32(value));
         }
 
         public void WriteZigZag64(long value)
         {
-            WriteVarint64((value << 1) ^ (value >> 63));
+            WriteVarUInt64(WireFormatHelpers.EncodeZigZag64(value));
         }
 
         public void WriteDouble(double value)
@@ -93,29 +83,69 @@ namespace GProtobuf.Core
             }
         }
 
+        /// <summary>
+        /// Calculates string size with ASCII fast path.
+        /// For ASCII strings: length = char count (1 byte per char), no GetByteCount call needed.
+        /// For non-ASCII: full UTF-8 calculation.
+        /// </summary>
         public void WriteString(string value)
         {
-            if (value != null)
+            if (value == null) return;
+
+            // ASCII fast path: Skip UTF8.GetByteCount for ASCII strings (10-15% faster)
+            if (value.Length < 128 && System.Text.Ascii.IsValid(value))
             {
-                int byteCount = System.Text.Encoding.UTF8.GetByteCount(value);
-                WriteVarint32((uint)byteCount); // String length as varint
-                Length += byteCount; // String bytes themselves
+                WriteVarUInt32((uint)value.Length);
+                Length += value.Length;
+                return;
             }
+
+            // Full UTF-8 calculation for non-ASCII or longer strings
+            int byteCount = System.Text.Encoding.UTF8.GetByteCount(value);
+            WriteVarUInt32((uint)byteCount); // String length as varint
+            Length += byteCount; // String bytes themselves
         }
 
         public void WriteBytes(byte[] bytes)
         {
             if (bytes != null)
             {
-                WriteVarint32((uint)bytes.Length); // Length as varint
+                WriteVarUInt32((uint)bytes.Length); // Length as varint - use optimized version
                 Length += bytes.Length; // Bytes themselves
             }
         }
 
         public void WriteBytes(ReadOnlySpan<byte> bytes)
         {
-            WriteVarint32((uint)bytes.Length); // Length as varint
+            WriteVarUInt32((uint)bytes.Length); // Length as varint - use optimized version
             Length += bytes.Length; // Bytes themselves
+        }
+
+        /// <summary>
+        /// Writes raw bytes without length prefix (for internal use)
+        /// </summary>
+        public void WriteRawBytesOnly(byte[] bytes)
+        {
+            if (bytes != null)
+            {
+                Length += bytes.Length;
+            }
+        }
+
+        /// <summary>
+        /// Writes raw bytes without length prefix (for internal use)
+        /// </summary>
+        public void WriteRawBytesOnly(ReadOnlySpan<byte> bytes)
+        {
+            Length += bytes.Length;
+        }
+
+        /// <summary>
+        /// Adds byte length to the calculator without allocating bytes (zero-allocation size calculation)
+        /// </summary>
+        public void AddByteLength(int byteLength)
+        {
+            Length += byteLength;
         }
 
         public void WriteRawBytes(byte[] bytes)
@@ -136,6 +166,67 @@ namespace GProtobuf.Core
             Length++; // Bool is always 1 byte in protobuf
         }
 
+        public void WriteBoolTrue()
+        {
+            Length++; // Bool is always 1 byte in protobuf
+        }
+
+        public void WriteByte(byte value)
+        {
+            WriteVarUInt32(value); // Use optimized version for unsigned
+        }
+
+        public void WriteSByte(sbyte value, bool zigZag = false)
+        {
+            if (zigZag)
+                WriteZigZag32(value);
+            else
+                WriteVarInt32(value); // Keep as signed to handle negatives correctly
+        }
+
+        public void WriteInt16(short value, bool zigZag = false)
+        {
+            if (zigZag)
+                WriteZigZag32(value);
+            else
+                WriteVarInt32(value); // Keep as signed to handle negatives correctly
+        }
+
+        public void WriteUInt16(ushort value)
+        {
+            WriteVarUInt32(value); // Use optimized version for unsigned
+        }
+
+        public void WriteUInt32(uint value)
+        {
+            WriteVarUInt32(value); // Use optimized version for unsigned
+        }
+
+        public void WriteInt64(long value, bool zigZag = false)
+        {
+            if (zigZag)
+                WriteZigZag64(value);
+            else
+                WriteVarInt64(value);
+        }
+
+        public void WriteUInt64(ulong value)
+        {
+            WriteVarUInt64(value);
+        }
+
+        //public void WriteVarUInt64(ulong value)
+        //{
+        //    int nbits = 64 - BitOperations.LeadingZeroCount((ulong)value);
+        //    this.Length += nbits == 0 ? 1 : (nbits + 6) / 7;
+        //    //while (value > 0x7F)
+        //    //{
+        //    //    Length++;
+        //    //    value >>= 7;
+        //    //}WriteUInt64
+        //    //Length++;
+        //}
+
         public void WriteFixed32(uint value)
         {
             Length += 4;
@@ -146,12 +237,12 @@ namespace GProtobuf.Core
             Length += 8;
         }
 
-        public void WriteSFixed32(int value)
+        public void WriteFixed32(int value)
         {
             Length += 4;
         }
 
-        public void WriteSFixed64(long value)
+        public void WriteFixed64(long value)
         {
             Length += 8;
         }
@@ -163,11 +254,353 @@ namespace GProtobuf.Core
         }
 
         // Helper method to get current length and reset
-        public long GetLengthAndReset()
+        public int GetLengthAndReset()
         {
-            long currentLength = Length;
+            int currentLength = Length;
             Length = 0;
             return currentLength;
         }
+
+        /// <summary>
+        /// Calculates size for Guid in protobuf-net BCL format.
+        /// BCL format: nested message with lo/hi fixed64 fields.
+        /// Wire format: [length=18 as varint][tag 0x09][8 bytes lo][tag 0x11][8 bytes hi]
+        /// Total: 19 bytes (1 length prefix + 18 nested content)
+        /// </summary>
+        public void WriteGuid(Guid value)
+        {
+            // BCL format size breakdown:
+            // - 1 byte: length prefix (varint 18 = 0x12)
+            // - 1 byte: lo field tag (0x09)
+            // - 8 bytes: lo data
+            // - 1 byte: hi field tag (0x11)
+            // - 8 bytes: hi data
+            // Total: 1 + 1 + 8 + 1 + 8 = 19 bytes
+            Length += 19;
+        }
+
+        /// <summary>
+        /// Calculates size for TimeSpan in protobuf-net BCL format (nested message).
+        /// Wire format: [length prefix][field 1: tag + value][field 2: tag + scale]
+        /// </summary>
+        public void WriteTimeSpan(TimeSpan value)
+        {
+            // Get optimal scale for this TimeSpan value
+            var (scaledValue, scale) = DateTimeHelper.GetOptimalScaleForTimeSpan(value);
+
+            // Calculate nested message size
+            int valueSize = GetZigZagVarintSize(scaledValue);
+            int scaleSize = GetVarintSize((uint)scale);
+            int contentSize = 1 + valueSize + 1 + scaleSize; // 2 tags + 2 values
+
+            // Add length prefix size + content size
+            WriteVarUInt32((uint)contentSize); // Length prefix
+            Length += contentSize;              // Nested content
+        }
+
+        /// <summary>
+        /// Calculates size for DateTime in protobuf-net BCL format (nested message).
+        /// Wire format: [length prefix][field 1: tag + value][field 2: tag + scale]
+        /// </summary>
+        public void WriteDateTime(DateTime value)
+        {
+            // Get optimal scale for this DateTime value
+            var (scaledValue, scale) = DateTimeHelper.GetOptimalScale(value);
+
+            // Calculate nested message size
+            int valueSize = GetZigZagVarintSize(scaledValue);
+            int scaleSize = GetVarintSize((uint)scale);
+            int contentSize = 1 + valueSize + 1 + scaleSize; // 2 tags + 2 values
+
+            // Add length prefix size + content size
+            WriteVarUInt32((uint)contentSize); // Length prefix
+            Length += contentSize;              // Nested content
+        }
+
+        /// <summary>
+        /// Helper method to calculate varint size for unsigned values.
+        /// Delegates to WireFormatHelpers for canonical implementation.
+        /// </summary>
+        private static int GetVarintSize(uint value)
+        {
+            return WireFormatHelpers.GetVarintSize(value);
+        }
+
+        /// <summary>
+        /// Helper method to calculate ZigZag varint size for signed values.
+        /// Delegates to WireFormatHelpers for canonical implementation.
+        /// </summary>
+        private static int GetZigZagVarintSize(long value)
+        {
+            return WireFormatHelpers.GetZigZagVarintSize(value);
+        }
+
+        // Packed array methods
+        public void WritePackedVarintArray(int[] array)
+        {
+            if (array != null)
+            {
+                var packedSize = Utils.GetVarintPackedCollectionSize(array);
+                WriteVarUInt32((uint)packedSize); // Use optimized version for size/length
+                Length += packedSize;
+            }
+        }
+
+        public void WritePackedVarintList(List<int> list)
+        {
+            if (list != null)
+            {
+                var packedSize = Utils.GetVarintPackedCollectionSize(list);
+                WriteVarUInt32((uint)packedSize); // Use optimized version for size/length
+                Length += packedSize;
+            }
+        }
+
+        public void WritePackedZigZagArray(int[] array)
+        {
+            if (array != null)
+            {
+                var packedSize = Utils.GetZigZagPackedCollectionSize(array);
+                WriteVarUInt32((uint)packedSize); // Use optimized version for size/length
+                Length += packedSize;
+            }
+        }
+
+        public void WritePackedZigZagList(List<int> list)
+        {
+            if (list != null)
+            {
+                var packedSize = Utils.GetZigZagPackedCollectionSize(list);
+                WriteVarUInt32((uint)packedSize); // Use optimized version for size/length
+                Length += packedSize;
+            }
+        }
+
+        #region Long Array Methods
+
+        /// <summary>
+        /// Writes a packed varint long array (calculates size only).
+        /// </summary>
+        public void WritePackedVarintInt64Array(long[] array)
+        {
+            if (array != null && array.Length > 0)
+            {
+                var packedSize = Utils.GetVarintPackedCollectionSize(array);
+                WriteVarUInt32((uint)packedSize);
+                Length += packedSize;
+            }
+        }
+
+        /// <summary>
+        /// Writes a packed ZigZag long array (calculates size only).
+        /// </summary>
+        public void WritePackedZigZagInt64Array(long[] array)
+        {
+            if (array != null && array.Length > 0)
+            {
+                var packedSize = Utils.GetZigZagPackedCollectionSize(array);
+                WriteVarUInt32((uint)packedSize);
+                Length += packedSize;
+            }
+        }
+
+        /// <summary>
+        /// Writes a single fixed-size long (8 bytes) for size calculation.
+        /// </summary>
+        public void WriteFixedInt64(long value)
+        {
+            Length += 8;
+        }
+
+        /// <summary>
+        /// Writes a ZigZag encoded VarInt64 for size calculation.
+        /// </summary>
+        public void WriteZigZagVarInt64(long value)
+        {
+            ulong zigzagValue = (ulong)((value << 1) ^ (value >> 63));
+            WriteVarUInt64(zigzagValue);
+        }
+
+        /// <summary>
+        /// Writes a VarInt64 for size calculation.
+        /// </summary>
+        public void WriteVarInt64(long value)
+        {
+            WriteVarUInt64((ulong)value);
+        }
+
+        /// <summary>
+        /// Writes a VarUInt64 for size calculation.
+        /// </summary>
+        public void WriteVarUInt64(ulong value)
+        {
+            //Length += Utils.GetVarUInt64Size(value);
+            int nbits = 64 - BitOperations.LeadingZeroCount(value);
+            this.Length += nbits == 0 ? 1 : (nbits + 6) / 7;
+        }
+
+        #endregion
+
+        #region Bool Array Methods
+
+        /// <summary>
+        /// Writes a packed boolean array (calculates size only).
+        /// </summary>
+        public void WritePackedBoolArray(bool[] array)
+        {
+            if (array != null && array.Length > 0)
+            {
+                var packedSize = Utils.GetBoolPackedCollectionSize(array);
+                WriteVarUInt32((uint)packedSize);
+                Length += packedSize;
+            }
+        }
+
+        #endregion
+
+        #region SByte Array Methods
+
+        /// <summary>
+        /// Writes a packed signed byte array (calculates size only).
+        /// </summary>
+        public void WritePackedSByteArray(sbyte[] array)
+        {
+            if (array != null && array.Length > 0)
+            {
+                var packedSize = Utils.GetVarintPackedCollectionSizeSByte(array);
+                WriteVarUInt32((uint)packedSize);
+                Length += packedSize;
+            }
+        }
+
+        /// <summary>
+        /// Writes a packed ZigZag signed byte array (calculates size only).
+        /// </summary>
+        public void WritePackedZigZagSByteArray(sbyte[] array)
+        {
+            if (array != null && array.Length > 0)
+            {
+                var packedSize = Utils.GetZigZagPackedCollectionSizeSByte(array);
+                WriteVarUInt32((uint)packedSize);
+                Length += packedSize;
+            }
+        }
+
+        #endregion
+
+        #region Int16 Array Methods
+
+        /// <summary>
+        /// Writes a packed int16 array (calculates size only).
+        /// </summary>
+        public void WritePackedInt16Array(short[] array)
+        {
+            if (array != null && array.Length > 0)
+            {
+                var packedSize = Utils.GetVarintPackedCollectionSizeInt16(array);
+                WriteVarUInt32((uint)packedSize);
+                Length += packedSize;
+            }
+        }
+
+        /// <summary>
+        /// Writes a packed ZigZag int16 array (calculates size only).
+        /// </summary>
+        public void WritePackedZigZagInt16Array(short[] array)
+        {
+            if (array != null && array.Length > 0)
+            {
+                var packedSize = Utils.GetZigZagPackedCollectionSizeInt16(array);
+                WriteVarUInt32((uint)packedSize);
+                Length += packedSize;
+            }
+        }
+
+        /// <summary>
+        /// Writes a single fixed-size int16 as int32 (4 bytes) for size calculation.
+        /// Protocol Buffers uses fixed32 for 16-bit values.
+        /// </summary>
+        public void WriteFixedInt32(short value)
+        {
+            Length += 4;
+        }
+
+        #endregion
+
+        #region UInt16 Array Methods
+
+        /// <summary>
+        /// Writes a packed uint16 array (calculates size only).
+        /// </summary>
+        public void WritePackedUInt16Array(ushort[] array)
+        {
+            if (array != null && array.Length > 0)
+            {
+                var packedSize = Utils.GetVarintPackedCollectionSizeUInt16(array);
+                WriteVarUInt32((uint)packedSize);
+                Length += packedSize;
+            }
+        }
+
+        /// <summary>
+        /// Writes a single fixed-size uint16 as uint32 (4 bytes) for size calculation.
+        /// Protocol Buffers uses fixed32 for 16-bit values.
+        /// </summary>
+        public void WriteFixedUInt32(ushort value)
+        {
+            Length += 4;
+        }
+
+        #endregion
+
+        #region UInt32 Array Methods
+
+        /// <summary>
+        /// Writes a packed uint32 array (calculates size only).
+        /// </summary>
+        public void WritePackedUInt32Array(uint[] array)
+        {
+            if (array != null && array.Length > 0)
+            {
+                var packedSize = Utils.GetVarintPackedCollectionSizeUInt32(array);
+                WriteVarUInt32((uint)packedSize);
+                Length += packedSize;
+            }
+        }
+
+        /// <summary>
+        /// Writes a single fixed-size uint32 (4 bytes) for size calculation.
+        /// </summary>
+        public void WriteFixedUInt32(uint value)
+        {
+            Length += 4;
+        }
+
+        #endregion
+
+        #region UInt64 Array Methods
+
+        /// <summary>
+        /// Writes a packed uint64 array (calculates size only).
+        /// </summary>
+        public void WritePackedUInt64Array(ulong[] array)
+        {
+            if (array != null && array.Length > 0)
+            {
+                var packedSize = Utils.GetVarintPackedCollectionSizeUInt64(array);
+                WriteVarUInt32((uint)packedSize);
+                Length += packedSize;
+            }
+        }
+
+        /// <summary>
+        /// Writes a single fixed-size uint64 (8 bytes) for size calculation.
+        /// </summary>
+        public void WriteFixedUInt64(ulong value)
+        {
+            Length += 8;
+        }
+
+        #endregion
     }
 }

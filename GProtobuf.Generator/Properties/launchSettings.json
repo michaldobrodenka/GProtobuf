@@ -3,7 +3,11 @@
   "profiles": {
     "DebugRoslynSourceGenerator": {
       "commandName": "DebugRoslynComponent",
-      "targetProject": "../Serializer/Serializer.csproj"
+      "targetProject": "../GProtobuf.CrossTests/GProtobuf.CrossTests.csproj"
+    },
+    "DebugRefactoredRoslynSourceGenerator": {
+      "commandName": "DebugRoslynComponent",
+      "targetProject": "../GProtobuf.CrossTests.Refactored/GProtobuf.CrossTests.Refactored.csproj"
     }
   }
 }

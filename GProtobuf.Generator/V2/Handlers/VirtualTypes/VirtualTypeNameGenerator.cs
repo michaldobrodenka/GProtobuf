@@ -1,0 +1,301 @@
+using System;
+using System.Text;
+using GProtobuf.Generator.V2.Handlers;
+using GProtobuf.Generator.V2.Helpers;
+
+namespace GProtobuf.Generator.V2
+{
+    /// <summary>
+    /// Generates unique, deterministic names for virtual map entry types.
+    /// Handles nested generics like Dictionary&lt;CustomClass, List&lt;Dictionary&lt;int, string&gt;&gt;&gt;
+    /// </summary>
+    internal static class VirtualTypeNameGenerator
+    {
+        /// <summary>
+        /// Generates a virtual type name for a map entry with given key and value types.
+        /// Example: MapEntry_Int32_String, MapEntry`_CustomClass_ListOfDictionaryOfInt32AndString
+        /// </summary>
+        public static string GetMapEntryTypeName(string keyType, string valueType)
+        {
+            var keyName = GetSafeTypeName(keyType);
+            var valueName = GetSafeTypeName(valueType);
+            return $"MapEntry_{keyName}_{valueName}";
+        }
+
+        /// <summary>
+        /// Converts a type name to a safe identifier that can be used in generated code.
+        /// Handles generics, nested types, and primitives.
+        /// </summary>
+        public static string GetSafeTypeName(string typeName)
+        {
+            if (string.IsNullOrEmpty(typeName))
+                return "Unknown";
+
+            typeName = typeName.Trim();
+
+            // Remove global:: prefix if present
+            if (typeName.StartsWith("global::"))
+            {
+                typeName = typeName.Substring(8);
+            }
+
+            // Handle nullable types - "int?" syntax
+            if (typeName.EndsWith("?"))
+            {
+                var innerType = typeName.Substring(0, typeName.Length - 1);
+                return $"Nullable{GetSafeTypeName(innerType)}";
+            }
+
+            // Handle nullable types - "System.Nullable<int>" or "Nullable<int>" syntax
+            if ((typeName.StartsWith("System.Nullable<") || typeName.StartsWith("Nullable<")) && typeName.EndsWith(">"))
+            {
+                int startIdx = typeName.IndexOf('<') + 1;
+                int endIdx = typeName.LastIndexOf('>');
+                string innerType = typeName.Substring(startIdx, endIdx - startIdx).Trim();
+                return $"Nullable{GetSafeTypeName(innerType)}";
+            }
+
+            // Handle arrays
+            if (typeName.EndsWith("[]"))
+            {
+                var elementType = typeName.Substring(0, typeName.Length - 2);
+                return $"ArrayOf{GetSafeTypeName(elementType)}";
+            }
+
+            // Handle Dictionary<K, V> and custom dictionary types (ConcurrentDictionary, ListDictionary, etc.)
+            if (IsDictionaryType(typeName))
+            {
+                var (keyType, valueType) = ParseTwoGenericArgs(typeName);
+                if (keyType != null && valueType != null)
+                {
+                    // Determine dictionary prefix - preserve custom dictionary type names
+                    var dictPrefix = GetDictionaryPrefix(typeName);
+                    return $"{dictPrefix}Of{GetSafeTypeName(keyType)}And{GetSafeTypeName(valueType)}";
+                }
+            }
+
+            // Handle List<T>
+            if (IsListType(typeName))
+            {
+                var elementType = ParseSingleGenericArg(typeName);
+                if (elementType != null)
+                {
+                    return $"ListOf{GetSafeTypeName(elementType)}";
+                }
+            }
+
+            // Handle HashSet<T>
+            if (IsHashSetType(typeName))
+            {
+                var elementType = ParseSingleGenericArg(typeName);
+                if (elementType != null)
+                {
+                    return $"HashSetOf{GetSafeTypeName(elementType)}";
+                }
+            }
+
+            // Handle KeyValuePair<K, V>
+            if (IsKeyValuePairType(typeName))
+            {
+                var (keyType, valueType) = ParseTwoGenericArgs(typeName);
+                if (keyType != null && valueType != null)
+                {
+                    return $"KeyValuePairOf{GetSafeTypeName(keyType)}And{GetSafeTypeName(valueType)}";
+                }
+            }
+
+            // Handle Tuple types (before primitive check to handle System.Tuple specifically)
+            if (TupleHandler.IsTupleType(typeName))
+            {
+                // Use TypeNameHelper.GetSafeMethodName which removes "System." prefixes
+                return TypeNameHelper.GetSafeMethodName(typeName);
+            }
+
+            // Handle primitive types
+            var primitiveMapping = GetPrimitiveTypeName(typeName);
+            if (primitiveMapping != null)
+            {
+                return primitiveMapping;
+            }
+
+            // Handle custom types - extract class name from full namespace
+            return ExtractClassName(typeName);
+        }
+
+        /// <summary>
+        /// Gets a short primitive type name for common types.
+        /// Uses lowercase names to match TypeNameHelper.SanitizePrimitiveName for consistency.
+        /// </summary>
+        private static string GetPrimitiveTypeName(string typeName)
+        {
+            var normalized = TypeMapping.NormalizeTypeName(typeName);
+
+            return normalized switch
+            {
+                "System.Int32" => "int",
+                "System.Int64" => "long",
+                "System.Int16" => "short",
+                "System.UInt32" => "uint",
+                "System.UInt64" => "ulong",
+                "System.UInt16" => "ushort",
+                "System.Byte" => "byte",
+                "System.SByte" => "sbyte",
+                "System.Single" => "float",
+                "System.Double" => "double",
+                "System.Boolean" => "bool",
+                "System.String" => "string",
+                "System.Guid" => "Guid",
+                "System.DateTime" => "DateTime",
+                "System.TimeSpan" => "TimeSpan",
+                "System.Decimal" => "decimal",
+                "System.Char" => "char",
+                _ => null
+            };
+        }
+
+        /// <summary>
+        /// Extracts the class name from a fully qualified type name.
+        /// Example: "MyNamespace.SubNamespace.MyClass" -> "MyClass"
+        /// </summary>
+        private static string ExtractClassName(string typeName)
+        {
+            // Remove global:: prefix if present
+            if (typeName.StartsWith("global::"))
+            {
+                typeName = typeName.Substring(8);
+            }
+
+            // Find the last dot that's not inside angle brackets
+            int depth = 0;
+            int lastDotIndex = -1;
+
+            for (int i = 0; i < typeName.Length; i++)
+            {
+                char c = typeName[i];
+                if (c == '<') depth++;
+                else if (c == '>') depth--;
+                else if (c == '.' && depth == 0) lastDotIndex = i;
+            }
+
+            if (lastDotIndex >= 0)
+            {
+                typeName = typeName.Substring(lastDotIndex + 1);
+            }
+
+            // Replace any remaining special characters
+            return typeName
+                .Replace("<", "Of")
+                .Replace(">", "")
+                .Replace(",", "And")
+                .Replace(" ", "")
+                .Replace(".", "_");
+        }
+
+        #region Type Detection
+
+        private static bool IsDictionaryType(string typeName)
+        {
+            return typeName.Contains("Dictionary<") ||
+                   typeName.Contains("IDictionary<");
+        }
+
+        /// <summary>
+        /// Gets the dictionary type prefix for naming.
+        /// Returns "ConcurrentDictionary" for ConcurrentDictionary, "Dictionary" for standard Dictionary, etc.
+        /// </summary>
+        private static string GetDictionaryPrefix(string typeName)
+        {
+            // Extract the dictionary type name (before the '<')
+            int genericIndex = typeName.IndexOf('<');
+            if (genericIndex < 0)
+                return "Dictionary";
+
+            string outerType = typeName.Substring(0, genericIndex);
+
+            // Extract just the class name (remove namespace)
+            int lastDotIndex = outerType.LastIndexOf('.');
+            if (lastDotIndex >= 0)
+            {
+                outerType = outerType.Substring(lastDotIndex + 1);
+            }
+
+            // Return the dictionary class name (ConcurrentDictionary, ListDictionary, Dictionary, etc.)
+            return outerType;
+        }
+
+        private static bool IsListType(string typeName)
+        {
+            return (typeName.Contains("List<") || typeName.Contains("IList<") ||
+                    typeName.Contains("ICollection<") || typeName.Contains("IEnumerable<"))
+                   && !typeName.Contains("KeyValuePair");
+        }
+
+        private static bool IsHashSetType(string typeName)
+        {
+            return typeName.Contains("HashSet<") || typeName.Contains("ISet<");
+        }
+
+        private static bool IsKeyValuePairType(string typeName)
+        {
+            return typeName.Contains("KeyValuePair<");
+        }
+
+        #endregion
+
+        #region Generic Parsing
+
+        /// <summary>
+        /// Parses a generic type with two type arguments (e.g., Dictionary&lt;K, V&gt;, KeyValuePair&lt;K, V&gt;).
+        /// </summary>
+        private static (string first, string second) ParseTwoGenericArgs(string typeName)
+        {
+            int startIndex = typeName.IndexOf('<');
+            if (startIndex < 0) return (null, null);
+
+            int endIndex = typeName.LastIndexOf('>');
+            if (endIndex <= startIndex) return (null, null);
+
+            string innerContent = typeName.Substring(startIndex + 1, endIndex - startIndex - 1);
+
+            // Find the comma that separates the two type arguments
+            // Need to handle nested generics like Dictionary<int, List<string>>
+            int depth = 0;
+            int commaIndex = -1;
+
+            for (int i = 0; i < innerContent.Length; i++)
+            {
+                char c = innerContent[i];
+                if (c == '<') depth++;
+                else if (c == '>') depth--;
+                else if (c == ',' && depth == 0)
+                {
+                    commaIndex = i;
+                    break;
+                }
+            }
+
+            if (commaIndex < 0) return (null, null);
+
+            string first = innerContent.Substring(0, commaIndex).Trim();
+            string second = innerContent.Substring(commaIndex + 1).Trim();
+
+            return (first, second);
+        }
+
+        /// <summary>
+        /// Parses a generic type with a single type argument (e.g., List&lt;T&gt;, HashSet&lt;T&gt;).
+        /// </summary>
+        private static string ParseSingleGenericArg(string typeName)
+        {
+            int startIndex = typeName.IndexOf('<');
+            if (startIndex < 0) return null;
+
+            int endIndex = typeName.LastIndexOf('>');
+            if (endIndex <= startIndex) return null;
+
+            return typeName.Substring(startIndex + 1, endIndex - startIndex - 1).Trim();
+        }
+
+        #endregion
+    }
+}
