@@ -19,7 +19,7 @@ namespace GProtobuf.Core
         private byte[] pooledBuffer;
         private int pooledWrittenBytes;
         private int pooledCount;
-        
+
         private readonly int pooledInitialElements;
         private static readonly int SizeOfT = Unsafe.SizeOf<T>();
 
@@ -32,13 +32,15 @@ namespace GProtobuf.Core
 #pragma warning restore CS9080 // Use of variable in this context may expose referenced variables outside of their declaration scope
             }
             stageCount = 0;
-            
+
             // Initialize pooled buffer fields
             pooledBuffer = Array.Empty<byte>();
             pooledWrittenBytes = 0;
             pooledCount = 0;
             this.pooledInitialElements = pooledInitialElements;
         }
+
+        public int Count => pooledCount + stageCount;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Add(T value)
@@ -102,11 +104,16 @@ namespace GProtobuf.Core
             }
         }
 
-        public int Count => pooledCount + stageCount;
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Enumerator GetEnumerator() => new Enumerator(pooledBuffer, pooledWrittenBytes, stage, stageCount);
 
         public T[] ToArray()
         {
             int totalCount = pooledCount + stageCount;
+
+            if (totalCount == 0)
+                return Array.Empty<T>();
+
             T[] arr = GC.AllocateUninitializedArray<T>(totalCount);
 
             if (pooledCount > 0)
@@ -129,6 +136,10 @@ namespace GProtobuf.Core
         public List<T> ToList()
         {
             int totalCount = pooledCount + stageCount;
+
+            if (totalCount == 0)
+                return new List<T>();
+
             List<T> list = new(totalCount);
             CollectionsMarshal.SetCount(list, totalCount);
             var dst = CollectionsMarshal.AsSpan(list);
@@ -213,6 +224,49 @@ namespace GProtobuf.Core
             pooledBuffer.AsSpan(0, pooledWrittenBytes).CopyTo(newArr);
             ArrayPool<byte>.Shared.Return(pooledBuffer, clearArray: false);
             pooledBuffer = newArr;
+        }
+
+        public ref struct Enumerator
+        {
+            private readonly ReadOnlySpan<T> pooled;
+            private readonly ReadOnlySpan<T> staged;
+            private int index;
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            internal Enumerator(byte[] pooledBuffer, int pooledWrittenBytes, Span<T> stage, int stageCount)
+            {
+                pooled = pooledWrittenBytes == 0
+                    ? ReadOnlySpan<T>.Empty
+                    : MemoryMarshal.Cast<byte, T>(pooledBuffer.AsSpan(0, pooledWrittenBytes));
+
+                staged = stage[..stageCount];
+                index = -1;
+            }
+
+            public T Current
+            {
+                [MethodImpl(MethodImplOptions.AggressiveInlining)]
+                get
+                {
+                    int i = index;
+                    return (uint)i < (uint)pooled.Length
+                        ? pooled[i]
+                        : staged[i - pooled.Length];
+                }
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public bool MoveNext()
+            {
+                int next = index + 1;
+                if ((uint)next < (uint)(pooled.Length + staged.Length))
+                {
+                    index = next;
+                    return true;
+                }
+
+                return false;
+            }
         }
     }
 }
