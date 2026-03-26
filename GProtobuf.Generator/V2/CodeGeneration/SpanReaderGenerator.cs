@@ -225,110 +225,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 }
             }
 
-            try
-            {
-                // Generate virtual map entry readers
-                GenerateVirtualMapEntryReaders();
-            }
-            catch (System.Exception ex)
-            {
-                throw new System.Exception("Error in GenerateVirtualMapEntryReaders", ex);
-            }
-
-            try
-            {
-                // Generate virtual tuple readers
-                GenerateVirtualTupleReaders();
-            }
-            catch (System.Exception ex)
-            {
-                throw new System.Exception("Error in GenerateVirtualTupleReaders", ex);
-            }
 
             _sb.EndBlock();
             _sb.AppendNewLine();
         }
 
-        /// <summary>
-        /// Generates reader methods for all registered virtual map entry types.
-        /// </summary>
-        private void GenerateVirtualMapEntryReaders()
-        {
-            System.Collections.Generic.IReadOnlyList<VirtualMapEntryInfo> virtualTypes;
-            try
-            {
-                virtualTypes = _virtualMapRegistry.GetAllTypes();
-            }
-            catch (System.Exception ex)
-            {
-                throw new System.Exception("Error calling _virtualMapRegistry.GetAllTypes()", ex);
-            }
-
-            if (virtualTypes.Count == 0) return;
-
-            // Validate all virtual map types and report warnings for problematic ones
-            ValidateVirtualMapTypes(virtualTypes);
-
-            _sb.AppendNewLine();
-            _sb.AppendIndentedLine("// Virtual Map Entry Readers");
-            _sb.AppendNewLine();
-
-            VirtualMapEntryGenerator generator;
-            try
-            {
-                generator = new VirtualMapEntryGenerator(_sb, _virtualMapRegistry, _registry, "Span");
-            }
-            catch (System.Exception ex)
-            {
-                throw new System.Exception("Error creating VirtualMapEntryGenerator", ex);
-            }
-
-            // Generate EstimateMapCapacity helper (once, used by all map readers)
-            _sb.AppendIndentedLine("#region Map Capacity Estimation");
-            _sb.AppendNewLine();
-            try
-            {
-                generator.GenerateEstimateMapCapacityHelper();
-            }
-            catch (System.Exception ex)
-            {
-                throw new System.Exception("Error in GenerateEstimateMapCapacityHelper", ex);
-            }
-            _sb.AppendIndentedLine("#endregion");
-            _sb.AppendNewLine();
-
-            // Generate individual map entry readers
-            foreach (var virtualType in virtualTypes)
-            {
-                try
-                {
-                    generator.GenerateReader(virtualType);
-                }
-                catch (System.Exception ex)
-                {
-                    throw new System.Exception($"Error generating reader for virtual map type: KeyType='{virtualType?.KeyType}', ValueType='{virtualType?.ValueType}', TypeName='{virtualType?.TypeName}'", ex);
-                }
-            }
-
-        }
-
-        /// <summary>
-        /// Generates reader methods for all registered virtual tuple types.
-        /// </summary>
-        private void GenerateVirtualTupleReaders()
-        {
-            var tupleTypes = _virtualTupleRegistry.GetAllTypes();
-            if (tupleTypes.Count == 0) return;
-
-            _sb.AppendNewLine();
-            _sb.AppendIndentedLine("// Virtual Tuple Readers");
-
-            var generator = new VirtualTupleGenerator(_sb, null, _registry);
-            foreach (var tupleInfo in tupleTypes)
-            {
-                generator.GenerateReader(tupleInfo);
-            }
-        }
 
         #region Read Method
 
@@ -748,7 +649,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             if (member.IsMap)
             {
-                var mapHandler = new MapHandler(_sb, _virtualMapRegistry, "SpanReaders", _registry);
+                var mapHandler = new MapHandler(_sb, _virtualMapRegistry, "SpanReaders", _registry, _currentNamespace);
                 mapHandler.GenerateRead(member, $"result.{member.Name}", readerVar);
             }
             else if (member.IsCollection)
@@ -1778,7 +1679,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // Route to appropriate handler based on field type
             if (member.IsMap)
             {
-                var mapHandler = new MapHandler(_sb, _virtualMapRegistry, "SpanReaders", _registry);
+                var mapHandler = new MapHandler(_sb, _virtualMapRegistry, "SpanReaders", _registry, _currentNamespace);
                 mapHandler.GenerateRead(member, $"instance.{member.Name}", readerVar);
             }
             else if (member.IsCollection)
@@ -2061,7 +1962,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // Route to appropriate handler based on field type
             if (member.IsMap)
             {
-                var mapHandler = new MapHandler(_sb, _virtualMapRegistry, "SpanReaders", _registry);
+                var mapHandler = new MapHandler(_sb, _virtualMapRegistry, "SpanReaders", _registry, _currentNamespace);
                 mapHandler.GenerateRead(member, $"instance.{member.Name}");
             }
             else if (member.IsCollection)
@@ -2492,7 +2393,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateMapFieldReadBody(ProtoMemberAttribute member)
         {
-            var mapHandler = new MapHandler(_sb, _virtualMapRegistry, "SpanReaders", _registry);
+            var mapHandler = new MapHandler(_sb, _virtualMapRegistry, "SpanReaders", _registry, _currentNamespace);
             mapHandler.GenerateRead(member, $"result.{member.Name}");
         }
 

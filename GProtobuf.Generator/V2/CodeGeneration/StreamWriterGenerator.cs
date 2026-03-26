@@ -92,52 +92,16 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 }
             }
 
-            // Generate virtual map entry writers
-            GenerateVirtualMapEntryWriters();
-
-            // Generate virtual tuple writers
-            GenerateVirtualTupleWriters();
+            // Virtual types (MapEntry, Tuple) are generated in shared namespace by SharedVirtualTypesGenerator
+            // No longer generated here to avoid duplication
 
             _sb.EndBlock();
             _sb.AppendNewLine();
         }
 
-        /// <summary>
-        /// Generates writer methods for all registered virtual map entry types.
-        /// </summary>
-        private void GenerateVirtualMapEntryWriters()
-        {
-            var virtualTypes = _virtualMapRegistry.GetAllTypes();
-            if (virtualTypes.Count == 0) return;
-
-            _sb.AppendNewLine();
-            _sb.AppendIndentedLine("// Virtual Map Entry Writers");
-
-            var generator = new VirtualMapEntryGenerator(_sb, _virtualMapRegistry, _registry, _writerKind);
-            foreach (var virtualType in virtualTypes)
-            {
-                generator.GenerateWriter(virtualType);
-            }
-
-        }
-
-        /// <summary>
-        /// Generates writer methods for all registered virtual tuple types.
-        /// </summary>
-        private void GenerateVirtualTupleWriters()
-        {
-            var tupleTypes = _virtualTupleRegistry.GetAllTypes();
-            if (tupleTypes.Count == 0) return;
-
-            _sb.AppendNewLine();
-            _sb.AppendIndentedLine("// Virtual Tuple Writers");
-
-            var generator = new VirtualTupleGenerator(_sb, _writerKind, _registry);
-            foreach (var tupleInfo in tupleTypes)
-            {
-                generator.GenerateWriter(tupleInfo);
-            }
-        }
+        // NOTE: GenerateVirtualMapEntryWriters, GenerateVirtualTupleWriters, IsMapEntryGenerated,
+        // MarkMapEntryAsGenerated, IsTupleGenerated, MarkTupleAsGenerated methods removed.
+        // Virtual types are now generated in SharedVirtualTypesGenerator in a shared namespace.
 
         /// <summary>
         /// Generates function pointer dispatch tables for types with many derived classes.
@@ -1002,7 +966,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateMapFieldWrite(ProtoMemberAttribute member, string sourceVar)
         {
-            var mapHandler = new MapHandler(_sb, _virtualMapRegistry, _className, _registry);
+            var mapHandler = new MapHandler(_sb, _virtualMapRegistry, _className, _registry, _currentNamespace);
             mapHandler.GenerateWrite(member, sourceVar);
         }
 
@@ -1381,7 +1345,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateMapFieldSizeCalculation(ProtoMemberAttribute member, string sourceVar, string calculatorVar)
         {
-            var mapHandler = new MapHandler(_sb, _virtualMapRegistry, _className, _registry);
+            var mapHandler = new MapHandler(_sb, _virtualMapRegistry, _className, _registry, _currentNamespace);
             mapHandler.GenerateSize(member, sourceVar, calculatorVar);
         }
 

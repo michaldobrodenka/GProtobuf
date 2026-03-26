@@ -90,52 +90,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     processedTypes.Add(protoIncludeTypeName);
                 }
             }
-            // Generate virtual map entry size calculators
-            GenerateVirtualMapEntrySizeCalculators();
-
-            // Generate virtual tuple size calculators
-            GenerateVirtualTupleSizeCalculators();
 
             _sb.EndBlock();
             _sb.AppendNewLine();
         }
 
-        /// <summary>
-        /// Generates size calculator methods for all registered virtual map entry types.
-        /// </summary>
-        private void GenerateVirtualMapEntrySizeCalculators()
-        {
-            var virtualTypes = _virtualMapRegistry.GetAllTypes();
-            if (virtualTypes.Count == 0) return;
-
-            _sb.AppendNewLine();
-            _sb.AppendIndentedLine("// Virtual Map Entry Size Calculators");
-
-            var generator = new VirtualMapEntryGenerator(_sb, _virtualMapRegistry, _registry);
-            foreach (var virtualType in virtualTypes)
-            {
-                generator.GenerateSizeCalculator(virtualType);
-            }
-
-        }
-
-        /// <summary>
-        /// Generates size calculator methods for all registered virtual tuple types.
-        /// </summary>
-        private void GenerateVirtualTupleSizeCalculators()
-        {
-            var tupleTypes = _virtualTupleRegistry.GetAllTypes();
-            if (tupleTypes.Count == 0) return;
-
-            _sb.AppendNewLine();
-            _sb.AppendIndentedLine("// Virtual Tuple Size Calculators");
-
-            var generator = new VirtualTupleGenerator(_sb, null, _registry);
-            foreach (var tupleInfo in tupleTypes)
-            {
-                generator.GenerateSizeCalculator(tupleInfo);
-            }
-        }
 
         private const string CalculatorType = "global::GProtobuf.Core.WriteSizeCalculator";
 
@@ -799,7 +758,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateMapFieldSize(ProtoMemberAttribute member, string sourceVar)
         {
-            var mapHandler = new MapHandler(_sb, _virtualMapRegistry, "SizeCalculators", _registry);
+            var mapHandler = new MapHandler(_sb, _virtualMapRegistry, "SizeCalculators", _registry, _currentNamespace);
             mapHandler.GenerateSize(member, sourceVar);
         }
 
