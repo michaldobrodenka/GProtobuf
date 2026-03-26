@@ -40,6 +40,15 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         {
         }
 
+        /// <summary>
+        /// Gets the fully qualified StreamReaders class in the shared virtual types namespace.
+        /// Used for calling virtual type methods (MapEntry, Tuple) from namespace files.
+        /// </summary>
+        private static string GetVirtualTypesStreamReadersClass()
+        {
+            return $"global::{SharedVirtualTypesGenerator.SharedNamespace}.{ClassName}";
+        }
+
         #region Constructor Analysis
 
         /// <summary>
@@ -173,121 +182,16 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 }
             }
 
-            // Generate virtual map/tuple methods only if not skipped (they're generated once in shared file)
-            if (!skipVirtualTypes)
-            {
-                // Generate virtual map entry readers for StreamReader
-                GenerateVirtualMapReaders();
-
-                // Generate virtual tuple readers for StreamReader
-                GenerateVirtualTupleReaders();
-
-                // Generate virtual collection readers for StreamReader (List<T>, HashSet<T>, Dictionary<K,V>)
-                GenerateVirtualCollectionReaders();
-            }
+            // Virtual types (MapEntry, Tuple, Collection) are generated in shared namespace by SharedVirtualTypesGenerator
+            // No longer generated here to avoid duplication (skipVirtualTypes is always true now)
 
             _sb.EndBlock();
             _sb.AppendNewLine();
         }
 
-        /// <summary>
-        /// Generates only the virtual map entry and tuple reader methods.
-        /// Used for generating the shared file that contains all virtual types.
-        /// </summary>
-        public void GenerateSharedVirtualTypesOnly()
-        {
-            _sb.AppendIndentedLine($"public static class {ClassName}");
-            _sb.StartNewBlock();
-
-            GenerateVirtualMapReaders();
-            GenerateVirtualTupleReaders();
-            GenerateVirtualCollectionReaders();
-
-            _sb.EndBlock();
-            _sb.AppendNewLine();
-        }
-
-        /// <summary>
-        /// Generates virtual map entry readers for StreamReader.
-        /// </summary>
-        private void GenerateVirtualMapReaders()
-        {
-            var virtualTypes = _virtualMapRegistry?.GetAllTypes();
-            if (virtualTypes == null || !virtualTypes.Any())
-                return;
-
-            _sb.AppendNewLine();
-            _sb.AppendIndentedLine("// Virtual Map Entry StreamReaders");
-            _sb.AppendNewLine();
-
-            var generator = new GProtobuf.Generator.V2.Handlers.VirtualTypes.VirtualMapEntryGenerator(_sb, _virtualMapRegistry, _registry);
-
-            foreach (var virtualType in virtualTypes)
-            {
-                try
-                {
-                    generator.GenerateStreamReader(virtualType);
-                }
-                catch (System.Exception ex)
-                {
-                    _sb.AppendIndentedLine($"// ERROR generating StreamReader for virtual type {virtualType.TypeName}: {ex.Message}");
-                }
-            }
-        }
-
-        /// <summary>
-        /// Generates virtual tuple readers for StreamReader.
-        /// </summary>
-        private void GenerateVirtualTupleReaders()
-        {
-            var virtualTuples = _virtualTupleRegistry?.GetAllTypes();
-            if (virtualTuples == null || !virtualTuples.Any())
-                return;
-
-            _sb.AppendNewLine();
-            _sb.AppendIndentedLine("// Virtual Tuple StreamReaders");
-            _sb.AppendNewLine();
-
-            var generator = new GProtobuf.Generator.V2.Handlers.VirtualTypes.VirtualTupleGenerator(_sb, "Stream", _registry);
-
-            foreach (var tuple in virtualTuples)
-            {
-                try
-                {
-                    generator.GenerateStreamReader(tuple);
-                }
-                catch (System.Exception ex)
-                {
-                    _sb.AppendIndentedLine($"// ERROR generating StreamReader for tuple {tuple.SafeName}: {ex.Message}");
-                }
-            }
-        }
-
-        /// <summary>
-        /// Generates virtual collection readers for StreamReader (List, HashSet, Dictionary as nested types).
-        /// </summary>
-        private void GenerateVirtualCollectionReaders()
-        {
-            var collectionTypes = _virtualMapRegistry?.GetAllCollectionTypes();
-            if (collectionTypes == null || !collectionTypes.Any())
-                return;
-
-            _sb.AppendNewLine();
-            _sb.AppendIndentedLine("// Virtual Collection StreamReaders");
-            _sb.AppendNewLine();
-
-            foreach (var collection in collectionTypes)
-            {
-                try
-                {
-                    GenerateCollectionReader(collection);
-                }
-                catch (System.Exception ex)
-                {
-                    _sb.AppendIndentedLine($"// ERROR generating StreamReader for collection {collection.SafeName}: {ex.Message}");
-                }
-            }
-        }
+        // NOTE: GenerateSharedVirtualTypesOnly, GenerateVirtualMapReaders, GenerateVirtualTupleReaders,
+        // GenerateVirtualCollectionReaders methods removed.
+        // Virtual types are now generated in SharedVirtualTypesGenerator in a shared namespace.
 
         private void GenerateCollectionReader(GProtobuf.Generator.V2.Handlers.VirtualTypes.VirtualCollectionInfo collection)
         {
@@ -1042,7 +946,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             if (member.IsMap)
             {
-                var mapHandler = new MapHandler(_sb, _virtualMapRegistry, "StreamReaders", _registry);
+                var mapHandler = new MapHandler(_sb, _virtualMapRegistry, "StreamReaders", _registry, _currentNamespace);
                 mapHandler.GenerateRead(member, $"result.{member.Name}", readerVar);
             }
             else if (member.IsCollection)
@@ -1918,7 +1822,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         {
             // Use MapHandler to generate consistent helper method calls (matching Populate methods pattern)
             // This reuses the existing ReadMapEntry_* helper methods instead of inlining ~80 lines per field
-            var mapHandler = new MapHandler(_sb, _virtualMapRegistry, "StreamReaders", _registry);
+            var mapHandler = new MapHandler(_sb, _virtualMapRegistry, "StreamReaders", _registry, _currentNamespace);
             mapHandler.GenerateRead(member, $"result.{member.Name}", "reader");
         }
 
@@ -2262,11 +2166,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine("var itemLength = reader.ReadVarInt32();");
             _sb.AppendIndentedLine("var itemOldLimit = reader.PushLimit(itemLength);");
 
-            // Handle tuple types - use current namespace's StreamReaders
+            // Handle tuple types - use virtual types in shared namespace
             if (TupleHandler.IsTupleType(member.CollectionElementType))
             {
                 var tupleSafeName = VirtualTypeNameGenerator.GetSafeTypeName(member.CollectionElementType);
-                _sb.AppendIndentedLine($"{targetCollection}.Add(StreamReaders.Read{tupleSafeName}Content(ref reader));");
+                _sb.AppendIndentedLine($"{targetCollection}.Add({GetVirtualTypesStreamReadersClass()}.Read{tupleSafeName}Content(ref reader));");
                 _sb.AppendIndentedLine("reader.PopLimit(itemOldLimit);");
                 return;
             }
@@ -2289,7 +2193,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             _sb.AppendIndentedLine("var tupleLength = reader.ReadVarInt32();");
             _sb.AppendIndentedLine("var tupleOldLimit = reader.PushLimit(tupleLength);");
-            _sb.AppendIndentedLine($"result.{member.Name} = StreamReaders.Read{tupleInfo.SafeName}Content(ref reader);");
+            _sb.AppendIndentedLine($"result.{member.Name} = {GetVirtualTypesStreamReadersClass()}.Read{tupleInfo.SafeName}Content(ref reader);");
             _sb.AppendIndentedLine("reader.PopLimit(tupleOldLimit);");
         }
 
@@ -2783,7 +2687,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             _sb.AppendIndentedLine("var tupleLength = reader.ReadVarInt32();");
             _sb.AppendIndentedLine("var tupleOldLimit = reader.PushLimit(tupleLength);");
-            _sb.AppendIndentedLine($"instance.{member.Name} = StreamReaders.Read{tupleInfo.SafeName}Content(ref reader);");
+            _sb.AppendIndentedLine($"instance.{member.Name} = {GetVirtualTypesStreamReadersClass()}.Read{tupleInfo.SafeName}Content(ref reader);");
             _sb.AppendIndentedLine("reader.PopLimit(tupleOldLimit);");
         }
 
@@ -3467,12 +3371,14 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             if (typeInfo == null || !typeInfo.IsDictionary)
             {
                 // Fallback to old behavior if we can't analyze the type
+                // For tuple types, use virtual types in shared namespace
                 var safeName = VirtualTypeNameGenerator.GetSafeTypeName(typeName);
+                var readersClass = TupleHandler.IsTupleType(typeName) ? GetVirtualTypesStreamReadersClass() : "StreamReaders";
                 _sb.AppendIndentedLine("{");
                 _sb.IncreaseIndent();
                 _sb.AppendIndentedLine($"var {varName}Len = {readerVar}.ReadVarInt32();");
                 _sb.AppendIndentedLine($"var {varName}OldLimit = {readerVar}.PushLimit({varName}Len);");
-                _sb.AppendIndentedLine($"{varName} = StreamReaders.Read{safeName}Content(ref {readerVar});");
+                _sb.AppendIndentedLine($"{varName} = {readersClass}.Read{safeName}Content(ref {readerVar});");
                 _sb.AppendIndentedLine($"{readerVar}.PopLimit({varName}OldLimit);");
                 _sb.DecreaseIndent();
                 _sb.AppendIndentedLine("}");
@@ -3557,12 +3463,13 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         private void GeneratePopulateMapCollectionValueRead(string varName, string typeName, string readerVar)
         {
             // Use PushLimit for zero-allocation nested message reading
+            // Collection types (List, HashSet) use virtual types in shared namespace
             var safeName = VirtualTypeNameGenerator.GetSafeTypeName(typeName);
             _sb.AppendIndentedLine("{");
             _sb.IncreaseIndent();
             _sb.AppendIndentedLine($"var {varName}Len = {readerVar}.ReadVarInt32();");
             _sb.AppendIndentedLine($"var {varName}OldLimit = {readerVar}.PushLimit({varName}Len);");
-            _sb.AppendIndentedLine($"{varName} = StreamReaders.Read{safeName}Content(ref {readerVar});");
+            _sb.AppendIndentedLine($"{varName} = {GetVirtualTypesStreamReadersClass()}.Read{safeName}Content(ref {readerVar});");
             _sb.AppendIndentedLine($"{readerVar}.PopLimit({varName}OldLimit);");
             _sb.DecreaseIndent();
             _sb.AppendIndentedLine("}");
@@ -3571,12 +3478,13 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         private void GeneratePopulateMapTupleValueRead(string varName, string typeName, string readerVar)
         {
             // Use PushLimit for zero-allocation nested message reading
+            // Tuple types use virtual types in shared namespace
             var safeName = VirtualTypeNameGenerator.GetSafeTypeName(typeName);
             _sb.AppendIndentedLine("{");
             _sb.IncreaseIndent();
             _sb.AppendIndentedLine($"var {varName}Len = {readerVar}.ReadVarInt32();");
             _sb.AppendIndentedLine($"var {varName}OldLimit = {readerVar}.PushLimit({varName}Len);");
-            _sb.AppendIndentedLine($"{varName} = StreamReaders.Read{safeName}Content(ref {readerVar});");
+            _sb.AppendIndentedLine($"{varName} = {GetVirtualTypesStreamReadersClass()}.Read{safeName}Content(ref {readerVar});");
             _sb.AppendIndentedLine($"{readerVar}.PopLimit({varName}OldLimit);");
             _sb.DecreaseIndent();
             _sb.AppendIndentedLine("}");
@@ -3876,7 +3784,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             if (TupleHandler.IsTupleType(member.CollectionElementType))
             {
                 var tupleSafeName = VirtualTypeNameGenerator.GetSafeTypeName(member.CollectionElementType);
-                _sb.AppendIndentedLine($"{targetCollection}.Add(StreamReaders.Read{tupleSafeName}Content(ref reader));");
+                _sb.AppendIndentedLine($"{targetCollection}.Add({GetVirtualTypesStreamReadersClass()}.Read{tupleSafeName}Content(ref reader));");
                 _sb.AppendIndentedLine("reader.PopLimit(itemOldLimit);");
                 return;
             }

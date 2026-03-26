@@ -50,32 +50,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 GenerateWriteMethod(type);
             }
 
-            // Generate virtual map entry writers
-            GenerateVirtualMapEntryWriters();
-
-            // Generate virtual tuple writers
-            GenerateVirtualTupleWriters();
 
             _sb.EndBlock();
             _sb.AppendNewLine();
         }
 
-        /// <summary>
-        /// Generates writer methods for all registered virtual map entry types.
-        /// </summary>
-        private void GenerateVirtualMapEntryWriters()
-        {
-            var virtualTypes = _virtualMapRegistry.GetAllTypes();
-            if (virtualTypes.Count == 0) return;
-
-            _sb.AppendNewLine();
-            _sb.AppendIndentedLine("// Virtual Map Entry Writers (OnePass)");
-
-            foreach (var virtualType in virtualTypes)
-            {
-                GenerateVirtualMapEntryWriter(virtualType);
-            }
-        }
 
         private void GenerateVirtualMapEntryWriter(VirtualMapEntryInfo virtualType)
         {
@@ -118,7 +97,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 var tupleInfo = _virtualTupleRegistry.Register(virtualType.KeyType, itemTypes);
                 TagCodeHelper.WriteTag(_sb, 1, WireType.Len);
                 _sb.AppendIndentedLine("writer.BeginSubMessage();");
-                _sb.AppendIndentedLine($"Write{tupleInfo.SafeName}(ref writer, {sourceVar});");
+                _sb.AppendIndentedLine($"{GetVirtualTypesWritersClass()}.Write{tupleInfo.SafeName}(ref writer, {sourceVar});");
                 _sb.AppendIndentedLine("writer.EndSubMessage();");
             }
             else if (keyTypeInfo?.IsArray == true)
@@ -192,7 +171,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.StartNewBlock();
             TagCodeHelper.WriteTag(_sb, 1, WireType.Len);
             _sb.AppendIndentedLine("writer.BeginSubMessage();");
-            _sb.AppendIndentedLine($"Write{nestedEntryInfo.TypeName}(ref writer, keyKvp.Key, keyKvp.Value);");
+            _sb.AppendIndentedLine($"{GetVirtualTypesWritersClass()}.Write{nestedEntryInfo.TypeName}(ref writer, keyKvp.Key, keyKvp.Value);");
             _sb.AppendIndentedLine("writer.EndSubMessage();");
             _sb.EndBlock();
             _sb.EndBlock();
@@ -354,7 +333,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // Each nested dictionary entry is written as repeated field 2 with BeginSubMessage/EndSubMessage
             TagCodeHelper.WriteTag(_sb, 2, WireType.Len);
             _sb.AppendIndentedLine("writer.BeginSubMessage();");
-            _sb.AppendIndentedLine($"Write{nestedEntryInfo.TypeName}(ref writer, kvp.Key, kvp.Value);");
+            _sb.AppendIndentedLine($"{GetVirtualTypesWritersClass()}.Write{nestedEntryInfo.TypeName}(ref writer, kvp.Key, kvp.Value);");
             _sb.AppendIndentedLine("writer.EndSubMessage();");
 
             _sb.EndBlock();
@@ -368,7 +347,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             TagCodeHelper.WriteTag(_sb, 2, WireType.Len);
             _sb.AppendIndentedLine("writer.BeginSubMessage();");
-            _sb.AppendIndentedLine($"Write{tupleInfo.SafeName}(ref writer, {sourceVar});");
+            _sb.AppendIndentedLine($"{GetVirtualTypesWritersClass()}.Write{tupleInfo.SafeName}(ref writer, {sourceVar});");
             _sb.AppendIndentedLine("writer.EndSubMessage();");
         }
 
@@ -423,7 +402,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 var tupleInfo = _virtualTupleRegistry.Register(elementType, itemTypes);
                 TagCodeHelper.WriteTag(_sb, fieldId, WireType.Len);
                 _sb.AppendIndentedLine("writer.BeginSubMessage();");
-                _sb.AppendIndentedLine($"Write{tupleInfo.SafeName}(ref writer, {itemVar});");
+                _sb.AppendIndentedLine($"{GetVirtualTypesWritersClass()}.Write{tupleInfo.SafeName}(ref writer, {itemVar});");
                 _sb.AppendIndentedLine("writer.EndSubMessage();");
                 return;
             }
@@ -450,7 +429,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 _sb.StartNewBlock();
                 _sb.AppendIndentedLine($"foreach (var innerKvp in {itemVar})");
                 _sb.StartNewBlock();
-                _sb.AppendIndentedLine($"Write{nestedEntryInfo.TypeName}(ref writer, innerKvp.Key, innerKvp.Value);");
+                _sb.AppendIndentedLine($"{GetVirtualTypesWritersClass()}.Write{nestedEntryInfo.TypeName}(ref writer, innerKvp.Key, innerKvp.Value);");
                 _sb.EndBlock();
                 _sb.EndBlock();
                 _sb.AppendIndentedLine("writer.EndSubMessage();");
@@ -469,22 +448,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.EndBlock();
         }
 
-        /// <summary>
-        /// Generates writer methods for all registered virtual tuple types.
-        /// </summary>
-        private void GenerateVirtualTupleWriters()
-        {
-            var tupleTypes = _virtualTupleRegistry.GetAllTypes();
-            if (tupleTypes.Count == 0) return;
-
-            _sb.AppendNewLine();
-            _sb.AppendIndentedLine("// Virtual Tuple Writers (OnePass)");
-
-            foreach (var tupleInfo in tupleTypes)
-            {
-                GenerateVirtualTupleWriter(tupleInfo);
-            }
-        }
 
         private void GenerateVirtualTupleWriter(TupleTypeInfo tupleInfo)
         {
@@ -564,6 +527,15 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             return NamespaceHelper.GetWritersClass(typeName, ClassName, _registry);
         }
 
+        /// <summary>
+        /// Gets the fully qualified OnePassStreamWriters class in the shared virtual types namespace.
+        /// Used for calling virtual type methods (MapEntry, Tuple) from namespace files.
+        /// </summary>
+        private static string GetVirtualTypesWritersClass()
+        {
+            return $"global::{SharedVirtualTypesGenerator.SharedNamespace}.{ClassName}";
+        }
+
         private void GenerateTupleArrayElementWrite(string itemAccess, TypeAnalysisInfo elemTypeInfo, int fieldId)
         {
             var arrayElementType = elemTypeInfo.CollectionElementType;
@@ -609,7 +581,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.StartNewBlock();
             TagCodeHelper.WriteTag(_sb, fieldId, WireType.Len);
             _sb.AppendIndentedLine("writer.BeginSubMessage();");
-            _sb.AppendIndentedLine($"Write{nestedEntryInfo.TypeName}(ref writer, dictKvp.Key, dictKvp.Value);");
+            _sb.AppendIndentedLine($"{GetVirtualTypesWritersClass()}.Write{nestedEntryInfo.TypeName}(ref writer, dictKvp.Key, dictKvp.Value);");
             _sb.AppendIndentedLine("writer.EndSubMessage();");
             _sb.EndBlock();
             _sb.EndBlock();
@@ -944,7 +916,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 member.MapKeyEnumUnderlyingType,
                 member.MapValueEnumUnderlyingType);
 
-            _sb.AppendIndentedLine($"Write{virtualType.TypeName}(ref writer, kvp.Key, kvp.Value);");
+            _sb.AppendIndentedLine($"{GetVirtualTypesWritersClass()}.Write{virtualType.TypeName}(ref writer, kvp.Key, kvp.Value);");
             _sb.AppendIndentedLine("writer.EndSubMessage();");
 
             _sb.EndBlock();
@@ -1034,7 +1006,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var tupleInfo = _virtualTupleRegistry.Register(member.Type, itemTypes);
             TagCodeHelper.WriteTag(_sb, member.FieldId, WireType.Len);
             _sb.AppendIndentedLine("writer.BeginSubMessage();");
-            _sb.AppendIndentedLine($"Write{tupleInfo.SafeName}(ref writer, {sourceVar});");
+            _sb.AppendIndentedLine($"{GetVirtualTypesWritersClass()}.Write{tupleInfo.SafeName}(ref writer, {sourceVar});");
             _sb.AppendIndentedLine("writer.EndSubMessage();");
         }
 
@@ -1050,7 +1022,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             TagCodeHelper.WriteTag(_sb, member.FieldId, WireType.Len);
             _sb.AppendIndentedLine("writer.BeginSubMessage();");
-            _sb.AppendIndentedLine($"Write{tupleInfo.SafeName}(ref writer, item);");
+            _sb.AppendIndentedLine($"{GetVirtualTypesWritersClass()}.Write{tupleInfo.SafeName}(ref writer, item);");
             _sb.AppendIndentedLine("writer.EndSubMessage();");
 
             _sb.EndBlock();
