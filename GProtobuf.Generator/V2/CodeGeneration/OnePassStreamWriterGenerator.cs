@@ -604,6 +604,15 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             return NamespaceHelper.GetWritersClass(typeName, ClassName, _registry);
         }
 
+        /// <summary>
+        /// Gets the fully qualified OnePassStreamWriters class in the shared virtual types namespace.
+        /// Used for calling virtual type methods (MapEntry, Tuple) from namespace files.
+        /// </summary>
+        private static string GetVirtualTypesWritersClass()
+        {
+            return $"global::{SharedVirtualTypesGenerator.SharedNamespace}.{ClassName}";
+        }
+
         private void GenerateTupleArrayElementWrite(string itemAccess, TypeAnalysisInfo elemTypeInfo, int fieldId)
         {
             var arrayElementType = elemTypeInfo.CollectionElementType;

@@ -11,6 +11,9 @@ namespace GProtobuf.Generator.V2.Handlers
     /// Uses Virtual Tuple approach - generates separate methods for each unique Tuple signature.
     /// Example: Tuple&lt;int, string&gt; → ReadTupleOfIntAndStringContent()
     /// Supports Tuple with 2-8 items.
+    ///
+    /// Virtual type methods are generated in a shared namespace (GProtobuf.VirtualTypes.Serialization)
+    /// to avoid code duplication.
     /// </summary>
     internal class TupleHandler
     {
@@ -29,6 +32,47 @@ namespace GProtobuf.Generator.V2.Handlers
             _tupleRegistry = tupleRegistry ?? new VirtualTupleTypeRegistry();
             _virtualTypesNamespace = virtualTypesNamespace ?? "GProtobuf.Generated";
         }
+
+        /// <summary>
+        /// Gets the fully qualified class name for SpanReaders in the shared virtual types namespace.
+        /// </summary>
+        private static string GetSpanReadersClass()
+        {
+            return $"global::{SharedVirtualTypesGenerator.SharedNamespace}.SpanReaders";
+        }
+
+        /// <summary>
+        /// Gets the fully qualified class name for StreamReaders in the shared virtual types namespace.
+        /// </summary>
+        private static string GetStreamReadersClass()
+        {
+            return $"global::{SharedVirtualTypesGenerator.SharedNamespace}.StreamReaders";
+        }
+
+        /// <summary>
+        /// Gets the fully qualified class name for SizeCalculators in the shared virtual types namespace.
+        /// </summary>
+        private static string GetSizeCalculatorsClass()
+        {
+            return $"global::{SharedVirtualTypesGenerator.SharedNamespace}.SizeCalculators";
+        }
+
+        /// <summary>
+        /// Gets the fully qualified writer class name in the shared virtual types namespace.
+        /// </summary>
+        private static string GetWritersClass(string writerClassName)
+        {
+            return $"global::{SharedVirtualTypesGenerator.SharedNamespace}.{writerClassName}";
+        }
+
+        // Legacy overloads for backwards compatibility (parameters ignored)
+        private static string GetSpanReadersClass(TupleTypeInfo tupleInfo) => GetSpanReadersClass();
+        private static string GetSpanReadersClass(TupleTypeInfo tupleInfo, string currentNamespace) => GetSpanReadersClass();
+        private static string GetStreamReadersClass(TupleTypeInfo tupleInfo, string currentNamespace) => GetStreamReadersClass();
+        private static string GetSizeCalculatorsClass(TupleTypeInfo tupleInfo) => GetSizeCalculatorsClass();
+        private static string GetSizeCalculatorsClass(TupleTypeInfo tupleInfo, string currentNamespace) => GetSizeCalculatorsClass();
+        private static string GetWritersClass(TupleTypeInfo tupleInfo, string writerClassName) => GetWritersClass(writerClassName);
+        private static string GetWritersClass(TupleTypeInfo tupleInfo, string writerClassName, string currentNamespace, string writerKind) => GetWritersClass(writerClassName);
 
         #region Type Detection and Parsing
 
@@ -98,7 +142,8 @@ namespace GProtobuf.Generator.V2.Handlers
         public void GenerateTupleRead(
             string targetVar,
             string tupleTypeName,
-            string readerVar = "reader")
+            string readerVar = "reader",
+            string currentNamespace = null)
         {
             var itemTypes = ParseTupleTypes(tupleTypeName);
             if (itemTypes.Count == 0)
@@ -109,6 +154,7 @@ namespace GProtobuf.Generator.V2.Handlers
 
             // Register tuple type for virtual method generation
             var tupleInfo = _tupleRegistry.Register(tupleTypeName, itemTypes);
+            var readersClass = GetSpanReadersClass(tupleInfo, currentNamespace ?? string.Empty);
 
             // Generate call to virtual Read method
             _sb.AppendIndentedLine($"var tupleLength = {readerVar}.ReadVarInt32();");
@@ -156,6 +202,7 @@ namespace GProtobuf.Generator.V2.Handlers
             _sb.EndBlock();
 
             // Read tuple item using virtual method
+            var readersClass = GetSpanReadersClass(tupleInfo);
             _sb.AppendIndentedLine($"var length = {readerVar}.ReadVarInt32();");
             _sb.AppendIndentedLine($"var nestedReader = new SpanReader({readerVar}.GetSlice(length));");
             _sb.AppendIndentedLine($"var item = {VirtualTypesPrefix}.SpanReaders.Read{tupleInfo.SafeName}Content(ref nestedReader);");
@@ -195,10 +242,12 @@ namespace GProtobuf.Generator.V2.Handlers
             TagCodeHelper.WriteTag(_sb, fieldId, WireType.Len);
 
             // Calculate tuple content size
+            var sizeCalcClass = GetSizeCalculatorsClass(tupleInfo);
             _sb.AppendIndentedLine("var tupleCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
             _sb.AppendIndentedLine($"{VirtualTypesPrefix}.SizeCalculators.Calculate{tupleInfo.SafeName}ContentSize(ref tupleCalc, tupleValue);");
 
             // Write length and content
+            var writersClass = GetWritersClass(tupleInfo, writerClassName);
             _sb.AppendIndentedLine("writer.WriteVarUInt32((uint)tupleCalc.Length);");
             _sb.AppendIndentedLine($"{VirtualTypesPrefix}.{writerClassName}.Write{tupleInfo.SafeName}Content(ref writer, tupleValue);");
 
@@ -236,6 +285,7 @@ namespace GProtobuf.Generator.V2.Handlers
             TagCodeHelper.WriteTag(_sb, fieldId, WireType.Len);
 
             // Calculate and write length
+            var sizeCalcClass = GetSizeCalculatorsClass(tupleInfo);
             _sb.AppendIndentedLine("var tupleCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
             _sb.AppendIndentedLine($"{VirtualTypesPrefix}.SizeCalculators.Calculate{tupleInfo.SafeName}ContentSize(ref tupleCalc, item);");
             _sb.AppendIndentedLine("writer.WriteVarUInt32((uint)tupleCalc.Length);");
@@ -280,6 +330,7 @@ namespace GProtobuf.Generator.V2.Handlers
             TagCodeHelper.AddTagSize(_sb, fieldId, WireType.Len, calculatorVar);
 
             // Calculate tuple content size
+            var sizeCalcClass = GetSizeCalculatorsClass(tupleInfo);
             _sb.AppendIndentedLine("var tupleCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
             _sb.AppendIndentedLine($"{VirtualTypesPrefix}.SizeCalculators.Calculate{tupleInfo.SafeName}ContentSize(ref tupleCalc, tupleValue);");
 
@@ -309,6 +360,7 @@ namespace GProtobuf.Generator.V2.Handlers
 
             // Register tuple type
             var tupleInfo = _tupleRegistry.Register(tupleTypeName, itemTypes);
+            var sizeCalcClass = GetSizeCalculatorsClass(tupleInfo);
 
             _sb.StartNewBlock(); // Scope block to avoid name collisions
             _sb.AppendIndentedLine($"var collection = {sourceVar};");

@@ -1,8 +1,7 @@
-using System;
+using GProtobuf.Generator.V2.CodeGeneration;
 using GProtobuf.Generator.V2.CodeGeneration.Core;
 using GProtobuf.Generator.V2.Handlers.Core;
 using GProtobuf.Generator.V2.Handlers.VirtualTypes;
-using GProtobuf.Generator.V2.Helpers;
 
 namespace GProtobuf.Generator.V2.Handlers
 {
@@ -10,8 +9,8 @@ namespace GProtobuf.Generator.V2.Handlers
     /// Handles code generation for map/dictionary types in protobuf.
     /// Maps are serialized as repeated length-delimited messages with key (field 1) and value (field 2).
     ///
-    /// For complex types (custom classes as keys, nested collections), uses VirtualMapTypeRegistry
-    /// to generate reusable virtual type serializers.
+    /// Virtual type methods (ReadMapEntry_*, WriteMapEntry_*, CalculateMapEntry_*Size) are generated
+    /// in a shared namespace (GProtobuf.VirtualTypes.Serialization) to avoid code duplication.
     /// </summary>
     internal class MapHandler
     {
@@ -48,6 +47,28 @@ namespace GProtobuf.Generator.V2.Handlers
             _writerClassName = writerClassName ?? "StreamWriters";
             _typeRegistry = typeRegistry;
             _virtualTypesNamespace = virtualTypesNamespace ?? "GProtobuf.Generated";
+        }
+
+        public MapHandler(StringBuilderWithIndent sb, VirtualMapTypeRegistry registry, string writerClassName, TypeRegistry typeRegistry, string currentNamespace)
+            : this(sb, registry, writerClassName, typeRegistry)
+        {
+        }
+
+        /// <summary>
+        /// Gets the fully qualified class name for calling virtual type methods in the shared namespace.
+        /// All virtual types are generated in GProtobuf.VirtualTypes.Serialization.
+        /// </summary>
+        private string GetVirtualTypeMethodClass()
+        {
+            return $"global::{SharedVirtualTypesGenerator.SharedNamespace}.{_writerClassName}";
+        }
+
+        /// <summary>
+        /// Gets the fully qualified SizeCalculators class name in the shared namespace.
+        /// </summary>
+        private string GetSizeCalculatorsClass()
+        {
+            return $"global::{SharedVirtualTypesGenerator.SharedNamespace}.SizeCalculators";
         }
 
         /// <summary>

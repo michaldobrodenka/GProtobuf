@@ -4,7 +4,6 @@ using System.Linq;
 using GProtobuf.Generator.V2.CodeGeneration;
 using GProtobuf.Generator.V2.CodeGeneration.Core;
 using GProtobuf.Generator.V2.Handlers.VirtualTypes;
-using GProtobuf.Generator.V2.Helpers;
 using Microsoft.CodeAnalysis;
 
 namespace GProtobuf.Generator.V2
@@ -301,6 +300,75 @@ namespace GProtobuf.Generator.V2
             }
         }
 
+        /// <summary>
+        /// Scans all types across all namespaces to collect virtual types (MapEntry, Tuple).
+        /// This must be done BEFORE generating code so we know all virtual types upfront.
+        /// </summary>
+        private void CollectAllVirtualTypes(
+            HashSet<string> allNamespaces,
+            VirtualMapTypeRegistry mapRegistry,
+            VirtualTupleTypeRegistry tupleRegistry)
+        {
+            foreach (var ns in allNamespaces)
+            {
+                var types = _registry.GetByNamespace(ns);
+                foreach (var type in types)
+                {
+                    CollectVirtualTypesFromType(type, mapRegistry, tupleRegistry);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Collects virtual types from a single type definition by scanning its ProtoMembers.
+        /// </summary>
+        private void CollectVirtualTypesFromType(
+            TypeDefinition type,
+            VirtualMapTypeRegistry mapRegistry,
+            VirtualTupleTypeRegistry tupleRegistry)
+        {
+            if (type.ProtoMembers == null)
+                return;
+
+            foreach (var member in type.ProtoMembers)
+            {
+                // Register map types (Dictionary<K,V>)
+                if (member.IsMap)
+                {
+                    mapRegistry.RegisterMapEntry(
+                        member.MapKeyType,
+                        member.MapValueType,
+                        member.MapKeyIsEnum,
+                        member.MapValueIsEnum,
+                        member.MapKeyEnumUnderlyingType,
+                        member.MapValueEnumUnderlyingType);
+                }
+
+                // Register tuple types
+                if (Handlers.TupleHandler.IsTupleType(member.Type))
+                {
+                    var itemTypes = Handlers.TupleHandler.ParseTupleTypes(member.Type);
+                    if (itemTypes.Count > 0)
+                    {
+                        tupleRegistry.Register(member.Type, itemTypes);
+                    }
+                }
+
+                // Register tuple types in collections (e.g., List<Tuple<int,string>>)
+                if (member.IsCollection && !string.IsNullOrEmpty(member.CollectionElementType))
+                {
+                    if (Handlers.TupleHandler.IsTupleType(member.CollectionElementType))
+                    {
+                        var itemTypes = Handlers.TupleHandler.ParseTupleTypes(member.CollectionElementType);
+                        if (itemTypes.Count > 0)
+                        {
+                            tupleRegistry.Register(member.CollectionElementType, itemTypes);
+                        }
+                    }
+                }
+            }
+        }
+
         private (string FileName, string FileCode) GenerateCodeForNamespace(
             string ns, VirtualMapTypeRegistry globalMapRegistry, VirtualTupleTypeRegistry globalTupleRegistry)
         {
@@ -348,7 +416,7 @@ namespace GProtobuf.Generator.V2
                     }
                 }
 
-                // Generate StreamReaders class (uses global registries for deduplication)
+                // Generate StreamReaders class (virtual types are in shared file, skip them here)
                 if (_options.GenerateStreamReader)
                 {
                     try

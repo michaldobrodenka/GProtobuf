@@ -3510,7 +3510,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             if (typeInfo == null || !typeInfo.IsDictionary)
             {
                 // Fallback to old behavior if we can't analyze the type
+                // For tuple types, use virtual types in shared namespace
                 var safeName = VirtualTypeNameGenerator.GetSafeTypeName(typeName);
+                var readersClass = TupleHandler.IsTupleType(typeName) ? GetVirtualTypesStreamReadersClass() : "StreamReaders";
                 _sb.AppendIndentedLine("{");
                 _sb.IncreaseIndent();
                 _sb.AppendIndentedLine($"var {varName}Len = {readerVar}.ReadVarInt32();");
@@ -3600,6 +3602,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         private void GeneratePopulateMapCollectionValueRead(string varName, string typeName, string readerVar)
         {
             // Use PushLimit for zero-allocation nested message reading
+            // Collection types (List, HashSet) use virtual types in shared namespace
             var safeName = VirtualTypeNameGenerator.GetSafeTypeName(typeName);
             _sb.AppendIndentedLine("{");
             _sb.IncreaseIndent();
@@ -3614,6 +3617,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         private void GeneratePopulateMapTupleValueRead(string varName, string typeName, string readerVar)
         {
             // Use PushLimit for zero-allocation nested message reading
+            // Tuple types use virtual types in shared namespace
             var safeName = VirtualTypeNameGenerator.GetSafeTypeName(typeName);
             _sb.AppendIndentedLine("{");
             _sb.IncreaseIndent();

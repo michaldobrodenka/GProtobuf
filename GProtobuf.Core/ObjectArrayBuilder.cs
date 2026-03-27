@@ -45,6 +45,49 @@ namespace GProtobuf.Core
             buffer[count++] = item;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Enumerator GetEnumerator()
+        {
+            if (buffer == null)
+                ThrowObjectDisposedException();
+
+            return new Enumerator(buffer, count);
+        }
+
+        public ref struct Enumerator
+        {
+            private readonly object[] buffer;
+            private readonly int count;
+            private int index;
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            internal Enumerator(object[] buffer, int count)
+            {
+                this.buffer = buffer;
+                this.count = count;
+                index = -1;
+            }
+
+            public T Current
+            {
+                [MethodImpl(MethodImplOptions.AggressiveInlining)]
+                get => (T)buffer[index];
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public bool MoveNext()
+            {
+                int next = index + 1;
+                if ((uint)next < (uint)count)
+                {
+                    index = next;
+                    return true;
+                }
+
+                return false;
+            }
+        }
+
         [MethodImpl(MethodImplOptions.NoInlining)]
         private static void ThrowObjectDisposedException()
         {

@@ -258,12 +258,14 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         #region Writer
 
         /// <summary>
-        /// Generates Write{TupleName}Content method.
+        /// Generates Write{TupleName}Content method (or Write{TupleName} for OnePassStream mode).
         /// Example: WriteTupleOfIntAndStringContent(ref StreamWriter writer, Tuple&lt;int, string&gt; instance)
        /// </summary>
         public void GenerateWriter(TupleTypeInfo tupleInfo)
         {
             var writerType = _writerKind != null ? $"global::GProtobuf.Core.{_writerKind}Writer" : "global::GProtobuf.Core.StreamWriter";
+            // OnePassStream mode doesn't use Content suffix (uses BeginSubMessage/EndSubMessage instead)
+            var methodSuffix = _writerKind == "OnePassStream" ? "" : "Content";
 
             _sb.AppendIndentedLine("[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
             _sb.AppendIndentedLine($"public static void Write{tupleInfo.SafeName}Content(ref {writerType} writer, {TypeMapping.GetGlobalGenericTypeName(tupleInfo.OriginalTypeName)} instance)");
@@ -341,13 +343,15 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 case TypeCategory.Complex:
                     // Complex type - write as length-prefixed message
                     var className = TypeNameHelper.GetSafeMethodName(actualType);
+                    // OnePassStream mode doesn't use Content suffix for nested tuples (uses BeginSubMessage/EndSubMessage instead)
+                    var nestedMethodSuffix = _writerKind == "OnePassStream" ? "" : "Content";
                     // Reuse pre-declared itemCalc (ref struct reinitializes on assignment)
                     _sb.AppendIndentedLine("itemCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
                     _sb.AppendIndentedLine($"{VirtualTypesPrefix}.SizeCalculators.Calculate{className}ContentSize(ref itemCalc, {sourceVar});");
                     _sb.AppendIndentedLine("writer.WriteVarUInt32((uint)itemCalc.Length);");
 
                     var writerClass = _writerKind != null ? $"{_writerKind}Writers" : "StreamWriters";
-                    _sb.AppendIndentedLine($"{writerClass}.Write{className}Content(ref writer, {sourceVar});");
+                    _sb.AppendIndentedLine($"{writerClass}.Write{className}{nestedMethodSuffix}(ref writer, {sourceVar});");
                     break;
             }
         }
