@@ -138,7 +138,7 @@ namespace GProtobuf.Generator.V2.Handlers
             string readerVar = "reader",
             bool useObjectArrayBuilder = false)
         {
-            var shortElementType = TypeMapping.GetShortTypeName(elementTypeName);
+            var shortElementType = TypeMapping.GetGlobalTypeName(elementTypeName);
 
             // For arrays and IEnumerable, use temp list
             // Arrays can't use Add(), and IEnumerable<T> doesn't have Add() method

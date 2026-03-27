@@ -30,6 +30,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         {
         }
 
+        public SpanReaderGenerator(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry, VirtualTupleTypeRegistry virtualTupleRegistry, GeneratorOptions options, string virtualTypesNamespace)
+            : base(sb, registry, virtualMapRegistry, virtualTupleRegistry, passRegistryToPrimitiveHandler: true, options, virtualTypesNamespace)
+        {
+        }
+
         /// <summary>
         /// Analyzes type and determines deserialization strategy (parameterless constructor, constructor with params, or FormatterServices).
         /// </summary>
@@ -121,6 +126,27 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 _sb.AppendIndentedLine($"    typeof({fullTypeName}));");
                 _sb.DecreaseIndent();
             }
+        }
+
+        /// <summary>
+        /// Generates SpanReaders class containing ONLY virtual types (map entries and tuples).
+        /// Used for GProtobuf.Generated namespace which centralizes all virtual type methods.
+        /// </summary>
+        public void GenerateVirtualTypesOnly(string currentNamespace)
+        {
+            _currentNamespace = currentNamespace ?? string.Empty;
+
+            _sb.AppendIndentedLine("public static class SpanReaders");
+            _sb.StartNewBlock();
+
+            // Generate virtual map entry readers (all types, ignoring IsGenerated flag)
+            GenerateVirtualMapEntryReaders(ignoreIsGeneratedFlag: true);
+
+            // Generate virtual tuple readers (all types, ignoring IsGenerated flag)
+            GenerateVirtualTupleReaders(ignoreIsGeneratedFlag: true);
+
+            _sb.EndBlock();
+            _sb.AppendNewLine();
         }
 
         /// <summary>
@@ -225,25 +251,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 }
             }
 
-            try
-            {
-                // Generate virtual map entry readers
-                GenerateVirtualMapEntryReaders();
-            }
-            catch (System.Exception ex)
-            {
-                throw new System.Exception("Error in GenerateVirtualMapEntryReaders", ex);
-            }
-
-            try
-            {
-                // Generate virtual tuple readers
-                GenerateVirtualTupleReaders();
-            }
-            catch (System.Exception ex)
-            {
-                throw new System.Exception("Error in GenerateVirtualTupleReaders", ex);
-            }
+            // Virtual map entry and tuple readers are NOT generated here - they are centralized
+            // in GProtobuf.Generated.Serialization.cs via GenerateVirtualTypesOnly().
+            // Types are registered during field processing above, then generated once in the shared file.
 
             _sb.EndBlock();
             _sb.AppendNewLine();
@@ -252,17 +262,24 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// <summary>
         /// Generates reader methods for all registered virtual map entry types.
         /// </summary>
-        private void GenerateVirtualMapEntryReaders()
+        /// <param name="ignoreIsGeneratedFlag">If true, generates all types regardless of IsGenerated flag (for GProtobuf.Generated).
+        /// If false, skips types that have already been generated.</param>
+        private void GenerateVirtualMapEntryReaders(bool ignoreIsGeneratedFlag)
         {
-            System.Collections.Generic.IReadOnlyList<VirtualMapEntryInfo> virtualTypes;
+            System.Collections.Generic.IReadOnlyList<VirtualMapEntryInfo> allTypes;
             try
             {
-                virtualTypes = _virtualMapRegistry.GetAllTypes();
+                allTypes = _virtualMapRegistry.GetAllTypes();
             }
             catch (System.Exception ex)
             {
                 throw new System.Exception("Error calling _virtualMapRegistry.GetAllTypes()", ex);
             }
+
+            // Filter types based on IsGenerated flag
+            var virtualTypes = ignoreIsGeneratedFlag
+                ? allTypes.ToList()
+                : allTypes.Where(t => !t.IsGenerated).ToList();
 
             if (virtualTypes.Count == 0) return;
 
@@ -276,7 +293,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             VirtualMapEntryGenerator generator;
             try
             {
-                generator = new VirtualMapEntryGenerator(_sb, _virtualMapRegistry, _registry, "Span");
+                generator = new VirtualMapEntryGenerator(_sb, _virtualMapRegistry, _registry, "Span", _virtualTypesNamespace);
             }
             catch (System.Exception ex)
             {
@@ -315,15 +332,23 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// <summary>
         /// Generates reader methods for all registered virtual tuple types.
         /// </summary>
-        private void GenerateVirtualTupleReaders()
+        /// <param name="ignoreIsGeneratedFlag">If true, generates all types regardless of IsGenerated flag (for GProtobuf.Generated).
+        /// If false, skips types that have already been generated.</param>
+        private void GenerateVirtualTupleReaders(bool ignoreIsGeneratedFlag)
         {
-            var tupleTypes = _virtualTupleRegistry.GetAllTypes();
+            var allTypes = _virtualTupleRegistry.GetAllTypes();
+
+            // Filter types based on IsGenerated flag
+            var tupleTypes = ignoreIsGeneratedFlag
+                ? allTypes
+                : allTypes.Where(t => !t.IsGenerated).ToList();
+
             if (tupleTypes.Count == 0) return;
 
             _sb.AppendNewLine();
             _sb.AppendIndentedLine("// Virtual Tuple Readers");
 
-            var generator = new VirtualTupleGenerator(_sb, null, _registry);
+            var generator = new VirtualTupleGenerator(_sb, null, _registry, _virtualTypesNamespace);
             foreach (var tupleInfo in tupleTypes)
             {
                 generator.GenerateReader(tupleInfo);
@@ -609,12 +634,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             // Declare ObjectArrayBuilder for class element collections
             ObjectArrayBuilderHelper.GenerateDeclarations(_sb, fieldsUsingObjectBuilder,
-                m => TypeMapping.GetShortTypeName(m.CollectionElementType));
+                m => TypeMapping.GetGlobalTypeName(m.CollectionElementType));
 
             // Declare temp lists for struct/primitive element collections
             foreach (var member in fieldsUsingTempList)
             {
-                var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType);
+                var elementType = TypeMapping.GetGlobalTypeName(member.CollectionElementType);
                 _sb.AppendIndentedLine($"global::System.Collections.Generic.List<{elementType}> _tempList_{member.Name} = null;");
             }
 
@@ -748,7 +773,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             if (member.IsMap)
             {
-                var mapHandler = new MapHandler(_sb, _virtualMapRegistry, "SpanReaders", _registry);
+                var mapHandler = new MapHandler(_sb, _virtualMapRegistry, "SpanReaders", _registry, _virtualTypesNamespace);
                 mapHandler.GenerateRead(member, $"result.{member.Name}", readerVar);
             }
             else if (member.IsCollection)
@@ -1201,12 +1226,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             // Declare ObjectArrayBuilder for class element collections
             ObjectArrayBuilderHelper.GenerateDeclarations(_sb, fieldsUsingObjectBuilder,
-                m => TypeMapping.GetShortTypeName(m.CollectionElementType));
+                m => TypeMapping.GetGlobalTypeName(m.CollectionElementType));
 
             // Declare temp lists for struct/primitive element collections
             foreach (var member in fieldsUsingTempList)
             {
-                var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType);
+                var elementType = TypeMapping.GetGlobalTypeName(member.CollectionElementType);
                 _sb.AppendIndentedLine($"global::System.Collections.Generic.List<{elementType}> _tempList_{member.Name} = null;");
             }
 
@@ -1540,12 +1565,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
                 // Declare ObjectArrayBuilder for class element collections
                 ObjectArrayBuilderHelper.GenerateDeclarations(_sb, fieldsUsingObjectBuilder,
-                    m => TypeMapping.GetShortTypeName(m.CollectionElementType));
+                    m => TypeMapping.GetGlobalTypeName(m.CollectionElementType));
 
                 // Declare temp lists for struct/primitive element collections
                 foreach (var member in fieldsUsingTempList)
                 {
-                    var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType);
+                    var elementType = TypeMapping.GetGlobalTypeName(member.CollectionElementType);
                     _sb.AppendIndentedLine($"global::System.Collections.Generic.List<{elementType}> _tempList_{member.Name} = null;");
                 }
 
@@ -1644,12 +1669,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             // Declare ObjectArrayBuilder for class element collections
             ObjectArrayBuilderHelper.GenerateDeclarations(_sb, fieldsUsingObjectBuilder,
-                m => TypeMapping.GetShortTypeName(m.CollectionElementType));
+                m => TypeMapping.GetGlobalTypeName(m.CollectionElementType));
 
             // Declare temp lists for struct/primitive element collections
             foreach (var member in fieldsUsingTempList)
             {
-                var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType);
+                var elementType = TypeMapping.GetGlobalTypeName(member.CollectionElementType);
                 _sb.AppendIndentedLine($"global::System.Collections.Generic.List<{elementType}> _tempList_{member.Name} = null;");
             }
 
@@ -1778,7 +1803,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // Route to appropriate handler based on field type
             if (member.IsMap)
             {
-                var mapHandler = new MapHandler(_sb, _virtualMapRegistry, "SpanReaders", _registry);
+                var mapHandler = new MapHandler(_sb, _virtualMapRegistry, "SpanReaders", _registry, _virtualTypesNamespace);
                 mapHandler.GenerateRead(member, $"instance.{member.Name}", readerVar);
             }
             else if (member.IsCollection)
@@ -1952,12 +1977,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             // Declare ObjectArrayBuilder for class element collections
             ObjectArrayBuilderHelper.GenerateDeclarations(_sb, fieldsUsingObjectBuilder,
-                m => TypeMapping.GetShortTypeName(m.CollectionElementType));
+                m => TypeMapping.GetGlobalTypeName(m.CollectionElementType));
 
             // Declare temp lists for struct/primitive element collections
             foreach (var member in fieldsUsingTempList)
             {
-                var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType);
+                var elementType = TypeMapping.GetGlobalTypeName(member.CollectionElementType);
                 _sb.AppendIndentedLine($"global::System.Collections.Generic.List<{elementType}> _tempList_{member.Name} = null;");
             }
 
@@ -2061,7 +2086,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // Route to appropriate handler based on field type
             if (member.IsMap)
             {
-                var mapHandler = new MapHandler(_sb, _virtualMapRegistry, "SpanReaders", _registry);
+                var mapHandler = new MapHandler(_sb, _virtualMapRegistry, "SpanReaders", _registry, _virtualTypesNamespace);
                 mapHandler.GenerateRead(member, $"instance.{member.Name}");
             }
             else if (member.IsCollection)
@@ -2492,7 +2517,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateMapFieldReadBody(ProtoMemberAttribute member)
         {
-            var mapHandler = new MapHandler(_sb, _virtualMapRegistry, "SpanReaders", _registry);
+            var mapHandler = new MapHandler(_sb, _virtualMapRegistry, "SpanReaders", _registry, _virtualTypesNamespace);
             mapHandler.GenerateRead(member, $"result.{member.Name}");
         }
 

@@ -2,6 +2,7 @@ using System.Linq;
 using GProtobuf.Generator.V2.CodeGeneration;
 using GProtobuf.Generator.V2.Handlers.Core;
 using GProtobuf.Generator.V2.Helpers;
+using GProtobuf.Generator.WireFormat;
 
 namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
 {
@@ -15,13 +16,20 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         private readonly string _writerKind; // "Stream" or "Buffer"
         private readonly TypeRegistry _registry;
         private readonly TupleItemTypeHandler _typeHandler;
+        private readonly string _virtualTypesNamespace;
 
-        public VirtualTupleGenerator(StringBuilderWithIndent sb, string writerKind, TypeRegistry registry)
+        /// <summary>
+        /// Gets the fully qualified prefix for virtual types serialization classes.
+        /// </summary>
+        private string VirtualTypesPrefix => $"global::{_virtualTypesNamespace}.Serialization";
+
+        public VirtualTupleGenerator(StringBuilderWithIndent sb, string writerKind, TypeRegistry registry, string virtualTypesNamespace = null)
         {
             _sb = sb;
             _writerKind = writerKind;
             _registry = registry;
             _typeHandler = new TupleItemTypeHandler(_registry);
+            _virtualTypesNamespace = virtualTypesNamespace ?? "GProtobuf.Generated";
         }
 
         #region Reader
@@ -33,13 +41,13 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         public void GenerateReader(TupleTypeInfo tupleInfo)
         {
             _sb.AppendIndentedLine("[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
-            _sb.AppendIndentedLine($"public static {tupleInfo.OriginalTypeName} Read{tupleInfo.SafeName}Content(ref SpanReader reader)");
+            _sb.AppendIndentedLine($"public static {TypeMapping.GetGlobalGenericTypeName(tupleInfo.OriginalTypeName)} Read{tupleInfo.SafeName}Content(ref SpanReader reader)");
             _sb.StartNewBlock();
 
             // Declare variables for all items
             for (int i = 0; i < tupleInfo.Arity; i++)
             {
-                var itemType = tupleInfo.ItemTypes[i];
+                var itemType = TypeMapping.GetGlobalTypeName(tupleInfo.ItemTypes[i]);
                 _sb.AppendIndentedLine($"{itemType} item{i + 1} = default({itemType});");
             }
 
@@ -76,7 +84,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             // Construct and return the tuple
             _sb.AppendNewLine();
             var items = string.Join(", ", Enumerable.Range(1, tupleInfo.Arity).Select(i => $"item{i}"));
-            _sb.AppendIndentedLine($"return new {tupleInfo.OriginalTypeName}({items});");
+            _sb.AppendIndentedLine($"return new {TypeMapping.GetGlobalGenericTypeName(tupleInfo.OriginalTypeName)}({items});");
 
             _sb.EndBlock(); // method
             _sb.AppendNewLine();
@@ -99,7 +107,9 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
 
                 case TypeCategory.Enum:
                     // Enum type - read as VarInt32 and cast
-                    _sb.AppendIndentedLine($"{targetVar} = ({actualType})reader.ReadVarInt32();");
+                    // Apply global:: prefix to enum type to avoid namespace resolution issues
+                    var globalEnumType = TypeMapping.GetGlobalGenericTypeName(actualType);
+                    _sb.AppendIndentedLine($"{targetVar} = ({globalEnumType})reader.ReadVarInt32();");
                     break;
 
                 case TypeCategory.Complex:
@@ -107,7 +117,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                     var className = TypeNameHelper.GetSafeMethodName(actualType);
                     _sb.AppendIndentedLine("var itemLength = reader.ReadVarInt32();");
                     _sb.AppendIndentedLine("var itemReader = new SpanReader(reader.GetSlice(itemLength));");
-                    _sb.AppendIndentedLine($"{targetVar} = SpanReaders.Read{className}Content(ref itemReader);");
+                    _sb.AppendIndentedLine($"{targetVar} = {VirtualTypesPrefix}.SpanReaders.Read{className}Content(ref itemReader);");
                     break;
             }
         }
@@ -122,13 +132,13 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         public void GenerateStreamReader(TupleTypeInfo tupleInfo)
         {
             _sb.AppendIndentedLine("[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
-            _sb.AppendIndentedLine($"public static {tupleInfo.OriginalTypeName} Read{tupleInfo.SafeName}Content(ref global::GProtobuf.Core.StreamReader reader)");
+            _sb.AppendIndentedLine($"public static {TypeMapping.GetGlobalGenericTypeName(tupleInfo.OriginalTypeName)} Read{tupleInfo.SafeName}Content(ref global::GProtobuf.Core.StreamReader reader)");
             _sb.StartNewBlock();
 
             // Declare variables for all items
             for (int i = 0; i < tupleInfo.Arity; i++)
             {
-                var itemType = tupleInfo.ItemTypes[i];
+                var itemType = TypeMapping.GetGlobalTypeName(tupleInfo.ItemTypes[i]);
                 _sb.AppendIndentedLine($"{itemType} item{i + 1} = default({itemType});");
             }
 
@@ -165,7 +175,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             // Construct and return the tuple
             _sb.AppendNewLine();
             var items = string.Join(", ", Enumerable.Range(1, tupleInfo.Arity).Select(i => $"item{i}"));
-            _sb.AppendIndentedLine($"return new {tupleInfo.OriginalTypeName}({items});");
+            _sb.AppendIndentedLine($"return new {TypeMapping.GetGlobalGenericTypeName(tupleInfo.OriginalTypeName)}({items});");
 
             _sb.EndBlock(); // method
             _sb.AppendNewLine();
@@ -227,7 +237,9 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                     break;
 
                 case TypeCategory.Enum:
-                    _sb.AppendIndentedLine($"{targetVar} = ({actualType})reader.ReadVarInt32();");
+                    // Apply global:: prefix to enum type to avoid namespace resolution issues
+                    var globalEnumType2 = TypeMapping.GetGlobalGenericTypeName(actualType);
+                    _sb.AppendIndentedLine($"{targetVar} = ({globalEnumType2})reader.ReadVarInt32();");
                     break;
 
                 case TypeCategory.Complex:
@@ -235,7 +247,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                     var className = TypeNameHelper.GetSafeMethodName(actualType);
                     _sb.AppendIndentedLine("var itemLength = reader.ReadVarInt32();");
                     _sb.AppendIndentedLine("var itemOldLimit = reader.PushLimit(itemLength);");
-                    _sb.AppendIndentedLine($"{targetVar} = StreamReaders.Read{className}Content(ref reader);");
+                    _sb.AppendIndentedLine($"{targetVar} = {VirtualTypesPrefix}.StreamReaders.Read{className}Content(ref reader);");
                     _sb.AppendIndentedLine("reader.PopLimit(itemOldLimit);");
                     break;
             }
@@ -254,7 +266,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             var writerType = _writerKind != null ? $"global::GProtobuf.Core.{_writerKind}Writer" : "global::GProtobuf.Core.StreamWriter";
 
             _sb.AppendIndentedLine("[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
-            _sb.AppendIndentedLine($"public static void Write{tupleInfo.SafeName}Content(ref {writerType} writer, {tupleInfo.OriginalTypeName} instance)");
+            _sb.AppendIndentedLine($"public static void Write{tupleInfo.SafeName}Content(ref {writerType} writer, {TypeMapping.GetGlobalGenericTypeName(tupleInfo.OriginalTypeName)} instance)");
             _sb.StartNewBlock();
 
             // Add null check for tuples (reference types)
@@ -331,7 +343,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                     var className = TypeNameHelper.GetSafeMethodName(actualType);
                     // Reuse pre-declared itemCalc (ref struct reinitializes on assignment)
                     _sb.AppendIndentedLine("itemCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
-                    _sb.AppendIndentedLine($"SizeCalculators.Calculate{className}ContentSize(ref itemCalc, {sourceVar});");
+                    _sb.AppendIndentedLine($"{VirtualTypesPrefix}.SizeCalculators.Calculate{className}ContentSize(ref itemCalc, {sourceVar});");
                     _sb.AppendIndentedLine("writer.WriteVarUInt32((uint)itemCalc.Length);");
 
                     var writerClass = _writerKind != null ? $"{_writerKind}Writers" : "StreamWriters";
@@ -351,7 +363,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         public void GenerateSizeCalculator(TupleTypeInfo tupleInfo)
         {
             _sb.AppendIndentedLine("[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
-            _sb.AppendIndentedLine($"public static void Calculate{tupleInfo.SafeName}ContentSize(ref global::GProtobuf.Core.WriteSizeCalculator calculator, {tupleInfo.OriginalTypeName} instance)");
+            _sb.AppendIndentedLine($"public static void Calculate{tupleInfo.SafeName}ContentSize(ref global::GProtobuf.Core.WriteSizeCalculator calculator, {TypeMapping.GetGlobalGenericTypeName(tupleInfo.OriginalTypeName)} instance)");
             _sb.StartNewBlock();
 
             // Add null check for tuples (reference types)
@@ -428,7 +440,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                     var className = TypeNameHelper.GetSafeMethodName(actualType);
                     // Reuse pre-declared itemCalc (ref struct reinitializes on assignment)
                     _sb.AppendIndentedLine("itemCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
-                    _sb.AppendIndentedLine($"SizeCalculators.Calculate{className}ContentSize(ref itemCalc, {sourceVar});");
+                    _sb.AppendIndentedLine($"{VirtualTypesPrefix}.SizeCalculators.Calculate{className}ContentSize(ref itemCalc, {sourceVar});");
                     _sb.AppendIndentedLine("calculator.WriteVarUInt32((uint)itemCalc.Length);");
                     _sb.AppendIndentedLine("calculator.AddByteLength(itemCalc.Length);");
                     break;

@@ -16,11 +16,18 @@ namespace GProtobuf.Generator.V2.Handlers
     {
         private readonly StringBuilderWithIndent _sb;
         private readonly VirtualTupleTypeRegistry _tupleRegistry;
+        private readonly string _virtualTypesNamespace;
 
-        public TupleHandler(StringBuilderWithIndent sb, VirtualTupleTypeRegistry tupleRegistry)
+        /// <summary>
+        /// Gets the fully qualified prefix for virtual types serialization classes.
+        /// </summary>
+        private string VirtualTypesPrefix => $"global::{_virtualTypesNamespace}.Serialization";
+
+        public TupleHandler(StringBuilderWithIndent sb, VirtualTupleTypeRegistry tupleRegistry, string virtualTypesNamespace = null)
         {
             _sb = sb;
             _tupleRegistry = tupleRegistry ?? new VirtualTupleTypeRegistry();
+            _virtualTypesNamespace = virtualTypesNamespace ?? "GProtobuf.Generated";
         }
 
         #region Type Detection and Parsing
@@ -106,7 +113,7 @@ namespace GProtobuf.Generator.V2.Handlers
             // Generate call to virtual Read method
             _sb.AppendIndentedLine($"var tupleLength = {readerVar}.ReadVarInt32();");
             _sb.AppendIndentedLine($"var tupleReader = new SpanReader({readerVar}.GetSlice(tupleLength));");
-            _sb.AppendIndentedLine($"{targetVar} = SpanReaders.Read{tupleInfo.SafeName}Content(ref tupleReader);");
+            _sb.AppendIndentedLine($"{targetVar} = {VirtualTypesPrefix}.SpanReaders.Read{tupleInfo.SafeName}Content(ref tupleReader);");
         }
 
         /// <summary>
@@ -151,7 +158,7 @@ namespace GProtobuf.Generator.V2.Handlers
             // Read tuple item using virtual method
             _sb.AppendIndentedLine($"var length = {readerVar}.ReadVarInt32();");
             _sb.AppendIndentedLine($"var nestedReader = new SpanReader({readerVar}.GetSlice(length));");
-            _sb.AppendIndentedLine($"var item = SpanReaders.Read{tupleInfo.SafeName}Content(ref nestedReader);");
+            _sb.AppendIndentedLine($"var item = {VirtualTypesPrefix}.SpanReaders.Read{tupleInfo.SafeName}Content(ref nestedReader);");
             _sb.AppendIndentedLine($"{actualTargetVar}.Add(item);");
         }
 
@@ -189,11 +196,11 @@ namespace GProtobuf.Generator.V2.Handlers
 
             // Calculate tuple content size
             _sb.AppendIndentedLine("var tupleCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
-            _sb.AppendIndentedLine($"SizeCalculators.Calculate{tupleInfo.SafeName}ContentSize(ref tupleCalc, tupleValue);");
+            _sb.AppendIndentedLine($"{VirtualTypesPrefix}.SizeCalculators.Calculate{tupleInfo.SafeName}ContentSize(ref tupleCalc, tupleValue);");
 
             // Write length and content
             _sb.AppendIndentedLine("writer.WriteVarUInt32((uint)tupleCalc.Length);");
-            _sb.AppendIndentedLine($"{writerClassName}.Write{tupleInfo.SafeName}Content(ref writer, tupleValue);");
+            _sb.AppendIndentedLine($"{VirtualTypesPrefix}.{writerClassName}.Write{tupleInfo.SafeName}Content(ref writer, tupleValue);");
 
             _sb.EndBlock(); // if
             _sb.EndBlock(); // scope
@@ -230,11 +237,11 @@ namespace GProtobuf.Generator.V2.Handlers
 
             // Calculate and write length
             _sb.AppendIndentedLine("var tupleCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
-            _sb.AppendIndentedLine($"SizeCalculators.Calculate{tupleInfo.SafeName}ContentSize(ref tupleCalc, item);");
+            _sb.AppendIndentedLine($"{VirtualTypesPrefix}.SizeCalculators.Calculate{tupleInfo.SafeName}ContentSize(ref tupleCalc, item);");
             _sb.AppendIndentedLine("writer.WriteVarUInt32((uint)tupleCalc.Length);");
 
             // Write content
-            _sb.AppendIndentedLine($"{writerClassName}.Write{tupleInfo.SafeName}Content(ref writer, item);");
+            _sb.AppendIndentedLine($"{VirtualTypesPrefix}.{writerClassName}.Write{tupleInfo.SafeName}Content(ref writer, item);");
 
             _sb.EndBlock(); // foreach
             _sb.EndBlock(); // if
@@ -274,7 +281,7 @@ namespace GProtobuf.Generator.V2.Handlers
 
             // Calculate tuple content size
             _sb.AppendIndentedLine("var tupleCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
-            _sb.AppendIndentedLine($"SizeCalculators.Calculate{tupleInfo.SafeName}ContentSize(ref tupleCalc, tupleValue);");
+            _sb.AppendIndentedLine($"{VirtualTypesPrefix}.SizeCalculators.Calculate{tupleInfo.SafeName}ContentSize(ref tupleCalc, tupleValue);");
 
             // Add tuple length varint + content size
             _sb.AppendIndentedLine($"{calculatorVar}.WriteVarUInt32((uint)tupleCalc.Length);");
@@ -315,7 +322,7 @@ namespace GProtobuf.Generator.V2.Handlers
 
             // Calculate item content size
             _sb.AppendIndentedLine("var tupleCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
-            _sb.AppendIndentedLine($"SizeCalculators.Calculate{tupleInfo.SafeName}ContentSize(ref tupleCalc, item);");
+            _sb.AppendIndentedLine($"{VirtualTypesPrefix}.SizeCalculators.Calculate{tupleInfo.SafeName}ContentSize(ref tupleCalc, item);");
 
             // Add length varint size + content size
             _sb.AppendIndentedLine($"{calculatorVar}.WriteVarUInt32((uint)tupleCalc.Length);");

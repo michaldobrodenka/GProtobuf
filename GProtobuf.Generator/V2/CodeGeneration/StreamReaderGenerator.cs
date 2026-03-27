@@ -40,6 +40,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         {
         }
 
+        public StreamReaderGenerator(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry, VirtualTupleTypeRegistry virtualTupleRegistry, string virtualTypesNamespace)
+            : base(sb, registry, virtualMapRegistry, virtualTupleRegistry, passRegistryToPrimitiveHandler: true, options: null, virtualTypesNamespace: virtualTypesNamespace)
+        {
+        }
+
         #region Constructor Analysis
 
         /// <summary>
@@ -173,18 +178,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 }
             }
 
-            // Generate virtual map/tuple methods only if not skipped (they're generated once in shared file)
-            if (!skipVirtualTypes)
-            {
-                // Generate virtual map entry readers for StreamReader
-                GenerateVirtualMapReaders();
-
-                // Generate virtual tuple readers for StreamReader
-                GenerateVirtualTupleReaders();
-
-                // Generate virtual collection readers for StreamReader (List<T>, HashSet<T>, Dictionary<K,V>)
-                GenerateVirtualCollectionReaders();
-            }
+            // Virtual map entry and tuple readers are NOT generated here - they are centralized
+            // in GProtobuf.Generated.Serialization.cs via GenerateVirtualTypesOnly().
+            // Types are registered during field processing above, then generated once in the shared file.
 
             _sb.EndBlock();
             _sb.AppendNewLine();
@@ -192,16 +188,19 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         /// <summary>
         /// Generates only the virtual map entry and tuple reader methods.
-        /// Used for generating the shared file that contains all virtual types.
+        /// Used for generating the GProtobuf.Generated file that contains all virtual types.
         /// </summary>
-        public void GenerateSharedVirtualTypesOnly()
+        public void GenerateVirtualTypesOnly(string currentNamespace)
         {
+            _currentNamespace = currentNamespace ?? string.Empty;
+
             _sb.AppendIndentedLine($"public static class {ClassName}");
             _sb.StartNewBlock();
 
-            GenerateVirtualMapReaders();
-            GenerateVirtualTupleReaders();
-            GenerateVirtualCollectionReaders();
+            // Generate all virtual types (ignoring IsGenerated flag)
+            GenerateVirtualMapReaders(ignoreIsGeneratedFlag: true);
+            GenerateVirtualTupleReaders(ignoreIsGeneratedFlag: true);
+            GenerateVirtualCollectionReaders(ignoreIsGeneratedFlag: true);
 
             _sb.EndBlock();
             _sb.AppendNewLine();
@@ -210,17 +209,26 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// <summary>
         /// Generates virtual map entry readers for StreamReader.
         /// </summary>
-        private void GenerateVirtualMapReaders()
+        /// <param name="ignoreIsGeneratedFlag">If true, generates all types regardless of IsGenerated flag (for GProtobuf.Generated).
+        /// If false, skips types that have already been generated.</param>
+        private void GenerateVirtualMapReaders(bool ignoreIsGeneratedFlag)
         {
-            var virtualTypes = _virtualMapRegistry?.GetAllTypes();
-            if (virtualTypes == null || !virtualTypes.Any())
+            var allTypes = _virtualMapRegistry?.GetAllTypes();
+            if (allTypes == null || !allTypes.Any())
                 return;
+
+            // Filter types based on IsGenerated flag
+            var virtualTypes = ignoreIsGeneratedFlag
+                ? allTypes.ToList()
+                : allTypes.Where(t => !t.IsGenerated).ToList();
+
+            if (virtualTypes.Count == 0) return;
 
             _sb.AppendNewLine();
             _sb.AppendIndentedLine("// Virtual Map Entry StreamReaders");
             _sb.AppendNewLine();
 
-            var generator = new GProtobuf.Generator.V2.Handlers.VirtualTypes.VirtualMapEntryGenerator(_sb, _virtualMapRegistry, _registry);
+            var generator = new GProtobuf.Generator.V2.Handlers.VirtualTypes.VirtualMapEntryGenerator(_sb, _virtualMapRegistry, _registry, _virtualTypesNamespace);
 
             foreach (var virtualType in virtualTypes)
             {
@@ -238,17 +246,26 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// <summary>
         /// Generates virtual tuple readers for StreamReader.
         /// </summary>
-        private void GenerateVirtualTupleReaders()
+        /// <param name="ignoreIsGeneratedFlag">If true, generates all types regardless of IsGenerated flag (for GProtobuf.Generated).
+        /// If false, skips types that have already been generated.</param>
+        private void GenerateVirtualTupleReaders(bool ignoreIsGeneratedFlag)
         {
-            var virtualTuples = _virtualTupleRegistry?.GetAllTypes();
-            if (virtualTuples == null || !virtualTuples.Any())
+            var allTuples = _virtualTupleRegistry?.GetAllTypes();
+            if (allTuples == null || !allTuples.Any())
                 return;
+
+            // Filter types based on IsGenerated flag
+            var virtualTuples = ignoreIsGeneratedFlag
+                ? allTuples
+                : allTuples.Where(t => !t.IsGenerated).ToList();
+
+            if (virtualTuples.Count == 0) return;
 
             _sb.AppendNewLine();
             _sb.AppendIndentedLine("// Virtual Tuple StreamReaders");
             _sb.AppendNewLine();
 
-            var generator = new GProtobuf.Generator.V2.Handlers.VirtualTypes.VirtualTupleGenerator(_sb, "Stream", _registry);
+            var generator = new GProtobuf.Generator.V2.Handlers.VirtualTypes.VirtualTupleGenerator(_sb, "Stream", _registry, _virtualTypesNamespace);
 
             foreach (var tuple in virtualTuples)
             {
@@ -266,8 +283,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// <summary>
         /// Generates virtual collection readers for StreamReader (List, HashSet, Dictionary as nested types).
         /// </summary>
-        private void GenerateVirtualCollectionReaders()
+        /// <param name="ignoreIsGeneratedFlag">Parameter for consistency with other methods. Collections don't track IsGenerated.</param>
+        private void GenerateVirtualCollectionReaders(bool ignoreIsGeneratedFlag)
         {
+            // Note: Collections don't have IsGenerated flag - they use inline generation
+            // This parameter is for consistency with other methods
             var collectionTypes = _virtualMapRegistry?.GetAllCollectionTypes();
             if (collectionTypes == null || !collectionTypes.Any())
                 return;
@@ -310,7 +330,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateListReader(GProtobuf.Generator.V2.Handlers.VirtualTypes.VirtualCollectionInfo collection)
         {
-            var elementType = TypeMapping.GetShortTypeName(collection.ElementType);
+            // Use GetGlobalGenericTypeName to handle nested generic types with global:: prefix
+            var elementType = TypeMapping.GetGlobalGenericTypeName(collection.ElementType);
             var normalizedElementType = TypeMapping.NormalizeTypeName(collection.ElementType);
 
             _sb.AppendIndentedLine($"public static global::System.Collections.Generic.List<{elementType}> Read{collection.SafeName}Content(ref {ReaderType} reader)");
@@ -329,7 +350,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateHashSetReader(GProtobuf.Generator.V2.Handlers.VirtualTypes.VirtualCollectionInfo collection)
         {
-            var elementType = TypeMapping.GetShortTypeName(collection.ElementType);
+            // Use GetGlobalGenericTypeName to handle nested generic types with global:: prefix
+            var elementType = TypeMapping.GetGlobalGenericTypeName(collection.ElementType);
             var normalizedElementType = TypeMapping.NormalizeTypeName(collection.ElementType);
 
             // Determine the actual HashSet type to use based on FullTypeName
@@ -351,7 +373,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateArrayReader(GProtobuf.Generator.V2.Handlers.VirtualTypes.VirtualCollectionInfo collection)
         {
-            var elementType = TypeMapping.GetShortTypeName(collection.ElementType);
+            // Use GetGlobalGenericTypeName to handle nested generic types with global:: prefix
+            var elementType = TypeMapping.GetGlobalGenericTypeName(collection.ElementType);
             var normalizedElementType = TypeMapping.NormalizeTypeName(collection.ElementType);
 
             _sb.AppendIndentedLine($"public static {elementType}[] Read{collection.SafeName}Content(ref {ReaderType} reader)");
@@ -370,8 +393,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateDictionaryReader(GProtobuf.Generator.V2.Handlers.VirtualTypes.VirtualCollectionInfo collection)
         {
-            var keyType = TypeMapping.GetShortTypeName(collection.DictionaryKeyType);
-            var valueType = TypeMapping.GetShortTypeName(collection.DictionaryValueType);
+            // Use GetGlobalGenericTypeName to handle nested generic types with global:: prefix
+            var keyType = TypeMapping.GetGlobalGenericTypeName(collection.DictionaryKeyType);
+            var valueType = TypeMapping.GetGlobalGenericTypeName(collection.DictionaryValueType);
 
             // Determine the actual dictionary type to use based on FullTypeName
             var (dictionaryType, instantiationType) = GetDictionaryTypes(collection.FullTypeName, keyType, valueType);
@@ -460,7 +484,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var elementType = typeInfo.CollectionElementType ?? "System.Object";
             var elementTypeInfo = typeInfo.CollectionElementTypeInfo;
             var normalizedElementType = TypeMapping.NormalizeTypeName(elementType);
-            var shortElementType = TypeMapping.GetShortTypeName(elementType);
+            // Use GetGlobalGenericTypeName to properly handle custom types with global:: prefix
+            var shortElementType = TypeMapping.GetGlobalGenericTypeName(elementType);
             bool isHashSet = typeInfo.IsHashSet;
 
             // Determine collection creation type
@@ -498,10 +523,20 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
                 string className;
                 string nsPrefix;
-                if (IsLocalVirtualType(normalizedElementType))
+                // Check if it's a real ProtoContract type registered in the registry
+                bool isRegisteredType = _registry?.GetByFullName(normalizedElementType) != null || _registry?.GetByFullName(elementType) != null;
+                if (isRegisteredType)
                 {
+                    // Real ProtoContract type - use its own namespace
+                    className = TypeNameHelper.GetClassName(elementType);
+                    var typeNs = _registry?.GetNamespaceForType(elementType);
+                    nsPrefix = GeneratorHelpers.GetNamespacePrefix(typeNs, _currentNamespace);
+                }
+                else if (IsLocalVirtualType(normalizedElementType))
+                {
+                    // Virtual type (tuple, collection, etc.) - use GProtobuf.Generated
                     className = VirtualTypeNameGenerator.GetSafeTypeName(elementType);
-                    nsPrefix = "";
+                    nsPrefix = $"{VirtualTypesPrefix}.";
                 }
                 else
                 {
@@ -614,25 +649,26 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 _sb.AppendIndentedLine("var itemLength = reader.ReadVarInt32();");
                 _sb.AppendIndentedLine("var itemOldLimit = reader.PushLimit(itemLength);");
 
-                // For virtual types (collections, dictionaries), use VirtualTypeNameGenerator for proper method names
+                // Check if it's a real ProtoContract type registered in the registry
+                bool isRegisteredType = _registry?.GetByFullName(normalizedElementType) != null || _registry?.GetByFullName(elementType) != null;
                 string className;
-                if (IsLocalVirtualType(normalizedElementType))
+                string nsPrefix;
+                if (isRegisteredType)
                 {
+                    // Real ProtoContract type - use its own namespace
+                    className = TypeNameHelper.GetClassName(elementType);
+                    var elementNs = _registry?.GetNamespaceForType(elementType);
+                    nsPrefix = GeneratorHelpers.GetNamespacePrefix(elementNs, _currentNamespace);
+                }
+                else if (IsLocalVirtualType(normalizedElementType))
+                {
+                    // Virtual type (tuple, collection, etc.) - use GProtobuf.Generated
                     className = VirtualTypeNameGenerator.GetSafeTypeName(elementType);
+                    nsPrefix = $"{VirtualTypesPrefix}.";
                 }
                 else
                 {
                     className = TypeNameHelper.GetClassName(elementType);
-                }
-
-                // Virtual types (tuples, collections) are generated locally, not in external namespaces
-                string nsPrefix;
-                if (IsLocalVirtualType(normalizedElementType))
-                {
-                    nsPrefix = "";
-                }
-                else
-                {
                     var elementNs = _registry?.GetNamespaceForType(elementType);
                     nsPrefix = GeneratorHelpers.GetNamespacePrefix(elementNs, _currentNamespace);
                 }
@@ -678,26 +714,26 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 _sb.AppendIndentedLine($"var {targetVar}Len = {readerVar}.ReadVarInt32();");
                 _sb.AppendIndentedLine($"var {targetVar}OldLimit = {readerVar}.PushLimit({targetVar}Len);");
 
-                // For virtual types (collections, dictionaries), use VirtualTypeNameGenerator for proper method names
-                // For regular types, use TypeNameHelper.GetClassName
+                // Check if it's a real ProtoContract type registered in the registry
+                bool isRegisteredType = _registry?.GetByFullName(normalizedType) != null || _registry?.GetByFullName(typeName) != null;
                 string className;
-                if (IsLocalVirtualType(normalizedType))
+                string nsPrefix;
+                if (isRegisteredType)
                 {
+                    // Real ProtoContract type - use its own namespace
+                    className = TypeNameHelper.GetClassName(typeName);
+                    var typeNs = _registry?.GetNamespaceForType(typeName);
+                    nsPrefix = GeneratorHelpers.GetNamespacePrefix(typeNs, _currentNamespace);
+                }
+                else if (IsLocalVirtualType(normalizedType))
+                {
+                    // Virtual type (tuple, collection, etc.) - use GProtobuf.Generated
                     className = VirtualTypeNameGenerator.GetSafeTypeName(typeName);
+                    nsPrefix = $"{VirtualTypesPrefix}.";
                 }
                 else
                 {
                     className = TypeNameHelper.GetClassName(typeName);
-                }
-
-                // Virtual types (tuples, collections) are generated locally, not in external namespaces
-                string nsPrefix;
-                if (IsLocalVirtualType(normalizedType))
-                {
-                    nsPrefix = "";
-                }
-                else
-                {
                     var typeNs = _registry?.GetNamespaceForType(typeName);
                     nsPrefix = GeneratorHelpers.GetNamespacePrefix(typeNs, _currentNamespace);
                 }
@@ -897,12 +933,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             // Declare ObjectArrayBuilder for class element collections
             ObjectArrayBuilderHelper.GenerateDeclarations(_sb, fieldsUsingObjectBuilder,
-                m => TypeMapping.GetShortTypeName(m.CollectionElementType));
+                m => TypeMapping.GetGlobalTypeName(m.CollectionElementType));
 
             // Declare temp lists for non-class collection fields from inheritance chain
             foreach (var member in fieldsUsingTempList)
             {
-                var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType);
+                var elementType = TypeMapping.GetGlobalTypeName(member.CollectionElementType);
                 _sb.AppendIndentedLine($"global::System.Collections.Generic.List<{elementType}> _tempList_{member.Name} = null;");
             }
 
@@ -1042,7 +1078,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             if (member.IsMap)
             {
-                var mapHandler = new MapHandler(_sb, _virtualMapRegistry, "StreamReaders", _registry);
+                var mapHandler = new MapHandler(_sb, _virtualMapRegistry, "StreamReaders", _registry, _virtualTypesNamespace);
                 mapHandler.GenerateRead(member, $"result.{member.Name}", readerVar);
             }
             else if (member.IsCollection)
@@ -1502,12 +1538,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             // Declare ObjectArrayBuilder for class element collections
             ObjectArrayBuilderHelper.GenerateDeclarations(_sb, fieldsUsingObjectBuilder,
-                m => TypeMapping.GetShortTypeName(m.CollectionElementType));
+                m => TypeMapping.GetGlobalTypeName(m.CollectionElementType));
 
             // Declare temp lists for non-class collection fields
             foreach (var member in fieldsUsingTempList)
             {
-                var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType);
+                var elementType = TypeMapping.GetGlobalTypeName(member.CollectionElementType);
                 _sb.AppendIndentedLine($"global::System.Collections.Generic.List<{elementType}> _tempList_{member.Name} = null;");
             }
 
@@ -1918,7 +1954,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         {
             // Use MapHandler to generate consistent helper method calls (matching Populate methods pattern)
             // This reuses the existing ReadMapEntry_* helper methods instead of inlining ~80 lines per field
-            var mapHandler = new MapHandler(_sb, _virtualMapRegistry, "StreamReaders", _registry);
+            var mapHandler = new MapHandler(_sb, _virtualMapRegistry, "StreamReaders", _registry, _virtualTypesNamespace);
             mapHandler.GenerateRead(member, $"result.{member.Name}", "reader");
         }
 
@@ -1940,7 +1976,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GeneratePrimitiveCollectionRead(ProtoMemberAttribute member, bool isEnumCollection)
         {
-            var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType);
+            var elementType = TypeMapping.GetGlobalTypeName(member.CollectionElementType);
             var normalizedElementType = TypeMapping.NormalizeTypeName(member.CollectionElementType);
 
             // Check for custom collection types (ValueLogTypeHashSet, etc.)
@@ -2174,7 +2210,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateComplexCollectionRead(ProtoMemberAttribute member, string nsPrefix)
         {
-            var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType);
+            var elementType = TypeMapping.GetGlobalTypeName(member.CollectionElementType);
             var elementClassName = TypeNameHelper.GetClassName(member.CollectionElementType);
             var normalizedElementType = TypeMapping.NormalizeTypeName(member.CollectionElementType);
 
@@ -2262,11 +2298,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine("var itemLength = reader.ReadVarInt32();");
             _sb.AppendIndentedLine("var itemOldLimit = reader.PushLimit(itemLength);");
 
-            // Handle tuple types - use current namespace's StreamReaders
+            // Handle tuple types - use centralized virtual types in GProtobuf.Generated
             if (TupleHandler.IsTupleType(member.CollectionElementType))
             {
                 var tupleSafeName = VirtualTypeNameGenerator.GetSafeTypeName(member.CollectionElementType);
-                _sb.AppendIndentedLine($"{targetCollection}.Add(StreamReaders.Read{tupleSafeName}Content(ref reader));");
+                _sb.AppendIndentedLine($"{targetCollection}.Add({VirtualTypesPrefix}.StreamReaders.Read{tupleSafeName}Content(ref reader));");
                 _sb.AppendIndentedLine("reader.PopLimit(itemOldLimit);");
                 return;
             }
@@ -2289,7 +2325,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             _sb.AppendIndentedLine("var tupleLength = reader.ReadVarInt32();");
             _sb.AppendIndentedLine("var tupleOldLimit = reader.PushLimit(tupleLength);");
-            _sb.AppendIndentedLine($"result.{member.Name} = StreamReaders.Read{tupleInfo.SafeName}Content(ref reader);");
+            _sb.AppendIndentedLine($"result.{member.Name} = {VirtualTypesPrefix}.StreamReaders.Read{tupleInfo.SafeName}Content(ref reader);");
             _sb.AppendIndentedLine("reader.PopLimit(tupleOldLimit);");
         }
 
@@ -2416,12 +2452,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             // Declare ObjectArrayBuilder for class element collections
             ObjectArrayBuilderHelper.GenerateDeclarations(_sb, fieldsUsingObjectBuilder,
-                m => TypeMapping.GetShortTypeName(m.CollectionElementType ?? GetArrayElementType(m.Type)));
+                m => TypeMapping.GetGlobalTypeName(m.CollectionElementType ?? GetArrayElementType(m.Type)));
 
             // Declare temp lists for non-class collection fields
             foreach (var member in fieldsUsingTempList)
             {
-                var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType ?? GetArrayElementType(member.Type));
+                var elementType = TypeMapping.GetGlobalTypeName(member.CollectionElementType ?? GetArrayElementType(member.Type));
                 _sb.AppendIndentedLine($"global::System.Collections.Generic.List<{elementType}> _tempList_{member.Name} = null;");
             }
 
@@ -2783,7 +2819,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             _sb.AppendIndentedLine("var tupleLength = reader.ReadVarInt32();");
             _sb.AppendIndentedLine("var tupleOldLimit = reader.PushLimit(tupleLength);");
-            _sb.AppendIndentedLine($"instance.{member.Name} = StreamReaders.Read{tupleInfo.SafeName}Content(ref reader);");
+            _sb.AppendIndentedLine($"instance.{member.Name} = {VirtualTypesPrefix}.StreamReaders.Read{tupleInfo.SafeName}Content(ref reader);");
             _sb.AppendIndentedLine("reader.PopLimit(tupleOldLimit);");
         }
 
@@ -2942,7 +2978,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         {
             var elementType = TypeHelper.GetCollectionElementType(typeName);
             var normalizedElementType = TypeMapping.NormalizeTypeName(elementType);
-            var shortElementType = TypeMapping.GetShortTypeName(elementType);
+            // Use GetGlobalGenericTypeName to properly handle custom types with global:: prefix
+            var shortElementType = TypeMapping.GetGlobalGenericTypeName(elementType);
             bool isHashSet = TypeHelper.IsHashSetType(typeName);
             bool isCustomHashSet = TypeHelper.IsCustomHashSetType(typeName);
 
@@ -3044,8 +3081,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         {
             // Extract inner key/value types from the nested dictionary
             var (innerKeyType, innerValueType) = TypeHelper.ParseDictionaryTypes(typeName);
-            var shortInnerKeyType = TypeMapping.GetShortTypeName(innerKeyType);
-            var shortInnerValueType = TypeMapping.GetShortTypeName(innerValueType);
+            // Use GetGlobalGenericTypeName to properly handle custom types with global:: prefix
+            var shortInnerKeyType = TypeMapping.GetGlobalGenericTypeName(innerKeyType);
+            var shortInnerValueType = TypeMapping.GetGlobalGenericTypeName(innerValueType);
             var normalizedInnerKeyType = TypeMapping.NormalizeTypeName(innerKeyType);
             var normalizedInnerValueType = TypeMapping.NormalizeTypeName(innerValueType);
 
@@ -3333,28 +3371,33 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
 
             // Complex type handling:
+            // First check if it's a real ProtoContract type registered in the registry
+            // This prevents types like ValueLogTypeHashSet (which is a registered ProtoContract but has "HashSet" in name)
+            // from being incorrectly treated as collection virtual types
+            bool isRegisteredType = _registry?.GetByFullName(normalizedType) != null || _registry?.GetByFullName(typeName) != null;
+
             // Check for array types first
             if (typeName.EndsWith("[]"))
             {
                 GeneratePopulateMapArrayValueRead(varName, typeName, readerVar);
                 return;
             }
-            // Check for nested Dictionary types
-            if (TypeHelper.IsDictionaryType(typeName))
+            // Check for nested Dictionary types (but not if it's a registered ProtoContract type)
+            if (!isRegisteredType && TypeHelper.IsDictionaryType(typeName))
             {
                 GeneratePopulateMapNestedDictionaryValueRead(varName, typeName, readerVar);
                 return;
             }
-            // Check for List/Collection types
-            if (TypeHelper.IsListType(typeName) || TypeHelper.IsHashSetType(typeName) ||
-                TypeHelper.IsCustomHashSetType(typeName) || TypeHelper.IsCustomListType(typeName))
+            // Check for List/Collection types (but not if it's a registered ProtoContract type)
+            if (!isRegisteredType && (TypeHelper.IsListType(typeName) || TypeHelper.IsHashSetType(typeName) ||
+                TypeHelper.IsCustomHashSetType(typeName) || TypeHelper.IsCustomListType(typeName)))
             {
                 GeneratePopulateMapCollectionValueRead(varName, typeName, readerVar);
                 return;
             }
-            // Check for Tuple types
-            if (typeName.StartsWith("System.Tuple<") || typeName.StartsWith("System.ValueTuple<") ||
-                typeName.StartsWith("(") || normalizedType.Contains("Tuple<"))
+            // Check for Tuple types (but not if it's a registered ProtoContract type)
+            if (!isRegisteredType && (typeName.StartsWith("System.Tuple<") || typeName.StartsWith("System.ValueTuple<") ||
+                typeName.StartsWith("(") || normalizedType.Contains("Tuple<")))
             {
                 GeneratePopulateMapTupleValueRead(varName, typeName, readerVar);
                 return;
@@ -3472,7 +3515,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 _sb.IncreaseIndent();
                 _sb.AppendIndentedLine($"var {varName}Len = {readerVar}.ReadVarInt32();");
                 _sb.AppendIndentedLine($"var {varName}OldLimit = {readerVar}.PushLimit({varName}Len);");
-                _sb.AppendIndentedLine($"{varName} = StreamReaders.Read{safeName}Content(ref {readerVar});");
+                _sb.AppendIndentedLine($"{varName} = {VirtualTypesPrefix}.StreamReaders.Read{safeName}Content(ref {readerVar});");
                 _sb.AppendIndentedLine($"{readerVar}.PopLimit({varName}OldLimit);");
                 _sb.DecreaseIndent();
                 _sb.AppendIndentedLine("}");
@@ -3562,7 +3605,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.IncreaseIndent();
             _sb.AppendIndentedLine($"var {varName}Len = {readerVar}.ReadVarInt32();");
             _sb.AppendIndentedLine($"var {varName}OldLimit = {readerVar}.PushLimit({varName}Len);");
-            _sb.AppendIndentedLine($"{varName} = StreamReaders.Read{safeName}Content(ref {readerVar});");
+            _sb.AppendIndentedLine($"{varName} = {VirtualTypesPrefix}.StreamReaders.Read{safeName}Content(ref {readerVar});");
             _sb.AppendIndentedLine($"{readerVar}.PopLimit({varName}OldLimit);");
             _sb.DecreaseIndent();
             _sb.AppendIndentedLine("}");
@@ -3576,7 +3619,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.IncreaseIndent();
             _sb.AppendIndentedLine($"var {varName}Len = {readerVar}.ReadVarInt32();");
             _sb.AppendIndentedLine($"var {varName}OldLimit = {readerVar}.PushLimit({varName}Len);");
-            _sb.AppendIndentedLine($"{varName} = StreamReaders.Read{safeName}Content(ref {readerVar});");
+            _sb.AppendIndentedLine($"{varName} = {VirtualTypesPrefix}.StreamReaders.Read{safeName}Content(ref {readerVar});");
             _sb.AppendIndentedLine($"{readerVar}.PopLimit({varName}OldLimit);");
             _sb.DecreaseIndent();
             _sb.AppendIndentedLine("}");
@@ -3600,7 +3643,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GeneratePopulatePrimitiveCollectionRead(ProtoMemberAttribute member, bool isEnumCollection)
         {
-            var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType);
+            var elementType = TypeMapping.GetGlobalTypeName(member.CollectionElementType);
             var normalizedElementType = TypeMapping.NormalizeTypeName(member.CollectionElementType);
             var normalizedMemberType = TypeMapping.NormalizeTypeName(member.Type);
 
@@ -3805,7 +3848,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GeneratePopulateComplexCollectionRead(ProtoMemberAttribute member, string nsPrefix)
         {
-            var elementType = TypeMapping.GetShortTypeName(member.CollectionElementType);
+            var elementType = TypeMapping.GetGlobalTypeName(member.CollectionElementType);
             var elementClassName = TypeNameHelper.GetClassName(member.CollectionElementType);
             var normalizedElementType = TypeMapping.NormalizeTypeName(member.CollectionElementType);
             var normalizedMemberType = TypeMapping.NormalizeTypeName(member.Type);
@@ -3876,7 +3919,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             if (TupleHandler.IsTupleType(member.CollectionElementType))
             {
                 var tupleSafeName = VirtualTypeNameGenerator.GetSafeTypeName(member.CollectionElementType);
-                _sb.AppendIndentedLine($"{targetCollection}.Add(StreamReaders.Read{tupleSafeName}Content(ref reader));");
+                _sb.AppendIndentedLine($"{targetCollection}.Add({VirtualTypesPrefix}.StreamReaders.Read{tupleSafeName}Content(ref reader));");
                 _sb.AppendIndentedLine("reader.PopLimit(itemOldLimit);");
                 return;
             }

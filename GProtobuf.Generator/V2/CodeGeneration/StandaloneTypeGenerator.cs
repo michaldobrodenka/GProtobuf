@@ -71,14 +71,14 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         private void GenerateListDeserializer(StandaloneTypeInfo info, string methodName)
         {
             var elementType = info.ElementType!;
-            var returnType = $"global::System.Collections.Generic.List<{GetGlobalTypeName(elementType)}>";
+            var returnType = $"global::System.Collections.Generic.List<{TypeMapping.GetGlobalGenericTypeName(elementType)}>";
             GenerateCollectionDeserializerCore(info, methodName, returnType, "return list;");
         }
 
         private void GenerateArrayDeserializer(StandaloneTypeInfo info, string methodName)
         {
             var elementType = info.ElementType!;
-            var returnType = $"{GetGlobalTypeName(elementType)}[]";
+            var returnType = $"{TypeMapping.GetGlobalGenericTypeName(elementType)}[]";
             GenerateCollectionDeserializerCore(info, methodName, returnType, "return list.ToArray();");
         }
 
@@ -88,7 +88,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         private void GenerateCollectionDeserializerCore(StandaloneTypeInfo info, string methodName, string returnType, string returnStatement)
         {
             var elementType = info.ElementType!;
-            var listType = $"global::System.Collections.Generic.List<{GetGlobalTypeName(elementType)}>";
+            var listType = $"global::System.Collections.Generic.List<{TypeMapping.GetGlobalGenericTypeName(elementType)}>";
 
             // ReadOnlySpan<byte> overload
             _sb.AppendIndentedLine($"public static {returnType} {methodName}(ReadOnlySpan<byte> data)");
@@ -146,7 +146,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             if (hasProtoIncludeInheritance)
             {
                 // Type has ProtoInclude inheritance - need to use Populate which handles base class wrapper
-                _sb.AppendIndentedLine($"var instance = new {GetGlobalTypeName(elementType)}();");
+                _sb.AppendIndentedLine($"var instance = new {TypeMapping.GetGlobalGenericTypeName(elementType)}();");
                 _sb.AppendIndentedLine($"{spanReadersClass}.Populate{elementClassName}(ref subReader, {GeneratorHelpers.GetPopulateInstanceArgument(_registry, elementType, "instance")});");
                 _sb.AppendIndentedLine($"{addMethod}(instance);");
             }
@@ -167,12 +167,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             string dictInstantiation;
             if (info.IsCustomDictionaryType && info.CustomDictionaryTypeName != null)
             {
-                returnType = $"global::{info.CustomDictionaryTypeName}<{GetGlobalTypeName(keyType)}, {GetGlobalTypeName(valueType)}>";
+                returnType = $"global::{info.CustomDictionaryTypeName}<{TypeMapping.GetGlobalGenericTypeName(keyType)}, {TypeMapping.GetGlobalGenericTypeName(valueType)}>";
                 dictInstantiation = returnType;
             }
             else
             {
-                returnType = $"global::System.Collections.Generic.Dictionary<{GetGlobalTypeName(keyType)}, {GetGlobalTypeName(valueType)}>";
+                returnType = $"global::System.Collections.Generic.Dictionary<{TypeMapping.GetGlobalGenericTypeName(keyType)}, {TypeMapping.GetGlobalGenericTypeName(valueType)}>";
                 dictInstantiation = returnType;
             }
 
@@ -191,7 +191,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // Each entry is length-prefixed with key=field1, value=field2
             _sb.AppendIndentedLine("var entryLength = (int)reader.ReadVarUInt32();");
             _sb.AppendIndentedLine("var entryEnd = reader.Position + entryLength;");
-            _sb.AppendIndentedLine($"{GetGlobalTypeName(keyType)} key = default;");
+            _sb.AppendIndentedLine($"{TypeMapping.GetGlobalGenericTypeName(keyType)} key = default;");
 
             // Generate value initialization based on type
             GenerateValueInitialization(info, valueType);
@@ -255,20 +255,20 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             if (info.ValueKind == StandaloneTypeKind.List && info.NestedValueInfo != null)
             {
                 var elementType = info.NestedValueInfo.ElementType!;
-                var globalElementType = GetGlobalTypeName(elementType);
+                var globalElementType = TypeMapping.GetGlobalGenericTypeName(elementType);
                 _sb.AppendIndentedLine($"var value = new global::System.Collections.Generic.List<{globalElementType}>();");
             }
             else if (info.ValueKind == StandaloneTypeKind.Array && info.NestedValueInfo != null)
             {
                 // Use temp list for arrays, convert to array after reading
                 var elementType = info.NestedValueInfo.ElementType!;
-                var globalElementType = GetGlobalTypeName(elementType);
+                var globalElementType = TypeMapping.GetGlobalGenericTypeName(elementType);
                 _sb.AppendIndentedLine($"global::System.Collections.Generic.List<{globalElementType}> _tempList_value = null;");
-                _sb.AppendIndentedLine($"{GetGlobalTypeName(valueType)} value = null;");
+                _sb.AppendIndentedLine($"{TypeMapping.GetGlobalGenericTypeName(valueType)} value = null;");
             }
             else
             {
-                _sb.AppendIndentedLine($"{GetGlobalTypeName(valueType)} value = default;");
+                _sb.AppendIndentedLine($"{TypeMapping.GetGlobalGenericTypeName(valueType)} value = default;");
             }
         }
 
@@ -280,7 +280,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             if (nestedInfo.Kind == StandaloneTypeKind.Array)
             {
                 // For arrays, accumulate in temp list
-                var globalElementType = GetGlobalTypeName(elementType);
+                var globalElementType = TypeMapping.GetGlobalGenericTypeName(elementType);
                 _sb.AppendIndentedLine($"_tempList_{varName} ??= new global::System.Collections.Generic.List<{globalElementType}>();");
 
                 if (nestedInfo.ElementIsPrimitive)
@@ -369,7 +369,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         private void GenerateNestedListRead(string listTypeName, string varName, StandaloneTypeInfo nestedInfo)
         {
             var elementType = nestedInfo.ElementType!;
-            var globalElementType = GetGlobalTypeName(elementType);
+            var globalElementType = TypeMapping.GetGlobalGenericTypeName(elementType);
 
             // Read length prefix for the list
             _sb.AppendIndentedLine($"var len_{varName} = (int)reader.ReadVarUInt32();");
@@ -411,7 +411,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         private void GenerateNestedArrayRead(string arrayTypeName, string varName, StandaloneTypeInfo nestedInfo)
         {
             var elementType = nestedInfo.ElementType!;
-            var globalElementType = GetGlobalTypeName(elementType);
+            var globalElementType = TypeMapping.GetGlobalGenericTypeName(elementType);
 
             // Read length prefix for the array
             _sb.AppendIndentedLine($"var len_{varName} = (int)reader.ReadVarUInt32();");
@@ -455,8 +455,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         {
             var keyType = nestedInfo.KeyType!;
             var valueType = nestedInfo.ValueType!;
-            var globalKeyType = GetGlobalTypeName(keyType);
-            var globalValueType = GetGlobalTypeName(valueType);
+            var globalKeyType = TypeMapping.GetGlobalGenericTypeName(keyType);
+            var globalValueType = TypeMapping.GetGlobalGenericTypeName(valueType);
 
             // Read length prefix for the nested dictionary
             _sb.AppendIndentedLine($"var len_{varName} = (int)reader.ReadVarUInt32();");
@@ -545,14 +545,14 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         private void GenerateListSerializer(StandaloneTypeInfo info, string methodName)
         {
             var elementType = info.ElementType!;
-            var paramType = $"global::System.Collections.Generic.List<{GetGlobalTypeName(elementType)}>";
+            var paramType = $"global::System.Collections.Generic.List<{TypeMapping.GetGlobalGenericTypeName(elementType)}>";
             GenerateCollectionSerializerCore(info, methodName, paramType, "list");
         }
 
         private void GenerateArraySerializer(StandaloneTypeInfo info, string methodName)
         {
             var elementType = info.ElementType!;
-            var paramType = $"{GetGlobalTypeName(elementType)}[]";
+            var paramType = $"{TypeMapping.GetGlobalGenericTypeName(elementType)}[]";
             GenerateCollectionSerializerCore(info, methodName, paramType, "array");
         }
 
@@ -650,11 +650,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             string paramType;
             if (info.IsCustomDictionaryType)
             {
-                paramType = $"global::System.Collections.Generic.IDictionary<{GetGlobalTypeName(keyType)}, {GetGlobalTypeName(valueType)}>";
+                paramType = $"global::System.Collections.Generic.IDictionary<{TypeMapping.GetGlobalGenericTypeName(keyType)}, {TypeMapping.GetGlobalGenericTypeName(valueType)}>";
             }
             else
             {
-                paramType = $"global::System.Collections.Generic.Dictionary<{GetGlobalTypeName(keyType)}, {GetGlobalTypeName(valueType)}>";
+                paramType = $"global::System.Collections.Generic.Dictionary<{TypeMapping.GetGlobalGenericTypeName(keyType)}, {TypeMapping.GetGlobalGenericTypeName(valueType)}>";
             }
 
             // Stream serializer
@@ -1041,23 +1041,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         #endregion
 
         #region Helpers
-
-        /// <summary>
-        /// Converts a type name to its code-generation form.
-        /// Uses C# keywords for primitives (int, string, etc.) and global:: prefix for custom types.
-        /// </summary>
-        private static string GetGlobalTypeName(string typeName)
-        {
-            // Check if it's a primitive/simple type first
-            if (TypeMapping.IsSimpleType(typeName))
-            {
-                // Return C# keyword form (int, string, etc.)
-                return TypeMapping.GetShortTypeName(typeName);
-            }
-
-            // For non-primitive types, use global:: prefix
-            return $"global::{typeName}";
-        }
 
         /// <summary>
         /// Checks if a type is a primitive type (can be serialized directly).

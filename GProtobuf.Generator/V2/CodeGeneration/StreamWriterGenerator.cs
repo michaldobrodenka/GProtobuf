@@ -29,16 +29,42 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         }
 
         public StreamWriterGenerator(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry, VirtualTupleTypeRegistry virtualTupleRegistry)
-            : this(sb, registry, virtualMapRegistry, virtualTupleRegistry, "Stream")
+            : this(sb, registry, virtualMapRegistry, virtualTupleRegistry, "Stream", null)
         {
         }
 
-        protected StreamWriterGenerator(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry, VirtualTupleTypeRegistry virtualTupleRegistry, string writerKind)
-            : base(sb, registry, virtualMapRegistry, virtualTupleRegistry, passRegistryToPrimitiveHandler: true)
+        public StreamWriterGenerator(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry, VirtualTupleTypeRegistry virtualTupleRegistry, string virtualTypesNamespace)
+            : this(sb, registry, virtualMapRegistry, virtualTupleRegistry, "Stream", virtualTypesNamespace)
+        {
+        }
+
+        protected StreamWriterGenerator(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry, VirtualTupleTypeRegistry virtualTupleRegistry, string writerKind, string virtualTypesNamespace = null)
+            : base(sb, registry, virtualMapRegistry, virtualTupleRegistry, passRegistryToPrimitiveHandler: true, options: null, virtualTypesNamespace: virtualTypesNamespace)
         {
             _writerKind = writerKind;
             _writerType = $"global::GProtobuf.Core.{writerKind}Writer";
             _className = $"{writerKind}Writers";
+        }
+
+        /// <summary>
+        /// Generates Writers class containing ONLY virtual types (map entries and tuples).
+        /// Used for GProtobuf.Generated namespace which centralizes all virtual type methods.
+        /// </summary>
+        public void GenerateVirtualTypesOnly(string currentNamespace)
+        {
+            _currentNamespace = currentNamespace ?? string.Empty;
+
+            _sb.AppendIndentedLine($"public static class {_className}");
+            _sb.StartNewBlock();
+
+            // Generate virtual map entry writers (all types, ignoring IsGenerated flag)
+            GenerateVirtualMapEntryWriters(ignoreIsGeneratedFlag: true);
+
+            // Generate virtual tuple writers (all types, ignoring IsGenerated flag)
+            GenerateVirtualTupleWriters(ignoreIsGeneratedFlag: true);
+
+            _sb.EndBlock();
+            _sb.AppendNewLine();
         }
 
         /// <summary>
@@ -92,11 +118,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 }
             }
 
-            // Generate virtual map entry writers
-            GenerateVirtualMapEntryWriters();
-
-            // Generate virtual tuple writers
-            GenerateVirtualTupleWriters();
+            // Virtual map entry and tuple writers are NOT generated here - they are centralized
+            // in GProtobuf.Generated.Serialization.cs via GenerateVirtualTypesOnly().
+            // Types are registered during field processing above, then generated once in the shared file.
 
             _sb.EndBlock();
             _sb.AppendNewLine();
@@ -105,15 +129,23 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// <summary>
         /// Generates writer methods for all registered virtual map entry types.
         /// </summary>
-        private void GenerateVirtualMapEntryWriters()
+        /// <param name="ignoreIsGeneratedFlag">If true, generates all types regardless of IsGenerated flag (for GProtobuf.Generated).
+        /// If false, skips types that have already been generated.</param>
+        private void GenerateVirtualMapEntryWriters(bool ignoreIsGeneratedFlag)
         {
-            var virtualTypes = _virtualMapRegistry.GetAllTypes();
+            var allTypes = _virtualMapRegistry.GetAllTypes();
+
+            // Filter types based on IsGenerated flag
+            var virtualTypes = ignoreIsGeneratedFlag
+                ? allTypes.ToList()
+                : allTypes.Where(t => !t.IsGenerated).ToList();
+
             if (virtualTypes.Count == 0) return;
 
             _sb.AppendNewLine();
             _sb.AppendIndentedLine("// Virtual Map Entry Writers");
 
-            var generator = new VirtualMapEntryGenerator(_sb, _virtualMapRegistry, _registry, _writerKind);
+            var generator = new VirtualMapEntryGenerator(_sb, _virtualMapRegistry, _registry, _writerKind, _virtualTypesNamespace);
             foreach (var virtualType in virtualTypes)
             {
                 generator.GenerateWriter(virtualType);
@@ -124,15 +156,23 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// <summary>
         /// Generates writer methods for all registered virtual tuple types.
         /// </summary>
-        private void GenerateVirtualTupleWriters()
+        /// <param name="ignoreIsGeneratedFlag">If true, generates all types regardless of IsGenerated flag (for GProtobuf.Generated).
+        /// If false, skips types that have already been generated.</param>
+        private void GenerateVirtualTupleWriters(bool ignoreIsGeneratedFlag)
         {
-            var tupleTypes = _virtualTupleRegistry.GetAllTypes();
+            var allTypes = _virtualTupleRegistry.GetAllTypes();
+
+            // Filter types based on IsGenerated flag
+            var tupleTypes = ignoreIsGeneratedFlag
+                ? allTypes
+                : allTypes.Where(t => !t.IsGenerated).ToList();
+
             if (tupleTypes.Count == 0) return;
 
             _sb.AppendNewLine();
             _sb.AppendIndentedLine("// Virtual Tuple Writers");
 
-            var generator = new VirtualTupleGenerator(_sb, _writerKind, _registry);
+            var generator = new VirtualTupleGenerator(_sb, _writerKind, _registry, _virtualTypesNamespace);
             foreach (var tupleInfo in tupleTypes)
             {
                 generator.GenerateWriter(tupleInfo);
@@ -1002,7 +1042,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateMapFieldWrite(ProtoMemberAttribute member, string sourceVar)
         {
-            var mapHandler = new MapHandler(_sb, _virtualMapRegistry, _className, _registry);
+            var mapHandler = new MapHandler(_sb, _virtualMapRegistry, _className, _registry, _virtualTypesNamespace);
             mapHandler.GenerateWrite(member, sourceVar);
         }
 
@@ -1381,7 +1421,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateMapFieldSizeCalculation(ProtoMemberAttribute member, string sourceVar, string calculatorVar)
         {
-            var mapHandler = new MapHandler(_sb, _virtualMapRegistry, _className, _registry);
+            var mapHandler = new MapHandler(_sb, _virtualMapRegistry, _className, _registry, _virtualTypesNamespace);
             mapHandler.GenerateSize(member, sourceVar, calculatorVar);
         }
 

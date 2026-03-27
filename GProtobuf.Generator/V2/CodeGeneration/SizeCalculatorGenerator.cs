@@ -29,6 +29,32 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         {
         }
 
+        public SizeCalculatorGenerator(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry, VirtualTupleTypeRegistry virtualTupleRegistry, string virtualTypesNamespace)
+            : base(sb, registry, virtualMapRegistry, virtualTupleRegistry, passRegistryToPrimitiveHandler: true, options: null, virtualTypesNamespace: virtualTypesNamespace)
+        {
+        }
+
+        /// <summary>
+        /// Generates SizeCalculators class containing ONLY virtual types (map entries and tuples).
+        /// Used for GProtobuf.Generated namespace which centralizes all virtual type methods.
+        /// </summary>
+        public void GenerateVirtualTypesOnly(string currentNamespace)
+        {
+            _currentNamespace = currentNamespace ?? string.Empty;
+
+            _sb.AppendIndentedLine("public static class SizeCalculators");
+            _sb.StartNewBlock();
+
+            // Generate virtual map entry size calculators (all types, ignoring IsGenerated flag)
+            GenerateVirtualMapEntrySizeCalculators(ignoreIsGeneratedFlag: true);
+
+            // Generate virtual tuple size calculators (all types, ignoring IsGenerated flag)
+            GenerateVirtualTupleSizeCalculators(ignoreIsGeneratedFlag: true);
+
+            _sb.EndBlock();
+            _sb.AppendNewLine();
+        }
+
         /// <summary>
         /// Generates complete SizeCalculators class for all types.
         /// </summary>
@@ -90,11 +116,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     processedTypes.Add(protoIncludeTypeName);
                 }
             }
-            // Generate virtual map entry size calculators
-            GenerateVirtualMapEntrySizeCalculators();
-
-            // Generate virtual tuple size calculators
-            GenerateVirtualTupleSizeCalculators();
+            // Virtual map entry and tuple size calculators are NOT generated here - they are centralized
+            // in GProtobuf.Generated.Serialization.cs via GenerateVirtualTypesOnly().
+            // Types are registered during field processing above, then generated once in the shared file.
 
             _sb.EndBlock();
             _sb.AppendNewLine();
@@ -103,15 +127,23 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// <summary>
         /// Generates size calculator methods for all registered virtual map entry types.
         /// </summary>
-        private void GenerateVirtualMapEntrySizeCalculators()
+        /// <param name="ignoreIsGeneratedFlag">If true, generates all types regardless of IsGenerated flag (for GProtobuf.Generated).
+        /// If false, skips types that have already been generated.</param>
+        private void GenerateVirtualMapEntrySizeCalculators(bool ignoreIsGeneratedFlag)
         {
-            var virtualTypes = _virtualMapRegistry.GetAllTypes();
+            var allTypes = _virtualMapRegistry.GetAllTypes();
+
+            // Filter types based on IsGenerated flag
+            var virtualTypes = ignoreIsGeneratedFlag
+                ? allTypes.ToList()
+                : allTypes.Where(t => !t.IsGenerated).ToList();
+
             if (virtualTypes.Count == 0) return;
 
             _sb.AppendNewLine();
             _sb.AppendIndentedLine("// Virtual Map Entry Size Calculators");
 
-            var generator = new VirtualMapEntryGenerator(_sb, _virtualMapRegistry, _registry);
+            var generator = new VirtualMapEntryGenerator(_sb, _virtualMapRegistry, _registry, _virtualTypesNamespace);
             foreach (var virtualType in virtualTypes)
             {
                 generator.GenerateSizeCalculator(virtualType);
@@ -122,15 +154,23 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// <summary>
         /// Generates size calculator methods for all registered virtual tuple types.
         /// </summary>
-        private void GenerateVirtualTupleSizeCalculators()
+        /// <param name="ignoreIsGeneratedFlag">If true, generates all types regardless of IsGenerated flag (for GProtobuf.Generated).
+        /// If false, skips types that have already been generated.</param>
+        private void GenerateVirtualTupleSizeCalculators(bool ignoreIsGeneratedFlag)
         {
-            var tupleTypes = _virtualTupleRegistry.GetAllTypes();
+            var allTypes = _virtualTupleRegistry.GetAllTypes();
+
+            // Filter types based on IsGenerated flag
+            var tupleTypes = ignoreIsGeneratedFlag
+                ? allTypes
+                : allTypes.Where(t => !t.IsGenerated).ToList();
+
             if (tupleTypes.Count == 0) return;
 
             _sb.AppendNewLine();
             _sb.AppendIndentedLine("// Virtual Tuple Size Calculators");
 
-            var generator = new VirtualTupleGenerator(_sb, null, _registry);
+            var generator = new VirtualTupleGenerator(_sb, null, _registry, _virtualTypesNamespace);
             foreach (var tupleInfo in tupleTypes)
             {
                 generator.GenerateSizeCalculator(tupleInfo);
@@ -799,7 +839,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateMapFieldSize(ProtoMemberAttribute member, string sourceVar)
         {
-            var mapHandler = new MapHandler(_sb, _virtualMapRegistry, "SizeCalculators", _registry);
+            var mapHandler = new MapHandler(_sb, _virtualMapRegistry, "SizeCalculators", _registry, _virtualTypesNamespace);
             mapHandler.GenerateSize(member, sourceVar);
         }
 

@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using GProtobuf.Generator.Attributes;
 
@@ -845,6 +847,104 @@ namespace GProtobuf.Generator.WireFormat
 
             var lastDot = fullName.LastIndexOf('.');
             return lastDot >= 0 ? fullName.Substring(lastDot + 1) : fullName;
+        }
+
+        /// <summary>
+        /// Converts a type name to its code-generation form with global:: prefix for custom types.
+        /// Uses C# keywords for primitives (int, string, etc.) and global:: prefix for custom types.
+        /// This ensures namespace resolution works correctly when generated code is inside nested namespaces.
+        /// </summary>
+        public static string GetGlobalTypeName(string typeName)
+        {
+            if (string.IsNullOrEmpty(typeName))
+                return typeName;
+
+            // Check if it's a primitive/simple type first
+            if (IsSimpleType(typeName))
+            {
+                // Return C# keyword form (int, string, etc.)
+                return GetShortTypeName(typeName);
+            }
+
+            // Already has global:: prefix
+            if (typeName.StartsWith("global::"))
+                return typeName;
+
+            // For non-primitive types, use global:: prefix
+            return $"global::{typeName}";
+        }
+
+        /// <summary>
+        /// Converts a generic type name to its code-generation form with global:: prefix for all type components.
+        /// Handles nested generics like System.Tuple&lt;SomeNamespace.Type, string&gt;
+        /// Returns: global::System.Tuple&lt;global::SomeNamespace.Type, string&gt;
+        /// </summary>
+        public static string GetGlobalGenericTypeName(string typeName)
+        {
+            if (string.IsNullOrEmpty(typeName))
+                return typeName;
+
+            // Already has global:: prefix at the start
+            if (typeName.StartsWith("global::"))
+                return typeName;
+
+            // Check if it's a generic type
+            int genericStart = typeName.IndexOf('<');
+            if (genericStart < 0)
+            {
+                // Not a generic type - use simple GetGlobalTypeName
+                return GetGlobalTypeName(typeName);
+            }
+
+            // Parse the generic type
+            string baseType = typeName.Substring(0, genericStart);
+            string argsSection = typeName.Substring(genericStart + 1, typeName.Length - genericStart - 2); // Remove < and >
+
+            // Convert base type
+            string globalBaseType = GetGlobalTypeName(baseType);
+
+            // Parse and convert each generic argument
+            var args = ParseGenericArguments(argsSection);
+            var globalArgs = args.Select(arg => GetGlobalGenericTypeName(arg.Trim()));
+
+            return $"{globalBaseType}<{string.Join(", ", globalArgs)}>";
+        }
+
+        /// <summary>
+        /// Parses generic arguments from a string, handling nested generics.
+        /// Example: "int, System.Tuple&lt;string, int&gt;, bool" → ["int", "System.Tuple&lt;string, int&gt;", "bool"]
+        /// </summary>
+        private static List<string> ParseGenericArguments(string argsSection)
+        {
+            var args = new List<string>();
+            int depth = 0;
+            int start = 0;
+
+            for (int i = 0; i < argsSection.Length; i++)
+            {
+                char c = argsSection[i];
+                if (c == '<')
+                {
+                    depth++;
+                }
+                else if (c == '>')
+                {
+                    depth--;
+                }
+                else if (c == ',' && depth == 0)
+                {
+                    args.Add(argsSection.Substring(start, i - start).Trim());
+                    start = i + 1;
+                }
+            }
+
+            // Add the last argument
+            if (start < argsSection.Length)
+            {
+                args.Add(argsSection.Substring(start).Trim());
+            }
+
+            return args;
         }
 
         public static string SanitizeTypeNameForMethod(string typeName)

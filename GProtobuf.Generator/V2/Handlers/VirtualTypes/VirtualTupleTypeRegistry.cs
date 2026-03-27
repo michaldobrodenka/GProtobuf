@@ -273,5 +273,17 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         /// Number of items in the tuple (2-8 for standard Tuple)
         /// </summary>
         public int Arity => ItemTypes?.Count ?? 0;
+
+        /// <summary>
+        /// Indicates whether this type has already been generated in some namespace.
+        /// Used to prevent duplicate generation when global registries are shared.
+        /// </summary>
+        public bool IsGenerated { get; set; }
+
+        /// <summary>
+        /// The namespace where this type was first generated.
+        /// Used for cross-namespace method calls.
+        /// </summary>
+        public string GeneratedInNamespace { get; set; }
     }
 }

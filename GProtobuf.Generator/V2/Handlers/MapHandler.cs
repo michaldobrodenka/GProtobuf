@@ -19,24 +19,35 @@ namespace GProtobuf.Generator.V2.Handlers
         private readonly VirtualMapTypeRegistry _registry;
         private readonly string _writerClassName;
         private readonly TypeRegistry _typeRegistry;
+        private readonly string _virtualTypesNamespace;
 
+        /// <summary>
+        /// Gets the fully qualified prefix for virtual types serialization classes.
+        /// </summary>
+        private string VirtualTypesPrefix => $"global::{_virtualTypesNamespace}.Serialization";
 
         public MapHandler(StringBuilderWithIndent sb, VirtualMapTypeRegistry registry)
-            : this(sb, registry, "StreamWriters", null)
+            : this(sb, registry, "StreamWriters", null, null)
         {
         }
 
         public MapHandler(StringBuilderWithIndent sb, VirtualMapTypeRegistry registry, string writerClassName)
-            : this(sb, registry, writerClassName, null)
+            : this(sb, registry, writerClassName, null, null)
         {
         }
 
         public MapHandler(StringBuilderWithIndent sb, VirtualMapTypeRegistry registry, string writerClassName, TypeRegistry typeRegistry)
+            : this(sb, registry, writerClassName, typeRegistry, null)
+        {
+        }
+
+        public MapHandler(StringBuilderWithIndent sb, VirtualMapTypeRegistry registry, string writerClassName, TypeRegistry typeRegistry, string virtualTypesNamespace)
         {
             _sb = sb;
             _registry = registry;
             _writerClassName = writerClassName ?? "StreamWriters";
             _typeRegistry = typeRegistry;
+            _virtualTypesNamespace = virtualTypesNamespace ?? "GProtobuf.Generated";
         }
 
         /// <summary>
@@ -173,8 +184,8 @@ namespace GProtobuf.Generator.V2.Handlers
         {
             var mapEntryTypeName = VirtualTypeNameGenerator.GetMapEntryTypeName(virtualInfo.KeyType, virtualInfo.ValueType);
 
-            // Call ReadMapEntry - generated in current namespace
-            _sb.AppendIndentedLine($"var entry = {_writerClassName}.Read{mapEntryTypeName}(ref {readerVar});");
+            // Call ReadMapEntry - centralized in GProtobuf.Generated.Serialization
+            _sb.AppendIndentedLine($"var entry = {VirtualTypesPrefix}.{_writerClassName}.Read{mapEntryTypeName}(ref {readerVar});");
             _sb.AppendIndentedLine($"if (entry.success)");
             _sb.StartNewBlock();
 
@@ -504,8 +515,8 @@ namespace GProtobuf.Generator.V2.Handlers
             // Write tag
             TagCodeHelper.WriteTag(_sb, member.FieldId, WireType.Len);
 
-            // Call WriteMapEntry - generated in current namespace
-            _sb.AppendIndentedLine($"{_writerClassName}.Write{mapEntryTypeName}(ref writer, kvp.Key, kvp.Value);");
+            // Call WriteMapEntry - centralized in GProtobuf.Generated.Serialization
+            _sb.AppendIndentedLine($"{VirtualTypesPrefix}.{_writerClassName}.Write{mapEntryTypeName}(ref writer, kvp.Key, kvp.Value);");
 
             _sb.EndBlock(); // foreach
         }
@@ -771,9 +782,9 @@ namespace GProtobuf.Generator.V2.Handlers
             _sb.StartNewBlock();
 
 
-            // Calculate size - generated in current namespace
+            // Calculate size - centralized in GProtobuf.Generated.Serialization
             _sb.AppendIndentedLine("entryCalc.Reset();");
-            _sb.AppendIndentedLine($"SizeCalculators.Calculate{mapEntryTypeName}Size(ref entryCalc, kvp.Key, kvp.Value);");
+            _sb.AppendIndentedLine($"{VirtualTypesPrefix}.SizeCalculators.Calculate{mapEntryTypeName}Size(ref entryCalc, kvp.Key, kvp.Value);");
 
             // Add tag and length prefix size
             _sb.AppendIndentedLine($"{calculatorVar}.AddByteLength({tagBytes});");

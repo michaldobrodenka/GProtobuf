@@ -27,6 +27,18 @@ namespace GProtobuf.Generator.V2.CodeGeneration.Core
         protected int _nestedCalcCounter;
 
         /// <summary>
+        /// The namespace where virtual types (map entries, tuples) are generated.
+        /// Assembly-specific to avoid conflicts: {RootNamespace}.GProtobuf
+        /// </summary>
+        protected readonly string _virtualTypesNamespace;
+
+        /// <summary>
+        /// Gets the fully qualified prefix for virtual types serialization classes.
+        /// Used to generate calls like global::{Namespace}.Serialization.SpanReaders.ReadMapEntry_*
+        /// </summary>
+        protected string VirtualTypesPrefix => $"global::{_virtualTypesNamespace}.Serialization";
+
+        /// <summary>
         /// Gets the virtual map type registry used by this generator.
         /// </summary>
         public VirtualMapTypeRegistry VirtualMapRegistry => _virtualMapRegistry;
@@ -42,12 +54,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration.Core
         protected bool UseStringPooling => _options?.UseStringPooling ?? false;
 
         protected GeneratorBase(StringBuilderWithIndent sb, TypeRegistry registry, GeneratorOptions options = null)
-            : this(sb, registry, null, null, false, options)
+            : this(sb, registry, null, null, false, options, null)
         {
         }
 
         protected GeneratorBase(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry, GeneratorOptions options = null)
-            : this(sb, registry, virtualMapRegistry, null, false, options)
+            : this(sb, registry, virtualMapRegistry, null, false, options, null)
         {
         }
 
@@ -57,16 +69,18 @@ namespace GProtobuf.Generator.V2.CodeGeneration.Core
             VirtualMapTypeRegistry virtualMapRegistry,
             VirtualTupleTypeRegistry virtualTupleRegistry,
             bool passRegistryToPrimitiveHandler = false,
-            GeneratorOptions options = null)
+            GeneratorOptions options = null,
+            string virtualTypesNamespace = null)
         {
             _sb = sb;
             _registry = registry;
             _options = options ?? GeneratorOptions.Default;
+            _virtualTypesNamespace = virtualTypesNamespace ?? "GProtobuf.Generated";
             _primitiveHandler = passRegistryToPrimitiveHandler ? new PrimitiveHandler(registry) : new PrimitiveHandler();
             _collectionHandler = new CollectionHandler(sb, registry);
             _virtualTupleRegistry = virtualTupleRegistry ?? new VirtualTupleTypeRegistry();
             _virtualMapRegistry = virtualMapRegistry ?? new VirtualMapTypeRegistry(_virtualTupleRegistry, _registry);
-            _tupleHandler = new TupleHandler(sb, _virtualTupleRegistry);
+            _tupleHandler = new TupleHandler(sb, _virtualTupleRegistry, _virtualTypesNamespace);
         }
 
         /// <summary>

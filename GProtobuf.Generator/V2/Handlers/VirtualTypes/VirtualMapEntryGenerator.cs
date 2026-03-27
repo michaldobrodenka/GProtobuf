@@ -3,6 +3,7 @@ using System.Linq;
 using GProtobuf.Generator.V2.CodeGeneration.Core;
 using GProtobuf.Generator.V2.Handlers.Core;
 using GProtobuf.Generator.V2.Helpers;
+using GProtobuf.Generator.WireFormat;
 
 namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
 {
@@ -21,13 +22,19 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         private readonly string _readerClassName;
         private readonly bool _isStreamReader;
         private readonly bool _isOnePassWriter;
+        private readonly string _virtualTypesNamespace;
 
-        public VirtualMapEntryGenerator(StringBuilderWithIndent sb, VirtualMapTypeRegistry registry, TypeRegistry typeRegistry = null)
-            : this(sb, registry, typeRegistry, "Stream")
+        /// <summary>
+        /// Gets the fully qualified prefix for virtual types serialization classes.
+        /// </summary>
+        private string VirtualTypesPrefix => $"global::{_virtualTypesNamespace}.Serialization";
+
+        public VirtualMapEntryGenerator(StringBuilderWithIndent sb, VirtualMapTypeRegistry registry, TypeRegistry typeRegistry = null, string virtualTypesNamespace = null)
+            : this(sb, registry, typeRegistry, "Stream", virtualTypesNamespace)
         {
         }
 
-        public VirtualMapEntryGenerator(StringBuilderWithIndent sb, VirtualMapTypeRegistry registry, TypeRegistry typeRegistry, string writerKind)
+        public VirtualMapEntryGenerator(StringBuilderWithIndent sb, VirtualMapTypeRegistry registry, TypeRegistry typeRegistry, string writerKind, string virtualTypesNamespace = null)
         {
             _sb = sb;
             _registry = registry;
@@ -38,6 +45,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             _readerClassName = $"{writerKind}Readers";
             _isStreamReader = writerKind == "Stream";
             _isOnePassWriter = writerKind == "OnePassStream";
+            _virtualTypesNamespace = virtualTypesNamespace ?? "GProtobuf.Generated";
         }
 
         /// <summary>
@@ -282,7 +290,9 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
 
             if (isEnum)
             {
-                _sb.AppendIndentedLine($"{targetVar} = ({typeName})reader.ReadVarInt32();");
+                // Apply global:: prefix to enum type to avoid namespace resolution issues
+                var globalTypeName = TypeMapping.GetGlobalGenericTypeName(typeName);
+                _sb.AppendIndentedLine($"{targetVar} = ({globalTypeName})reader.ReadVarInt32();");
                 return;
             }
 
@@ -362,7 +372,9 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 }
                 else if (elemInfo.IsEnum)
                 {
-                    _sb.AppendIndentedLine($"{tempListVar}.Add(({elementType})reader.ReadVarInt32());");
+                    // Apply global:: prefix to enum type to avoid namespace resolution issues
+                    var globalElementType = TypeMapping.GetGlobalGenericTypeName(elementType);
+                    _sb.AppendIndentedLine($"{tempListVar}.Add(({globalElementType})reader.ReadVarInt32());");
                 }
                 else if (TupleHandler.IsTupleType(elementType))
                 {
@@ -370,7 +382,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                     _sb.AppendIndentedLine($"var {fieldPrefix}ItemLength = reader.ReadVarUInt32();");
                     _sb.AppendIndentedLine($"var {fieldPrefix}ItemSpan = reader.GetSlice((int){fieldPrefix}ItemLength);");
                     _sb.AppendIndentedLine($"var {fieldPrefix}ScopedReader = new SpanReader({fieldPrefix}ItemSpan);");
-                    _sb.AppendIndentedLine($"var {fieldPrefix}Item = SpanReaders.Read{className}Content(ref {fieldPrefix}ScopedReader);");
+                    _sb.AppendIndentedLine($"var {fieldPrefix}Item = {VirtualTypesPrefix}.SpanReaders.Read{className}Content(ref {fieldPrefix}ScopedReader);");
                     _sb.AppendIndentedLine($"{tempListVar}.Add({fieldPrefix}Item);");
                 }
                 else if (elemInfo.IsCustomType)
@@ -419,7 +431,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 _sb.AppendIndentedLine($"var {fieldPrefix}MsgLength = reader.ReadVarUInt32();");
                 _sb.AppendIndentedLine($"var {fieldPrefix}MsgSpan = reader.GetSlice((int){fieldPrefix}MsgLength);");
                 _sb.AppendIndentedLine($"var {fieldPrefix}ScopedReader = new SpanReader({fieldPrefix}MsgSpan);");
-                _sb.AppendIndentedLine($"{targetVar} = SpanReaders.Read{className}Content(ref {fieldPrefix}ScopedReader);");
+                _sb.AppendIndentedLine($"{targetVar} = {VirtualTypesPrefix}.SpanReaders.Read{className}Content(ref {fieldPrefix}ScopedReader);");
                 return;
             }
 
@@ -697,7 +709,10 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 }
                 else
                 {
-                    innerDictType = $"global::System.Collections.Generic.Dictionary<{innerKeyType}, {innerValueType}>";
+                    // Apply global:: prefix to key and value types to avoid namespace resolution issues
+                    var globalKeyType = TypeMapping.GetGlobalGenericTypeName(innerKeyType);
+                    var globalValueType = TypeMapping.GetGlobalGenericTypeName(innerValueType);
+                    innerDictType = $"global::System.Collections.Generic.Dictionary<{globalKeyType}, {globalValueType}>";
                 }
                 _sb.AppendIndentedLine($"var {fieldPrefix}InnerDict = new {innerDictType}();");
                 _sb.AppendIndentedLine($"var {fieldPrefix}CollectionLength = reader.ReadVarUInt32();");
@@ -753,6 +768,8 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             }
             else if (elemInfo.IsEnum)
             {
+                // Apply global:: prefix to enum type to avoid namespace resolution issues
+                var globalElementType = TypeMapping.GetGlobalGenericTypeName(elementType);
                 // Enum types can be packed (wire type Len) or non-packed (wire type VarInt)
                 _sb.AppendIndentedLine($"if ({wireTypeVar} == 2) // Len - packed format");
                 _sb.StartNewBlock();
@@ -761,12 +778,12 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 _sb.AppendIndentedLine("var packedEnd = reader.Position + (int)packedLength;");
                 _sb.AppendIndentedLine("while (reader.Position < packedEnd)");
                 _sb.StartNewBlock();
-                _sb.AppendIndentedLine($"{targetVar}.Add(({elementType})reader.ReadVarInt32());");
+                _sb.AppendIndentedLine($"{targetVar}.Add(({globalElementType})reader.ReadVarInt32());");
                 _sb.EndBlock();
                 _sb.EndBlock();
                 _sb.AppendIndentedLine("else // Non-packed - single element");
                 _sb.StartNewBlock();
-                _sb.AppendIndentedLine($"{targetVar}.Add(({elementType})reader.ReadVarInt32());");
+                _sb.AppendIndentedLine($"{targetVar}.Add(({globalElementType})reader.ReadVarInt32());");
                 _sb.EndBlock();
             }
             else if (TupleHandler.IsTupleType(elementType))
@@ -776,7 +793,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 _sb.AppendIndentedLine($"var {fieldPrefix}ItemLength = reader.ReadVarUInt32();");
                 _sb.AppendIndentedLine($"var {fieldPrefix}ItemSpan = reader.GetSlice((int){fieldPrefix}ItemLength);");
                 _sb.AppendIndentedLine($"var {fieldPrefix}ScopedReader = new SpanReader({fieldPrefix}ItemSpan);");
-                _sb.AppendIndentedLine($"var {fieldPrefix}Item = SpanReaders.Read{className}Content(ref {fieldPrefix}ScopedReader);");
+                _sb.AppendIndentedLine($"var {fieldPrefix}Item = {VirtualTypesPrefix}.SpanReaders.Read{className}Content(ref {fieldPrefix}ScopedReader);");
                 _sb.AppendIndentedLine($"{targetVar}.Add({fieldPrefix}Item);");
             }
             else if (elemInfo.IsCustomType)
@@ -945,7 +962,9 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
 
             if (isEnum)
             {
-                _sb.AppendIndentedLine($"{targetVar} = ({typeName}){readerVar}.ReadVarInt32();");
+                // Apply global:: prefix to enum type to avoid namespace resolution issues
+                var globalTypeName = TypeMapping.GetGlobalGenericTypeName(typeName);
+                _sb.AppendIndentedLine($"{targetVar} = ({globalTypeName}){readerVar}.ReadVarInt32();");
                 return;
             }
 
@@ -983,7 +1002,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 var className = TypeNameHelper.GetSafeMethodName(typeName);
                 _sb.AppendIndentedLine($"var {fieldPrefix}MsgLength = {readerVar}.ReadVarInt32();");
                 _sb.AppendIndentedLine($"var {fieldPrefix}OldLimit = {readerVar}.PushLimit({fieldPrefix}MsgLength);");
-                _sb.AppendIndentedLine($"{targetVar} = StreamReaders.Read{className}Content(ref {readerVar});");
+                _sb.AppendIndentedLine($"{targetVar} = {VirtualTypesPrefix}.StreamReaders.Read{className}Content(ref {readerVar});");
                 _sb.AppendIndentedLine($"{readerVar}.PopLimit({fieldPrefix}OldLimit);");
                 return;
             }
@@ -1042,7 +1061,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             // Use helper method instead of inlining ~40 lines
             // The helper handles PushLimit/PopLimit internally and returns (success, key, value)
             var mapEntryTypeName = VirtualTypeNameGenerator.GetMapEntryTypeName(innerKeyType, innerValueType);
-            _sb.AppendIndentedLine($"var {fieldPrefix}Entry = StreamReaders.Read{mapEntryTypeName}(ref {readerVar});");
+            _sb.AppendIndentedLine($"var {fieldPrefix}Entry = {VirtualTypesPrefix}.StreamReaders.Read{mapEntryTypeName}(ref {readerVar});");
             _sb.AppendIndentedLine($"{targetVar}[{fieldPrefix}Entry.key] = {fieldPrefix}Entry.value;");
         }
 
@@ -1090,14 +1109,16 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             }
             else if (elemInfo.IsEnum)
             {
-                _sb.AppendIndentedLine($"{tempListVar}.Add(({elementType}){readerVar}.ReadVarInt32());");
+                // Apply global:: prefix to enum type to avoid namespace resolution issues
+                var globalElementType = TypeMapping.GetGlobalGenericTypeName(elementType);
+                _sb.AppendIndentedLine($"{tempListVar}.Add(({globalElementType}){readerVar}.ReadVarInt32());");
             }
             else if (TupleHandler.IsTupleType(elementType))
             {
                 var className = TypeNameHelper.GetSafeMethodName(elementType);
                 _sb.AppendIndentedLine($"var {fieldPrefix}ItemLength = {readerVar}.ReadVarInt32();");
                 _sb.AppendIndentedLine($"var {fieldPrefix}OldLimit = {readerVar}.PushLimit({fieldPrefix}ItemLength);");
-                _sb.AppendIndentedLine($"var {fieldPrefix}Item = StreamReaders.Read{className}Content(ref {readerVar});");
+                _sb.AppendIndentedLine($"var {fieldPrefix}Item = {VirtualTypesPrefix}.StreamReaders.Read{className}Content(ref {readerVar});");
                 _sb.AppendIndentedLine($"{readerVar}.PopLimit({fieldPrefix}OldLimit);");
                 _sb.AppendIndentedLine($"{tempListVar}.Add({fieldPrefix}Item);");
             }
@@ -1187,14 +1208,16 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             }
             else if (elemInfo.IsEnum)
             {
-                _sb.AppendIndentedLine($"{targetVar}.Add(({elementType}){readerVar}.ReadVarInt32());");
+                // Apply global:: prefix to enum type to avoid namespace resolution issues
+                var globalElementType = TypeMapping.GetGlobalGenericTypeName(elementType);
+                _sb.AppendIndentedLine($"{targetVar}.Add(({globalElementType}){readerVar}.ReadVarInt32());");
             }
             else if (TupleHandler.IsTupleType(elementType))
             {
                 var className = TypeNameHelper.GetSafeMethodName(elementType);
                 _sb.AppendIndentedLine($"var {fieldPrefix}ItemLength = {readerVar}.ReadVarInt32();");
                 _sb.AppendIndentedLine($"var {fieldPrefix}OldLimit = {readerVar}.PushLimit({fieldPrefix}ItemLength);");
-                _sb.AppendIndentedLine($"var {fieldPrefix}Item = StreamReaders.Read{className}Content(ref {readerVar});");
+                _sb.AppendIndentedLine($"var {fieldPrefix}Item = {VirtualTypesPrefix}.StreamReaders.Read{className}Content(ref {readerVar});");
                 _sb.AppendIndentedLine($"{readerVar}.PopLimit({fieldPrefix}OldLimit);");
                 _sb.AppendIndentedLine($"{targetVar}.Add({fieldPrefix}Item);");
             }
@@ -1471,7 +1494,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
 
                 // Handle nullable types - append .Value for Content method calls
                 var valueAccess = GetNullableValueAccess(sourceVar, typeName);
-                _sb.AppendIndentedLine($"SizeCalculators.Calculate{className}ContentSize(ref tempCalc{fieldId}, {valueAccess});");
+                _sb.AppendIndentedLine($"{VirtualTypesPrefix}.SizeCalculators.Calculate{className}ContentSize(ref tempCalc{fieldId}, {valueAccess});");
 
                 // Cache the length if a cache variable is provided
                 if (lengthCacheVar != null)
@@ -1522,7 +1545,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             _sb.StartNewBlock();
             _sb.AppendIndentedLine($"{calcVar}.AddByteLength({tagBytes}); // tag for each nested entry");
             _sb.AppendIndentedLine("var innerEntryCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
-            _sb.AppendIndentedLine($"SizeCalculators.Calculate{mapEntryTypeName}Size(ref innerEntryCalc, kvp.Key, kvp.Value);");
+            _sb.AppendIndentedLine($"{VirtualTypesPrefix}.SizeCalculators.Calculate{mapEntryTypeName}Size(ref innerEntryCalc, kvp.Key, kvp.Value);");
             _sb.AppendIndentedLine($"{calcVar}.WriteVarUInt32((uint)innerEntryCalc.Length);  // entry length prefix");
             _sb.AppendIndentedLine($"{calcVar}.AddByteLength(innerEntryCalc.Length);         // entry content");
             _sb.EndBlock();
@@ -1554,7 +1577,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 _sb.AppendIndentedLine("foreach (var kvp in collectionDict)");
                 _sb.StartNewBlock();
                 _sb.AppendIndentedLine("var innerEntryCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
-                _sb.AppendIndentedLine($"SizeCalculators.Calculate{elemInfo.MapEntryTypeName}Size(ref innerEntryCalc, kvp.Key, kvp.Value);");
+                _sb.AppendIndentedLine($"{VirtualTypesPrefix}.SizeCalculators.Calculate{elemInfo.MapEntryTypeName}Size(ref innerEntryCalc, kvp.Key, kvp.Value);");
                 _sb.AppendIndentedLine("// Each entry is written as: length_prefix + content");
                 _sb.AppendIndentedLine("dictCalc.WriteVarUInt32((uint)innerEntryCalc.Length);  // size of length prefix");
                 _sb.AppendIndentedLine("dictCalc.AddByteLength(innerEntryCalc.Length);         // size of content");
@@ -1731,18 +1754,18 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 {
                     // OnePass mode uses BeginSubMessage/EndSubMessage instead of size prefix
                     _sb.AppendIndentedLine("writer.BeginSubMessage();");
-                    _sb.AppendIndentedLine($"{writersClass}.Write{className}(ref writer, {valueAccess});");
+                    _sb.AppendIndentedLine($"{VirtualTypesPrefix}.{writersClass}.Write{className}(ref writer, {valueAccess});");
                     _sb.AppendIndentedLine("writer.EndSubMessage();");
                 }
                 else
                 {
                     // Calculate size
                     _sb.AppendIndentedLine($"var writeCalc{fieldId} = new global::GProtobuf.Core.WriteSizeCalculator();");
-                    _sb.AppendIndentedLine($"SizeCalculators.Calculate{className}ContentSize(ref writeCalc{fieldId}, {valueAccess});");
+                    _sb.AppendIndentedLine($"{VirtualTypesPrefix}.SizeCalculators.Calculate{className}ContentSize(ref writeCalc{fieldId}, {valueAccess});");
                     _sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)writeCalc{fieldId}.Length);");
 
                     // Write content
-                    _sb.AppendIndentedLine($"{writersClass}.Write{className}Content(ref writer, {valueAccess});");
+                    _sb.AppendIndentedLine($"{VirtualTypesPrefix}.{writersClass}.Write{className}Content(ref writer, {valueAccess});");
                 }
                 return;
             }
@@ -1819,7 +1842,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 _sb.AppendIndentedLine("foreach (var kvp in collectionDict)");
                 _sb.StartNewBlock();
                 _sb.AppendIndentedLine("var innerEntryCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
-                _sb.AppendIndentedLine($"SizeCalculators.Calculate{elemInfo.MapEntryTypeName}Size(ref innerEntryCalc, kvp.Key, kvp.Value);");
+                _sb.AppendIndentedLine($"{VirtualTypesPrefix}.SizeCalculators.Calculate{elemInfo.MapEntryTypeName}Size(ref innerEntryCalc, kvp.Key, kvp.Value);");
                 _sb.AppendIndentedLine("// Each entry is written as: length_prefix + content");
                 _sb.AppendIndentedLine("dictCalc.WriteVarUInt32((uint)innerEntryCalc.Length);  // size of length prefix");
                 _sb.AppendIndentedLine("dictCalc.AddByteLength(innerEntryCalc.Length);         // size of content");
@@ -2057,11 +2080,14 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 // Check if it's a custom dictionary type (ListDictionary, ConcurrentDictionary, etc.)
                 if (TypeHelper.IsCustomDictionaryType(typeInfo.FullTypeName))
                 {
-                    // Use the original type name for custom dictionaries
-                    return $"global::{typeInfo.FullTypeName}";
+                    // Use GetGlobalGenericTypeName to properly handle nested generic types
+                    return TypeMapping.GetGlobalGenericTypeName(typeInfo.FullTypeName);
                 }
                 // Standard Dictionary<K,V> or IDictionary<K,V>
-                return $"global::System.Collections.Generic.Dictionary<{typeInfo.DictionaryKeyType}, {typeInfo.DictionaryValueType}>";
+                // Apply global:: prefix to key and value types to avoid namespace resolution issues
+                var globalKeyType = TypeMapping.GetGlobalGenericTypeName(typeInfo.DictionaryKeyType);
+                var globalValueType = TypeMapping.GetGlobalGenericTypeName(typeInfo.DictionaryValueType);
+                return $"global::System.Collections.Generic.Dictionary<{globalKeyType}, {globalValueType}>";
             }
 
             if (typeInfo.IsList)
@@ -2070,8 +2096,8 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 // Check if it's a custom list type
                 if (TypeHelper.IsCustomListType(typeInfo.FullTypeName))
                 {
-                    // Use the original type name for custom lists
-                    return $"global::{typeInfo.FullTypeName}";
+                    // Use GetGlobalGenericTypeName to properly handle nested generic types
+                    return TypeMapping.GetGlobalGenericTypeName(typeInfo.FullTypeName);
                 }
                 // Standard List<T>
                 return $"global::System.Collections.Generic.List<{elemType}>";
@@ -2083,8 +2109,8 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 // Check if it's a custom hashset type (e.g., ValueLogTypeHashSet)
                 if (TypeHelper.IsCustomHashSetType(typeInfo.FullTypeName))
                 {
-                    // Use the original type name for custom hashsets
-                    return $"global::{typeInfo.FullTypeName}";
+                    // Use GetGlobalGenericTypeName to properly handle nested generic types
+                    return TypeMapping.GetGlobalGenericTypeName(typeInfo.FullTypeName);
                 }
                 // Standard HashSet<T>
                 return $"global::System.Collections.Generic.HashSet<{elemType}>";
@@ -2116,7 +2142,9 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 return TypeMapping.GetShortTypeName(typeName);
             }
 
-            return $"global::{typeName}";
+            // For all other types (including generic types like Tuple<T1, T2>),
+            // use GetGlobalGenericTypeName to properly handle nested generic arguments
+            return TypeMapping.GetGlobalGenericTypeName(typeName);
         }
 
         /// <summary>
@@ -2135,11 +2163,14 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 // Check if it's a custom dictionary type (ListDictionary, ConcurrentDictionary, etc.)
                 if (TypeHelper.IsCustomDictionaryType(typeInfo.FullTypeName))
                 {
-                    // Use the original type name for custom dictionaries
-                    return $"new global::{typeInfo.FullTypeName}()";
+                    // Use GetGlobalGenericTypeName to properly handle nested generic types
+                    return $"new {TypeMapping.GetGlobalGenericTypeName(typeInfo.FullTypeName)}()";
                 }
                 // Standard Dictionary<K,V>
-                return $"new global::System.Collections.Generic.Dictionary<{typeInfo.DictionaryKeyType}, {typeInfo.DictionaryValueType}>()";
+                // Apply global:: prefix to key and value types to avoid namespace resolution issues
+                var globalKeyType = TypeMapping.GetGlobalGenericTypeName(typeInfo.DictionaryKeyType);
+                var globalValueType = TypeMapping.GetGlobalGenericTypeName(typeInfo.DictionaryValueType);
+                return $"new global::System.Collections.Generic.Dictionary<{globalKeyType}, {globalValueType}>()";
             }
 
             if (typeInfo.IsList)
@@ -2153,8 +2184,8 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 // Check if it's a custom list type
                 if (TypeHelper.IsCustomListType(typeInfo.FullTypeName))
                 {
-                    // Use the original type name for custom lists
-                    return $"new global::{typeInfo.FullTypeName}()";
+                    // Use GetGlobalGenericTypeName to properly handle nested generic types
+                    return $"new {TypeMapping.GetGlobalGenericTypeName(typeInfo.FullTypeName)}()";
                 }
                 // Standard List<T>
                 return $"new global::System.Collections.Generic.List<{elemType}>()";
@@ -2171,8 +2202,8 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 // Check if it's a custom hashset type (e.g., ValueLogTypeHashSet)
                 if (TypeHelper.IsCustomHashSetType(typeInfo.FullTypeName))
                 {
-                    // Use the original type name for custom hashsets
-                    return $"new global::{typeInfo.FullTypeName}()";
+                    // Use GetGlobalGenericTypeName to properly handle nested generic types
+                    return $"new {TypeMapping.GetGlobalGenericTypeName(typeInfo.FullTypeName)}()";
                 }
                 // Standard HashSet<T>
                 return $"new global::System.Collections.Generic.HashSet<{elemType}>()";

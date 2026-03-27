@@ -20,7 +20,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         }
 
         public BufferWriterGenerator(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry, VirtualTupleTypeRegistry virtualTupleRegistry)
-            : base(sb, registry, virtualMapRegistry, virtualTupleRegistry, "Buffer")
+            : base(sb, registry, virtualMapRegistry, virtualTupleRegistry, "Buffer", null)
+        {
+        }
+
+        public BufferWriterGenerator(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry, VirtualTupleTypeRegistry virtualTupleRegistry, string virtualTypesNamespace)
+            : base(sb, registry, virtualMapRegistry, virtualTupleRegistry, "Buffer", virtualTypesNamespace)
         {
         }
     }

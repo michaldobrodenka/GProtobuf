@@ -174,7 +174,7 @@ namespace GProtobuf.Benchmark.Models.Serialization
 
                 if (fieldId == 2)
                 {
-                    List<GProtobuf.Benchmark.Models.PersonModel> resultList = new();
+                    List<global::GProtobuf.Benchmark.Models.PersonModel> resultList = new();
                     var wireType1 = wireType;
                     var fieldId1 = fieldId;
                     while (fieldId1 == fieldId && wireType1 == WireType.Len)
@@ -206,7 +206,7 @@ namespace GProtobuf.Benchmark.Models.Serialization
 
                 if (fieldId == 4)
                 {
-                    List<GProtobuf.Benchmark.Models.AddressModel> resultList = new();
+                    List<global::GProtobuf.Benchmark.Models.AddressModel> resultList = new();
                     var wireType1 = wireType;
                     var fieldId1 = fieldId;
                     while (fieldId1 == fieldId && wireType1 == WireType.Len)
@@ -377,7 +377,7 @@ namespace GProtobuf.Benchmark.Models.Serialization
 
                 if (fieldId == 3)
                 {
-                    List<GProtobuf.Benchmark.Models.PersonModel> resultList = new();
+                    List<global::GProtobuf.Benchmark.Models.PersonModel> resultList = new();
                     var wireType1 = wireType;
                     var fieldId1 = fieldId;
                     while (fieldId1 == fieldId && wireType1 == WireType.Len)
@@ -401,7 +401,7 @@ namespace GProtobuf.Benchmark.Models.Serialization
 
                 if (fieldId == 4)
                 {
-                    List<GProtobuf.Benchmark.Models.AddressModel> resultList = new();
+                    List<global::GProtobuf.Benchmark.Models.AddressModel> resultList = new();
                     var wireType1 = wireType;
                     var fieldId1 = fieldId;
                     while (fieldId1 == fieldId && wireType1 == WireType.Len)

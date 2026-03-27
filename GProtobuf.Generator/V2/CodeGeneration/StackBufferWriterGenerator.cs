@@ -27,7 +27,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         }
 
         public StackBufferWriterGenerator(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry, VirtualTupleTypeRegistry virtualTupleRegistry)
-            : base(sb, registry, virtualMapRegistry, virtualTupleRegistry, "StackBuffer")
+            : base(sb, registry, virtualMapRegistry, virtualTupleRegistry, "StackBuffer", null)
+        {
+        }
+
+        public StackBufferWriterGenerator(StringBuilderWithIndent sb, TypeRegistry registry, VirtualMapTypeRegistry virtualMapRegistry, VirtualTupleTypeRegistry virtualTupleRegistry, string virtualTypesNamespace)
+            : base(sb, registry, virtualMapRegistry, virtualTupleRegistry, "StackBuffer", virtualTypesNamespace)
         {
         }
     }
