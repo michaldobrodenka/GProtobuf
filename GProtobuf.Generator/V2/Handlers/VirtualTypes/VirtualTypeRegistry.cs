@@ -505,7 +505,8 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         public string ValueEnumUnderlyingType { get; set; }
         public TypeAnalysisInfo KeyTypeInfo { get; set; }
         public TypeAnalysisInfo ValueTypeInfo { get; set; }
-
+        public bool IsGenerated { get; set; }
+        public string GeneratedInNamespace { get; set; }
     }
 
     /// <summary>

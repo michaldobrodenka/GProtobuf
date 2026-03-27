@@ -49,11 +49,6 @@ namespace GProtobuf.Generator.V2.Handlers
             _virtualTypesNamespace = virtualTypesNamespace ?? "GProtobuf.Generated";
         }
 
-        public MapHandler(StringBuilderWithIndent sb, VirtualMapTypeRegistry registry, string writerClassName, TypeRegistry typeRegistry, string currentNamespace)
-            : this(sb, registry, writerClassName, typeRegistry)
-        {
-        }
-
         /// <summary>
         /// Gets the fully qualified class name for calling virtual type methods in the shared namespace.
         /// All virtual types are generated in GProtobuf.VirtualTypes.Serialization.

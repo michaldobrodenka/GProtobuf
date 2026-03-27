@@ -3512,7 +3512,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 // Fallback to old behavior if we can't analyze the type
                 // For tuple types, use virtual types in shared namespace
                 var safeName = VirtualTypeNameGenerator.GetSafeTypeName(typeName);
-                var readersClass = TupleHandler.IsTupleType(typeName) ? GetVirtualTypesStreamReadersClass() : "StreamReaders";
                 _sb.AppendIndentedLine("{");
                 _sb.IncreaseIndent();
                 _sb.AppendIndentedLine($"var {varName}Len = {readerVar}.ReadVarInt32();");
