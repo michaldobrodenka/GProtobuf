@@ -936,6 +936,16 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 return;
             }
 
+            // For custom collection types (implements IEnumerable<T> + Add(T))
+            // Serialize as repeated field with implicit field id 1
+            if (type.IsCustomCollection && !string.IsNullOrEmpty(type.CustomCollectionElementType))
+            {
+                GenerateCustomCollectionReadContent(type, className);
+                _sb.EndBlock();
+                _sb.AppendNewLine();
+                return;
+            }
+
             if (type.EnableRecursionGuard)
             {
                 _sb.AppendIndentedLine("global::GProtobuf.Core.RecursionGuard.Enter();");
@@ -1004,6 +1014,62 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             GenerateObjectCreation(type, "result");
             _sb.AppendIndentedLine($"Populate{className}(ref reader, {GeneratorHelpers.GetPopulateInstanceArgument(type, "result")});");
+            _sb.AppendIndentedLine("return result;");
+        }
+
+        /// <summary>
+        /// Generates read content for custom collection types (implements IEnumerable&lt;T&gt; + Add(T)).
+        /// Reads repeated elements with implicit field id 1 and adds them to the collection.
+        /// </summary>
+        private void GenerateCustomCollectionReadContent(TypeDefinition type, string className)
+        {
+            var elementType = type.CustomCollectionElementType;
+            var globalElementType = TypeMapping.GetGlobalTypeName(elementType);
+
+            _sb.AppendIndentedLine($"var result = new global::{type.FullName}();");
+            _sb.AppendIndentedLine("while (!reader.IsEnd)");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine("reader.ReadWireTypeAndFieldId(out var wireType, out var fieldId);");
+            _sb.AppendNewLine();
+
+            // Field id 1 is used for collection elements (protobuf-net convention)
+            _sb.AppendIndentedLine("if (fieldId == 1)");
+            _sb.StartNewBlock();
+
+            // Check if element type is primitive, enum, or complex
+            bool isSimpleType = TypeMapping.IsSimpleType(elementType);
+            bool isEnum = _registry.IsEnum(elementType);
+
+            if (isSimpleType)
+            {
+                var readExpr = TypeMapping.GetReadExpression(elementType, DataFormat.Default, "reader", "wireType");
+                _sb.AppendIndentedLine($"result.Add({readExpr});");
+            }
+            else if (isEnum)
+            {
+                _sb.AppendIndentedLine($"result.Add(({globalElementType})reader.ReadVarInt32());");
+            }
+            else
+            {
+                // Complex type - need to read length-prefixed message
+                var elementClassName = TypeNameHelper.GetClassName(elementType);
+                var elementNs = _registry.GetNamespaceForType(elementType);
+                var qualifiedReadCall = string.IsNullOrEmpty(elementNs) || elementNs == _currentNamespace
+                    ? $"Read{elementClassName}Content"
+                    : $"global::{elementNs}.Serialization.SpanReaders.Read{elementClassName}Content";
+
+                _sb.AppendIndentedLine("var length = reader.ReadVarInt32();");
+                _sb.AppendIndentedLine("var nestedReader = new SpanReader(reader.GetSlice(length));");
+                _sb.AppendIndentedLine($"result.Add({qualifiedReadCall}(ref nestedReader));");
+            }
+
+            _sb.EndBlock(); // if fieldId == 1
+            _sb.AppendIndentedLine("else");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine("reader.SkipField(wireType);");
+            _sb.EndBlock(); // else
+
+            _sb.EndBlock(); // while
             _sb.AppendIndentedLine("return result;");
         }
 
@@ -1492,6 +1558,15 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 return;
             }
 
+            // For custom collection types, populate by reading repeated elements
+            if (type.IsCustomCollection && !string.IsNullOrEmpty(type.CustomCollectionElementType))
+            {
+                GenerateCustomCollectionPopulate(type, className);
+                _sb.EndBlock();
+                _sb.AppendNewLine();
+                return;
+            }
+
             // Standard Populate implementation for mutable types
 
             bool hasInheritance = GeneratorHelpers.HasInheritance(type, _registry);
@@ -1955,6 +2030,60 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     readerVar,
                     useObjectArrayBuilder: ObjectArrayBuilderHelper.ShouldUseObjectArrayBuilder(member, _registry));
             }
+        }
+
+        /// <summary>
+        /// Generates Populate method for custom collection types.
+        /// Reads repeated elements with implicit field id 1 and adds them to the collection.
+        /// </summary>
+        private void GenerateCustomCollectionPopulate(TypeDefinition type, string className)
+        {
+            var elementType = type.CustomCollectionElementType;
+            var globalElementType = TypeMapping.GetGlobalTypeName(elementType);
+
+            _sb.AppendIndentedLine("while (!reader.IsEnd)");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine("reader.ReadWireTypeAndFieldId(out var wireType, out var fieldId);");
+            _sb.AppendNewLine();
+
+            // Field id 1 is used for collection elements (protobuf-net convention)
+            _sb.AppendIndentedLine("if (fieldId == 1)");
+            _sb.StartNewBlock();
+
+            // Check if element type is primitive, enum, or complex
+            bool isSimpleType = TypeMapping.IsSimpleType(elementType);
+            bool isEnum = _registry.IsEnum(elementType);
+
+            if (isSimpleType)
+            {
+                var readExpr = TypeMapping.GetReadExpression(elementType, DataFormat.Default, "reader", "wireType");
+                _sb.AppendIndentedLine($"instance.Add({readExpr});");
+            }
+            else if (isEnum)
+            {
+                _sb.AppendIndentedLine($"instance.Add(({globalElementType})reader.ReadVarInt32());");
+            }
+            else
+            {
+                // Complex type - need to read length-prefixed message
+                var elementClassName = TypeNameHelper.GetClassName(elementType);
+                var elementNs = _registry.GetNamespaceForType(elementType);
+                var qualifiedReadCall = string.IsNullOrEmpty(elementNs) || elementNs == _currentNamespace
+                    ? $"Read{elementClassName}Content"
+                    : $"global::{elementNs}.Serialization.SpanReaders.Read{elementClassName}Content";
+
+                _sb.AppendIndentedLine("var length = reader.ReadVarInt32();");
+                _sb.AppendIndentedLine("var nestedReader = new SpanReader(reader.GetSlice(length));");
+                _sb.AppendIndentedLine($"instance.Add({qualifiedReadCall}(ref nestedReader));");
+            }
+
+            _sb.EndBlock(); // if fieldId == 1
+            _sb.AppendIndentedLine("else");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine("reader.SkipField(wireType);");
+            _sb.EndBlock(); // else
+
+            _sb.EndBlock(); // while
         }
 
         private void GenerateSimplePopulate(TypeDefinition type, string className)

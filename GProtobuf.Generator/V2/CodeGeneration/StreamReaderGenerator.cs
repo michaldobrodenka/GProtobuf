@@ -1243,6 +1243,15 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 return;
             }
 
+            // For custom collection types (implements IEnumerable<T> + Add(T))
+            if (type.IsCustomCollection && !string.IsNullOrEmpty(type.CustomCollectionElementType))
+            {
+                GenerateCustomCollectionReadContent(type, className);
+                _sb.EndBlock();
+                _sb.AppendNewLine();
+                return;
+            }
+
             if (type.EnableRecursionGuard)
             {
                 _sb.AppendIndentedLine("global::GProtobuf.Core.RecursionGuard.Enter();");
@@ -1301,6 +1310,87 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             GenerateObjectCreation(type, "result");
             _sb.AppendIndentedLine($"Populate{className}(ref reader, {GeneratorHelpers.GetPopulateInstanceArgument(type, "result")});");
             _sb.AppendIndentedLine("return result;");
+        }
+
+        /// <summary>
+        /// Generates read content for custom collection types.
+        /// </summary>
+        private void GenerateCustomCollectionReadContent(TypeDefinition type, string className)
+        {
+            var elementType = type.CustomCollectionElementType;
+            var globalElementType = TypeMapping.GetGlobalTypeName(elementType);
+
+            _sb.AppendIndentedLine($"var result = new global::{type.FullName}();");
+            _sb.AppendIndentedLine("while (!reader.IsEnd)");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine("reader.ReadWireTypeAndFieldId(out var wireType, out var fieldId);");
+            _sb.AppendNewLine();
+
+            _sb.AppendIndentedLine("if (fieldId == 1)");
+            _sb.StartNewBlock();
+
+            bool isSimpleType = TypeMapping.IsSimpleType(elementType);
+            bool isEnum = _registry.IsEnum(elementType);
+
+            if (isSimpleType)
+            {
+                var readExpr = GetStreamReadExpressionForSimpleType(elementType, "reader", "wireType");
+                _sb.AppendIndentedLine($"result.Add({readExpr});");
+            }
+            else if (isEnum)
+            {
+                _sb.AppendIndentedLine($"result.Add(({globalElementType})reader.ReadVarInt32());");
+            }
+            else
+            {
+                var elementClassName = TypeNameHelper.GetClassName(elementType);
+                var elementNs = _registry.GetNamespaceForType(elementType);
+                var qualifiedReadCall = string.IsNullOrEmpty(elementNs) || elementNs == _currentNamespace
+                    ? $"Read{elementClassName}Content"
+                    : $"global::{elementNs}.Serialization.StreamReaders.Read{elementClassName}Content";
+
+                _sb.AppendIndentedLine("var length = reader.ReadVarInt32();");
+                _sb.AppendIndentedLine("var oldLimit = reader.PushLimit(length);");
+                _sb.AppendIndentedLine($"result.Add({qualifiedReadCall}(ref reader));");
+                _sb.AppendIndentedLine("reader.PopLimit(oldLimit);");
+            }
+
+            _sb.EndBlock();
+            _sb.AppendIndentedLine("else");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine("reader.SkipField(wireType);");
+            _sb.EndBlock();
+
+            _sb.EndBlock();
+            _sb.AppendIndentedLine("return result;");
+        }
+
+        /// <summary>
+        /// Gets the read expression for simple types in StreamReader context.
+        /// </summary>
+        private static string GetStreamReadExpressionForSimpleType(string typeName, string readerVar, string wireTypeVar)
+        {
+            var normalized = TypeMapping.NormalizeTypeName(typeName);
+            return normalized switch
+            {
+                "System.Int32" or "int" => $"global::GProtobuf.Core.StreamReaders.ReadInt32(ref {readerVar}, {wireTypeVar}, false)",
+                "System.UInt32" or "uint" => $"global::GProtobuf.Core.StreamReaders.ReadUInt32(ref {readerVar}, {wireTypeVar})",
+                "System.Int64" or "long" => $"global::GProtobuf.Core.StreamReaders.ReadInt64(ref {readerVar}, {wireTypeVar}, false)",
+                "System.UInt64" or "ulong" => $"global::GProtobuf.Core.StreamReaders.ReadUInt64(ref {readerVar}, {wireTypeVar})",
+                "System.Int16" or "short" => $"global::GProtobuf.Core.StreamReaders.ReadInt16(ref {readerVar}, {wireTypeVar}, false)",
+                "System.UInt16" or "ushort" => $"global::GProtobuf.Core.StreamReaders.ReadUInt16(ref {readerVar}, {wireTypeVar})",
+                "System.Byte" or "byte" => $"global::GProtobuf.Core.StreamReaders.ReadByte(ref {readerVar}, {wireTypeVar})",
+                "System.SByte" or "sbyte" => $"global::GProtobuf.Core.StreamReaders.ReadSByte(ref {readerVar}, {wireTypeVar}, false)",
+                "System.Boolean" or "bool" => $"global::GProtobuf.Core.StreamReaders.ReadBool(ref {readerVar}, {wireTypeVar})",
+                "System.Single" or "float" => $"global::GProtobuf.Core.StreamReaders.ReadFloat(ref {readerVar}, {wireTypeVar})",
+                "System.Double" or "double" => $"global::GProtobuf.Core.StreamReaders.ReadDouble(ref {readerVar}, {wireTypeVar})",
+                "System.String" or "string" => $"global::GProtobuf.Core.StreamReaders.ReadString(ref {readerVar}, {wireTypeVar})",
+                "System.Guid" => $"global::GProtobuf.Core.StreamReaders.ReadGuid(ref {readerVar}, {wireTypeVar})",
+                "System.DateTime" => $"global::GProtobuf.Core.StreamReaders.ReadDateTime(ref {readerVar}, {wireTypeVar})",
+                "System.TimeSpan" => $"global::GProtobuf.Core.StreamReaders.ReadTimeSpan(ref {readerVar}, {wireTypeVar})",
+                "System.Byte[]" or "byte[]" => $"global::GProtobuf.Core.StreamReaders.ReadByteArray(ref {readerVar})",
+                _ => $"{readerVar}.ReadVarInt32()" // fallback
+            };
         }
 
         /// <summary>
@@ -2431,11 +2521,71 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 return;
             }
 
+            // For custom collection types, populate by reading repeated elements
+            if (type.IsCustomCollection && !string.IsNullOrEmpty(type.CustomCollectionElementType))
+            {
+                GenerateCustomCollectionPopulate(type, className);
+                _sb.EndBlock();
+                _sb.AppendNewLine();
+                return;
+            }
+
             // Generate inline field reading
             GeneratePopulateMethodBody(type, nsPrefix);
 
             _sb.EndBlock();
             _sb.AppendNewLine();
+        }
+
+        /// <summary>
+        /// Generates Populate method for custom collection types.
+        /// </summary>
+        private void GenerateCustomCollectionPopulate(TypeDefinition type, string className)
+        {
+            var elementType = type.CustomCollectionElementType;
+            var globalElementType = TypeMapping.GetGlobalTypeName(elementType);
+
+            _sb.AppendIndentedLine("while (!reader.IsEnd)");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine("reader.ReadWireTypeAndFieldId(out var wireType, out var fieldId);");
+            _sb.AppendNewLine();
+
+            _sb.AppendIndentedLine("if (fieldId == 1)");
+            _sb.StartNewBlock();
+
+            bool isSimpleType = TypeMapping.IsSimpleType(elementType);
+            bool isEnum = _registry.IsEnum(elementType);
+
+            if (isSimpleType)
+            {
+                var readExpr = GetStreamReadExpressionForSimpleType(elementType, "reader", "wireType");
+                _sb.AppendIndentedLine($"instance.Add({readExpr});");
+            }
+            else if (isEnum)
+            {
+                _sb.AppendIndentedLine($"instance.Add(({globalElementType})reader.ReadVarInt32());");
+            }
+            else
+            {
+                var elementClassName = TypeNameHelper.GetClassName(elementType);
+                var elementNs = _registry.GetNamespaceForType(elementType);
+                var qualifiedReadCall = string.IsNullOrEmpty(elementNs) || elementNs == _currentNamespace
+                    ? $"Read{elementClassName}Content"
+                    : $"global::{elementNs}.Serialization.StreamReaders.Read{elementClassName}Content";
+
+                _sb.AppendIndentedLine("var length = reader.ReadVarInt32();");
+                _sb.AppendIndentedLine("var oldLimit = reader.PushLimit(length);");
+                _sb.AppendIndentedLine($"instance.Add({qualifiedReadCall}(ref reader));");
+                _sb.AppendIndentedLine("reader.PopLimit(oldLimit);");
+            }
+
+            _sb.EndBlock();
+            _sb.AppendIndentedLine("else");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine("reader.SkipField(wireType);");
+            _sb.EndBlock();
+
+            _sb.EndBlock();
         }
 
         /// <summary>

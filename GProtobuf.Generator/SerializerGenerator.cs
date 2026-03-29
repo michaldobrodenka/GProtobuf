@@ -64,6 +64,22 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                 var baseClass = GetBaseClass(typeWithAttribute);
                 var enableRecursionGuard = GetEnableRecursionGuard(typeWithAttribute);
 
+                // Check if this is a custom collection type (implements IEnumerable<T> + Add(T))
+                // Only treat as custom collection if there are no ProtoMember fields
+                // (if there are ProtoMembers, serialize as regular class with fields)
+                bool isCustomCollection = false;
+                string customCollectionElementType = null;
+                if ((protoMembers == null || protoMembers.Count == 0) &&
+                    (customBufferMembers == null || customBufferMembers.Count == 0))
+                {
+                    var collectionInfo = AnalyzeNonGenericCollection(typeWithAttribute);
+                    if (collectionInfo.IsCollection)
+                    {
+                        isCustomCollection = true;
+                        customCollectionElementType = collectionInfo.ElementType;
+                    }
+                }
+
                 var typeDefinition = new TypeDefinition(
                     IsStruct: typeWithAttribute.TypeKind == Microsoft.CodeAnalysis.TypeKind.Struct,
                     IsAbstract: typeWithAttribute.IsAbstract,
@@ -75,7 +91,9 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                     TypeSymbol: typeWithAttribute,
                     BaseClass: baseClass,
                     CustomBufferMembers: customBufferMembers,
-                    EnableRecursionGuard: enableRecursionGuard);
+                    EnableRecursionGuard: enableRecursionGuard,
+                    IsCustomCollection: isCustomCollection,
+                    CustomCollectionElementType: customCollectionElementType);
 
                 return (namespaceName, typeDefinition);
             });
@@ -102,6 +120,20 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                 var hasParameterlessConstructor = HasParameterlessConstructor(typeWithAttribute);
                 var baseClass = GetBaseClass(typeWithAttribute);
 
+                // Check if this is a custom collection type
+                bool isCustomCollection = false;
+                string customCollectionElementType = null;
+                if ((protoMembers == null || protoMembers.Count == 0) &&
+                    (customBufferMembers == null || customBufferMembers.Count == 0))
+                {
+                    var collectionInfo = AnalyzeNonGenericCollection(typeWithAttribute);
+                    if (collectionInfo.IsCollection)
+                    {
+                        isCustomCollection = true;
+                        customCollectionElementType = collectionInfo.ElementType;
+                    }
+                }
+
                 var typeDefinition = new TypeDefinition(
                     IsStruct: typeWithAttribute.TypeKind == Microsoft.CodeAnalysis.TypeKind.Struct,
                     IsAbstract: typeWithAttribute.IsAbstract,
@@ -113,7 +145,9 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                     TypeSymbol: typeWithAttribute,
                     BaseClass: baseClass,
                     CustomBufferMembers: customBufferMembers,
-                    EnableRecursionGuard: false);
+                    EnableRecursionGuard: false,
+                    IsCustomCollection: isCustomCollection,
+                    CustomCollectionElementType: customCollectionElementType);
 
                 return (namespaceName, typeDefinition);
             });

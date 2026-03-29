@@ -55,6 +55,14 @@ namespace GProtobuf.Generator.Analysis
     /// Allows user-defined serialization logic for fields not marked with [ProtoMember].
     /// Empty list if type has no custom buffer members.
     /// </param>
+    /// <param name="IsCustomCollection">
+    /// True if type implements IEnumerable&lt;T&gt; with Add(T) method (protobuf-net compatible collection).
+    /// Such types serialize/deserialize as repeated elements, not as message fields.
+    /// </param>
+    /// <param name="CustomCollectionElementType">
+    /// Element type for custom collections (e.g., "DeviceValueType" for ValueLogTypeHashSet).
+    /// Null if IsCustomCollection is false.
+    /// </param>
     public sealed record TypeDefinition(
         bool IsStruct,
         bool IsAbstract,
@@ -66,5 +74,7 @@ namespace GProtobuf.Generator.Analysis
         Microsoft.CodeAnalysis.INamedTypeSymbol? TypeSymbol = null,
         string? BaseClass = null,
         List<CustomBufferMember>? CustomBufferMembers = null,
-        bool EnableRecursionGuard = false);
+        bool EnableRecursionGuard = false,
+        bool IsCustomCollection = false,
+        string? CustomCollectionElementType = null);
 }

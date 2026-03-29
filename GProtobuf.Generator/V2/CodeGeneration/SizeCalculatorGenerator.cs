@@ -339,6 +339,15 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 return;
             }
 
+            // For custom collection types (implements IEnumerable<T> + Add(T))
+            if (type.IsCustomCollection && !string.IsNullOrEmpty(type.CustomCollectionElementType))
+            {
+                GenerateCustomCollectionContentSize(type, className);
+                _sb.EndBlock();
+                _sb.AppendNewLine();
+                return;
+            }
+
             // Check if type has ProtoInclude hierarchy
             bool isDerived = _registry.IsDerivedType(type.FullName);
             bool hasProtoIncludes = type.ProtoIncludes != null && type.ProtoIncludes.Count > 0;
@@ -406,6 +415,53 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             _sb.EndBlock();
             _sb.AppendNewLine();
+        }
+
+        /// <summary>
+        /// Generates ContentSize for custom collection types.
+        /// Calculates size of each element with field id 1.
+        /// </summary>
+        private void GenerateCustomCollectionContentSize(TypeDefinition type, string className)
+        {
+            var elementType = type.CustomCollectionElementType;
+            var globalElementType = TypeMapping.GetGlobalTypeName(elementType);
+
+            bool isSimpleType = TypeMapping.IsSimpleType(elementType);
+            bool isEnum = _registry.IsEnum(elementType);
+
+            _sb.AppendIndentedLine("foreach (var item in obj)");
+            _sb.StartNewBlock();
+
+            if (isSimpleType)
+            {
+                // Tag (1 byte) + value
+                _sb.AppendIndentedLine("calculator.AddByteLength(1);"); // Tag
+                var sizeExpr = TypeMapping.GetSizeExpression(elementType, "item", DataFormat.Default, "calculator");
+                _sb.AppendIndentedLine($"{sizeExpr};");
+            }
+            else if (isEnum)
+            {
+                // Tag (1 byte) + VarInt
+                _sb.AppendIndentedLine("calculator.AddByteLength(1);"); // Tag
+                _sb.AppendIndentedLine("calculator.WriteVarInt32((int)item);");
+            }
+            else
+            {
+                // Complex type - tag (1 byte) + length prefix + content
+                var elementClassName = TypeNameHelper.GetClassName(elementType);
+                var elementNs = _registry.GetNamespaceForType(elementType);
+                var sizeCalcCall = string.IsNullOrEmpty(elementNs) || elementNs == _currentNamespace
+                    ? $"Calculate{elementClassName}ContentSize"
+                    : $"global::{elementNs}.Serialization.SizeCalculators.Calculate{elementClassName}ContentSize";
+
+                _sb.AppendIndentedLine("calculator.AddByteLength(1);"); // Tag
+                _sb.AppendIndentedLine("var nestedCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+                _sb.AppendIndentedLine($"{sizeCalcCall}(ref nestedCalc, item);");
+                _sb.AppendIndentedLine("calculator.WriteVarInt32(nestedCalc.Length);"); // Length prefix
+                _sb.AppendIndentedLine("calculator.AddByteLength(nestedCalc.Length);"); // Content
+            }
+
+            _sb.EndBlock();
         }
 
         /// <summary>

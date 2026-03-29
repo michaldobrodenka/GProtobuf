@@ -301,6 +301,15 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 return;
             }
 
+            // For custom collection types (implements IEnumerable<T> + Add(T))
+            if (type.IsCustomCollection && !string.IsNullOrEmpty(type.CustomCollectionElementType))
+            {
+                GenerateCustomCollectionWriteContent(type, className);
+                _sb.EndBlock();
+                _sb.AppendNewLine();
+                return;
+            }
+
             // Check if type has ProtoInclude hierarchy
             bool isDerived = _registry.IsDerivedType(type.FullName);
             bool hasProtoIncludes = type.ProtoIncludes != null && type.ProtoIncludes.Count > 0;
@@ -367,6 +376,59 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             _sb.EndBlock();
             _sb.AppendNewLine();
+        }
+
+        /// <summary>
+        /// Generates WriteContent for custom collection types.
+        /// Writes each element with field id 1.
+        /// </summary>
+        private void GenerateCustomCollectionWriteContent(TypeDefinition type, string className)
+        {
+            var elementType = type.CustomCollectionElementType;
+            var globalElementType = TypeMapping.GetGlobalTypeName(elementType);
+
+            bool isSimpleType = TypeMapping.IsSimpleType(elementType);
+            bool isEnum = _registry.IsEnum(elementType);
+
+            _sb.AppendIndentedLine("foreach (var item in instance)");
+            _sb.StartNewBlock();
+
+            if (isSimpleType)
+            {
+                // Write tag and value using TagCodeHelper
+                TagCodeHelper.WriteTag(_sb, 1, TypeMapping.GetWireType(elementType, DataFormat.Default));
+                var writeExpr = TypeMapping.GetWriteExpression(elementType, "item", DataFormat.Default, "writer");
+                _sb.AppendIndentedLine($"{writeExpr};");
+            }
+            else if (isEnum)
+            {
+                // Enums are VarInt with field id 1
+                _sb.AppendIndentedLine("writer.WriteSingleByte(0x08);"); // Field 1, VarInt
+                _sb.AppendIndentedLine("writer.WriteVarInt32((int)item);");
+            }
+            else
+            {
+                // Complex type - write as length-delimited message
+                var elementClassName = TypeNameHelper.GetClassName(elementType);
+                var elementNs = _registry.GetNamespaceForType(elementType);
+
+                _sb.AppendIndentedLine("writer.WriteSingleByte(0x0A);"); // Field 1, LengthDelimited
+
+                // Calculate size and write
+                var sizeCalcNs = string.IsNullOrEmpty(elementNs) || elementNs == _currentNamespace
+                    ? "SizeCalculators"
+                    : $"global::{elementNs}.Serialization.SizeCalculators";
+                var writeNs = string.IsNullOrEmpty(elementNs) || elementNs == _currentNamespace
+                    ? $"Write{elementClassName}Content"
+                    : $"global::{elementNs}.Serialization.{_className}.Write{elementClassName}Content";
+
+                _sb.AppendIndentedLine("var sizeCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+                _sb.AppendIndentedLine($"{sizeCalcNs}.Calculate{elementClassName}ContentSize(ref sizeCalc, item);");
+                _sb.AppendIndentedLine("writer.WriteVarInt32(sizeCalc.Length);");
+                _sb.AppendIndentedLine($"{writeNs}(ref writer, item);");
+            }
+
+            _sb.EndBlock();
         }
 
         /// <summary>
