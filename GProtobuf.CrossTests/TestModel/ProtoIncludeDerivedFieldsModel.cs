@@ -125,4 +125,65 @@ namespace GProtobuf.CrossTests.TestModel
         [ProtoMember(4)]
         public Dictionary<ValueTypeKey, string> TypeNames { get; set; }
     }
+
+    /// <summary>
+    /// Test model for Dictionary with DERIVED type array as value.
+    /// This tests the fix for:
+    /// Bug: When declared element type IS the derived type (e.g., DerivedClass[]),
+    ///      protobuf-net serializes elements WITHOUT ProtoInclude wrapper.
+    ///      But GProtobuf incorrectly checks IsDerivedType() and uses wrapper format.
+    ///
+    /// Key insight: ProtoInclude wrapper is only needed when the DECLARED type is the BASE type
+    /// and the actual runtime type could be any of the derived types.
+    /// When the DECLARED type is already the DERIVED type, no wrapper is needed.
+    /// </summary>
+    [ProtoContract]
+    public class DerivedTypeArrayModel
+    {
+        [ProtoMember(1)]
+        public int Id { get; set; }
+
+        /// <summary>
+        /// Dictionary with DERIVED type array as value.
+        /// Element type is LinearInterpolationConversion (derived), not ConversionBase (base).
+        /// protobuf-net serializes these WITHOUT ProtoInclude wrapper.
+        /// </summary>
+        [ProtoMember(2)]
+        public Dictionary<int, LinearInterpolationConversion[]> ConversionsByKey { get; set; }
+    }
+
+    /// <summary>
+    /// Test model that mirrors the exact bug case:
+    /// Dictionary&lt;DeviceValues.DeviceValueType, DeviceValueAggregationExtended[]&gt;
+    ///
+    /// This combines:
+    /// 1. ValueTypeKey (readonly struct) - like DeviceValueType
+    /// 2. LinearInterpolationConversion[] (derived type array) - like DeviceValueAggregationExtended[]
+    ///
+    /// Bug: Deserialization skipped all fields from derived type
+    ///      Serialization produced bytes incompatible with protobuf-net
+    /// Fix: StandaloneTypeGenerator uses IsDerivedType() to decide method variant
+    /// </summary>
+    [ProtoContract]
+    public class ReadonlyStructKeyDerivedArrayModel
+    {
+        [ProtoMember(1)]
+        public int Id { get; set; }
+
+        [ProtoMember(2)]
+        public string Name { get; set; }
+
+        /// <summary>
+        /// Dictionary with readonly struct key and derived type array value.
+        /// Mirrors Dictionary&lt;DeviceValueType, DeviceValueAggregationExtended[]&gt;.
+        /// </summary>
+        [ProtoMember(3)]
+        public Dictionary<ValueTypeKey, LinearInterpolationConversion[]> ConversionsByValueType { get; set; }
+
+        /// <summary>
+        /// Additional dictionary to test multiple entries.
+        /// </summary>
+        [ProtoMember(4)]
+        public Dictionary<ValueTypeKey, AnalogSwitchConversion[]> SwitchConversionsByValueType { get; set; }
+    }
 }
