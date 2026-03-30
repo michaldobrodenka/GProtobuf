@@ -267,10 +267,10 @@ namespace GProtobuf.Core
     }
 
     /// <summary>
-    /// Marks a method or property that returns the underlying value for serialization.
+    /// Marks a method, property, or field that returns the underlying value for serialization.
     /// The return type must match the ProtoVarintType specified on the struct.
     /// </summary>
-    [AttributeUsage(AttributeTargets.Method | AttributeTargets.Property, AllowMultiple = false, Inherited = false)]
+    [AttributeUsage(AttributeTargets.Method | AttributeTargets.Property | AttributeTargets.Field, AllowMultiple = false, Inherited = false)]
     public sealed class ProtoVarintValueAttribute : Attribute
     {
     }

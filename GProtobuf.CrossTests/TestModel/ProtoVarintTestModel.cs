@@ -204,6 +204,38 @@ namespace GProtobuf.CrossTests.TestModel
         public KNXAddress Address3 { get; set; }
     }
 
+    [ProtoVarint(ProtoVarintType.UInt32)]
+    public readonly struct DeviceId
+    {
+        [ProtoVarintValue]
+        public readonly uint Value;
+
+        [ProtoVarintConstructor]
+        public DeviceId(uint value)
+        {
+            Value = value;
+        }
+
+        public override string ToString() => Value.ToString();
+
+        public override bool Equals(object obj) => obj is DeviceId other && Value == other.Value;
+        public override int GetHashCode() => Value.GetHashCode();
+    }
+
+    [ProtoContract]
+    public class DeviceIdModel
+    {
+        [ProtoMember(1)]
+        public int SequenceNumber { get; set; }
+
+        [ProtoMember(2)]
+        public DeviceId DeviceId { get; set; }
+
+        [ProtoMember(3)]
+        public string DeviceName { get; set; }
+    }
+
+
     /// <summary>
     /// Test model demonstrating default value behavior for ProtoVarint.
     /// </summary>

@@ -595,7 +595,7 @@ public sealed class SerializerGenerator : IIncrementalGenerator
             varintType = (ProtoVarintType)typeValue;
         }
 
-        // Find ALL [ProtoVarintValue] methods or properties
+        // Find ALL [ProtoVarintValue] methods, properties, or fields
         var valueMembers = new List<(string Name, bool IsProperty, string ReturnType)>();
         foreach (var member in namedType.GetMembers())
         {
@@ -607,6 +607,11 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                 if (member is IPropertySymbol prop)
                 {
                     valueMembers.Add((prop.Name, true, prop.Type.ToDisplayString()));
+                }
+                else if (member is IFieldSymbol field)
+                {
+                    // Fields are accessed like properties (no parentheses)
+                    valueMembers.Add((field.Name, true, field.Type.ToDisplayString()));
                 }
                 else if (member is IMethodSymbol method && method.Parameters.Length == 0)
                 {

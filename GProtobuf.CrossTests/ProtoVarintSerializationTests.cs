@@ -232,6 +232,79 @@ namespace GProtobuf.CrossTests
 
         #endregion
 
+        #region DeviceIdModel Tests (ProtoVarintValue on Field)
+
+        [Fact]
+        public void Test_GG_DeviceId_RoundTrip()
+        {
+            // Arrange - uses DeviceId which has [ProtoVarintValue] on a FIELD
+            var original = new DeviceIdModel
+            {
+                SequenceNumber = 123,
+                DeviceId = new DeviceId(9999),
+                DeviceName = "Test Device"
+            };
+
+            // Act
+            using var ms = new MemoryStream();
+            global::GProtobuf.CrossTests.TestModel.Serialization.Serializers.SerializeDeviceIdModel(ms, original);
+            var bytes = ms.ToArray();
+            var deserialized = global::GProtobuf.CrossTests.TestModel.Serialization.Deserializers.DeserializeDeviceIdModel(bytes);
+
+            // Assert
+            deserialized.SequenceNumber.Should().Be(123);
+            deserialized.DeviceId.Value.Should().Be(9999);
+            deserialized.DeviceName.Should().Be("Test Device");
+        }
+
+        [Fact]
+        public void Test_GG_DeviceId_ZeroValue()
+        {
+            // Arrange
+            var original = new DeviceIdModel
+            {
+                SequenceNumber = 1,
+                DeviceId = new DeviceId(0),
+                DeviceName = "Zero"
+            };
+
+            // Act
+            using var ms = new MemoryStream();
+            global::GProtobuf.CrossTests.TestModel.Serialization.Serializers.SerializeDeviceIdModel(ms, original);
+            var bytes = ms.ToArray();
+            var deserialized = global::GProtobuf.CrossTests.TestModel.Serialization.Deserializers.DeserializeDeviceIdModel(bytes);
+
+            // Assert
+            deserialized.SequenceNumber.Should().Be(1);
+            deserialized.DeviceId.Value.Should().Be(0);
+            deserialized.DeviceName.Should().Be("Zero");
+        }
+
+        [Fact]
+        public void Test_GG_DeviceId_MaxValue()
+        {
+            // Arrange
+            var original = new DeviceIdModel
+            {
+                SequenceNumber = int.MaxValue,
+                DeviceId = new DeviceId(uint.MaxValue),
+                DeviceName = "Max"
+            };
+
+            // Act
+            using var ms = new MemoryStream();
+            global::GProtobuf.CrossTests.TestModel.Serialization.Serializers.SerializeDeviceIdModel(ms, original);
+            var bytes = ms.ToArray();
+            var deserialized = global::GProtobuf.CrossTests.TestModel.Serialization.Deserializers.DeserializeDeviceIdModel(bytes);
+
+            // Assert
+            deserialized.SequenceNumber.Should().Be(int.MaxValue);
+            deserialized.DeviceId.Value.Should().Be(uint.MaxValue);
+            deserialized.DeviceName.Should().Be("Max");
+        }
+
+        #endregion
+
         #region Wire Format Tests
 
         [Fact]
