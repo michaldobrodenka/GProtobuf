@@ -720,6 +720,10 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var keyType = info.KeyType!;
             var valueType = info.ValueType!;
 
+            var isArrayOrListValue = info.NestedValueInfo != null &&
+                (info.NestedValueInfo.Kind == StandaloneTypeKind.List ||
+                 info.NestedValueInfo.Kind == StandaloneTypeKind.Array);
+
             // protobuf-net format: [tag=0x0A][length][entry] for each map entry
             // Write outer tag first
             _sb.AppendIndentedLine("writer.WriteVarUInt32(0x0A); // field 1, wire type 2 (map entry)");
@@ -727,7 +731,15 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // Calculate entry size
             _sb.AppendIndentedLine("// Calculate entry size");
             GenerateSizeCalculation(keyType, "kvp.Key", 1, info.KeyIsPrimitive, null, "keySize");
-            GenerateSizeCalculation(valueType, "kvp.Value", 2, info.ValueIsPrimitive, info.NestedValueInfo, "valueSize");
+
+            if (isArrayOrListValue)
+            {
+                GenerateRepeatedFieldArraySizeCalculation("kvp.Value", 2, info.NestedValueInfo!, "valueSize");
+            }
+            else
+            {
+                GenerateSizeCalculation(valueType, "kvp.Value", 2, info.ValueIsPrimitive, info.NestedValueInfo, "valueSize");
+            }
             _sb.AppendIndentedLine("var entrySize = keySize + valueSize;");
             _sb.AppendNewLine();
 
@@ -740,32 +752,145 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             // Write value (field 2) - only if not null (for reference types)
             _sb.AppendIndentedLine("// Value (field 2)");
-            // For nested collections, pass the pre-calculated size variable to avoid duplicate calculation
-            string? valuePrecalculatedSizeVar = null;
-            if (info.NestedValueInfo != null && (info.NestedValueInfo.Kind == StandaloneTypeKind.List || info.NestedValueInfo.Kind == StandaloneTypeKind.Array))
-            {
-                var safeVarName = "kvp.Value".Replace(".", "_").Replace("[", "_").Replace("]", "_");
-                valuePrecalculatedSizeVar = $"_listContentSize_{safeVarName}_2";
-            }
 
-            // Only add null check for collection types (List, Array, Dictionary) which are always reference types
-            // Custom types (classes/structs) - no null check, let it fail naturally if null
-            var isCollectionValue = info.NestedValueInfo != null &&
-                (info.NestedValueInfo.Kind == StandaloneTypeKind.List ||
-                 info.NestedValueInfo.Kind == StandaloneTypeKind.Array ||
-                 info.NestedValueInfo.Kind == StandaloneTypeKind.Dictionary);
-
-            if (isCollectionValue)
+            if (isArrayOrListValue)
             {
                 _sb.AppendIndentedLine("if (kvp.Value != null)");
                 _sb.StartNewBlock();
-                GenerateTaggedFieldWrite(valueType, "kvp.Value", 2, info.ValueIsPrimitive, info.NestedValueInfo, writerClassName, valuePrecalculatedSizeVar);
+                GenerateRepeatedFieldArrayWrite("kvp.Value", 2, info.NestedValueInfo!, writerClassName);
                 _sb.EndBlock();
             }
             else
             {
-                GenerateTaggedFieldWrite(valueType, "kvp.Value", 2, info.ValueIsPrimitive, info.NestedValueInfo, writerClassName, valuePrecalculatedSizeVar);
+                var isCollectionValue = info.NestedValueInfo != null &&
+                    info.NestedValueInfo.Kind == StandaloneTypeKind.Dictionary;
+
+                if (isCollectionValue)
+                {
+                    _sb.AppendIndentedLine("if (kvp.Value != null)");
+                    _sb.StartNewBlock();
+                    GenerateTaggedFieldWrite(valueType, "kvp.Value", 2, info.ValueIsPrimitive, info.NestedValueInfo, writerClassName);
+                    _sb.EndBlock();
+                }
+                else
+                {
+                    GenerateTaggedFieldWrite(valueType, "kvp.Value", 2, info.ValueIsPrimitive, info.NestedValueInfo, writerClassName);
+                }
             }
+        }
+
+        /// <summary>
+        /// Generate size calculation for array/list as repeated field entries (for dictionary values).
+        /// </summary>
+        private void GenerateRepeatedFieldArraySizeCalculation(string varName, int fieldNumber, StandaloneTypeInfo nestedInfo, string resultVarName)
+        {
+            var elementType = nestedInfo.ElementType!;
+            var tagSize = fieldNumber < 16 ? 1 : 2;
+            var safeVarName = varName.Replace(".", "_").Replace("[", "_").Replace("]", "_");
+
+            // Initialize size to 0, then calculate only if not null
+            _sb.AppendIndentedLine($"var {resultVarName} = 0;");
+            _sb.AppendIndentedLine($"if ({varName} != null)");
+            _sb.StartNewBlock();
+
+            if (nestedInfo.ElementIsPrimitive)
+            {
+                if (nestedInfo.ElementIsEnum)
+                {
+                    // For enum elements: each is field_tag + varint
+                    _sb.AppendIndentedLine($"foreach (var _elem_{safeVarName}_{fieldNumber} in {varName})");
+                    _sb.StartNewBlock();
+                    _sb.AppendIndentedLine($"{resultVarName} += {tagSize} + global::GProtobuf.Core.Utils.GetVarintSize((uint)(int)_elem_{safeVarName}_{fieldNumber});");
+                    _sb.EndBlock();
+                }
+                else
+                {
+                    // For primitive elements: each is field_tag + value
+                    var elemSize = GetPrimitiveSizeExpression(elementType, $"_elem_{safeVarName}_{fieldNumber}");
+                    _sb.AppendIndentedLine($"foreach (var _elem_{safeVarName}_{fieldNumber} in {varName})");
+                    _sb.StartNewBlock();
+                    _sb.AppendIndentedLine($"{resultVarName} += {tagSize} + {elemSize};");
+                    _sb.EndBlock();
+                }
+            }
+            else
+            {
+                // For complex elements: each is field_tag + length_prefix + content
+                var className = TypeNameHelper.GetClassName(elementType);
+                var sizeCalcClass = NamespaceHelper.GetSizeCalculatorsClass(elementType, _registry);
+                bool isDerivedType = _registry.IsDerivedType(elementType);
+                var sizeSuffix = isDerivedType ? "Size" : "ContentSize";
+
+                _sb.AppendIndentedLine($"foreach (var _elem_{safeVarName}_{fieldNumber} in {varName})");
+                _sb.StartNewBlock();
+                _sb.AppendIndentedLine($"var _elemCalc_{safeVarName}_{fieldNumber} = new global::GProtobuf.Core.WriteSizeCalculator();");
+                _sb.AppendIndentedLine($"{sizeCalcClass}.Calculate{className}{sizeSuffix}(ref _elemCalc_{safeVarName}_{fieldNumber}, _elem_{safeVarName}_{fieldNumber});");
+                _sb.AppendIndentedLine($"{resultVarName} += {tagSize} + global::GProtobuf.Core.Utils.GetVarintSize((uint)_elemCalc_{safeVarName}_{fieldNumber}.Length) + _elemCalc_{safeVarName}_{fieldNumber}.Length;");
+                _sb.EndBlock();
+            }
+
+            _sb.EndBlock(); // end if (varName != null)
+        }
+
+        /// <summary>
+        /// Generate write code for array/list as repeated field entries (for dictionary values).
+        /// </summary>
+        private void GenerateRepeatedFieldArrayWrite(string varName, int fieldNumber, StandaloneTypeInfo nestedInfo, string writerClassName)
+        {
+            var elementType = nestedInfo.ElementType!;
+            var wireType = 2; // length-delimited for complex types, but varies for primitives
+            var safeVarName = varName.Replace(".", "_").Replace("[", "_").Replace("]", "_");
+
+            _sb.AppendIndentedLine($"foreach (var _elem_{safeVarName}_{fieldNumber} in {varName})");
+            _sb.StartNewBlock();
+
+            if (nestedInfo.ElementIsPrimitive)
+            {
+                if (nestedInfo.ElementIsEnum)
+                {
+                    // Enum: field_tag (wire type 0) + varint value
+                    var tag = (fieldNumber << 3) | 0;
+                    _sb.AppendIndentedLine($"writer.WriteVarUInt32({tag}); // field {fieldNumber}, wire type 0 (varint for enum)");
+                    _sb.AppendIndentedLine($"writer.WriteVarInt32((int)_elem_{safeVarName}_{fieldNumber});");
+                }
+                else
+                {
+                    // Primitive: field_tag + value
+                    wireType = GetWireType(elementType);
+                    var tag = (fieldNumber << 3) | wireType;
+                    _sb.AppendIndentedLine($"writer.WriteVarUInt32({tag}); // field {fieldNumber}, wire type {wireType}");
+
+                    if (elementType == "string" || elementType == "System.String")
+                    {
+                        _sb.AppendIndentedLine($"writer.WriteString(_elem_{safeVarName}_{fieldNumber});");
+                    }
+                    else
+                    {
+                        var writeExpr = GetPrimitiveWriteExpression(elementType, $"_elem_{safeVarName}_{fieldNumber}");
+                        _sb.AppendIndentedLine($"writer.{writeExpr};");
+                    }
+                }
+            }
+            else
+            {
+                // Complex type: field_tag (wire type 2) + length + content
+                var tag = (fieldNumber << 3) | 2;
+                _sb.AppendIndentedLine($"writer.WriteVarUInt32({tag}); // field {fieldNumber}, wire type 2");
+
+                var className = TypeNameHelper.GetClassName(elementType);
+                var sizeCalcClass = NamespaceHelper.GetSizeCalculatorsClass(elementType, _registry);
+                var writerClass = NamespaceHelper.GetWritersClass(elementType, writerClassName, _registry);
+                bool isDerivedType = _registry.IsDerivedType(elementType);
+                var methodSuffix = isDerivedType ? "" : "Content";
+                var sizeSuffix = isDerivedType ? "Size" : "ContentSize";
+
+                _sb.AppendIndentedLine($"var _elemWriteCalc_{safeVarName}_{fieldNumber} = new global::GProtobuf.Core.WriteSizeCalculator();");
+                _sb.AppendIndentedLine($"{sizeCalcClass}.Calculate{className}{sizeSuffix}(ref _elemWriteCalc_{safeVarName}_{fieldNumber}, _elem_{safeVarName}_{fieldNumber});");
+                _sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)_elemWriteCalc_{safeVarName}_{fieldNumber}.Length);");
+                _sb.AppendIndentedLine($"{writerClass}.Write{className}{methodSuffix}(ref writer, _elem_{safeVarName}_{fieldNumber});");
+            }
+
+            _sb.EndBlock();
         }
 
         private void GenerateSizeCalculation(string typeName, string varName, int fieldNumber, bool isPrimitive, StandaloneTypeInfo? nestedInfo, string resultVarName)
