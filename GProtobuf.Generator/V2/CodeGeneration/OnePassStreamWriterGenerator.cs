@@ -168,6 +168,14 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 // Dictionary key type - write as nested map entries
                 GenerateDictionaryKeyWrite(virtualType, sourceVar, keyTypeInfo);
             }
+            else if (keyTypeInfo?.IsProtoVarint == true)
+            {
+                // ProtoVarint key type - write as simple varint
+                var valueMember = keyTypeInfo.ProtoVarintValueMember ?? "Value";
+                var writeMethod = PrimitiveTypeCodeGenerator.GetProtoVarintWriteMethod(keyTypeInfo.ProtoVarintType);
+                TagCodeHelper.WriteTag(_sb, 1, WireType.VarInt);
+                _sb.AppendIndentedLine($"writer.{writeMethod}({sourceVar}.{valueMember});");
+            }
             else
             {
                 // Custom ProtoContract key type - use namespace-qualified call
@@ -310,6 +318,16 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             if (TupleHandler.IsTupleType(virtualType.ValueType))
             {
                 GenerateTupleValueWrite(virtualType, sourceVar);
+                return;
+            }
+
+            // Handle ProtoVarint value types - write as simple varint
+            if (valueTypeInfo?.IsProtoVarint == true)
+            {
+                var valueMember = valueTypeInfo.ProtoVarintValueMember ?? "Value";
+                var writeMethod = PrimitiveTypeCodeGenerator.GetProtoVarintWriteMethod(valueTypeInfo.ProtoVarintType);
+                TagCodeHelper.WriteTag(_sb, 2, WireType.VarInt);
+                _sb.AppendIndentedLine($"writer.{writeMethod}({sourceVar}.{valueMember});");
                 return;
             }
 

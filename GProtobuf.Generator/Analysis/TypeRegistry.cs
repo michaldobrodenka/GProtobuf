@@ -131,6 +131,39 @@ namespace GProtobuf.Generator.Analysis
 
         public IReadOnlyCollection<string> GetAllEnums() => _enumTypes;
 
+        /// <summary>
+        /// Checks if a type is marked with [ProtoVarint] attribute.
+        /// </summary>
+        public bool IsProtoVarint(string typeName)
+        {
+            var type = GetByFullName(typeName);
+            return type?.IsProtoVarint == true;
+        }
+
+        /// <summary>
+        /// Gets the ProtoVarint type for a type marked with [ProtoVarint] attribute.
+        /// Returns null if the type is not a ProtoVarint type.
+        /// </summary>
+        public Attributes.ProtoVarintType? GetProtoVarintType(string typeName)
+        {
+            var type = GetByFullName(typeName);
+            if (type?.IsProtoVarint == true)
+                return type.ProtoVarintType;
+            return null;
+        }
+
+        /// <summary>
+        /// Gets the value member name for a type marked with [ProtoVarint] attribute.
+        /// Returns null if the type is not a ProtoVarint type.
+        /// </summary>
+        public string GetProtoVarintValueMember(string typeName)
+        {
+            var type = GetByFullName(typeName);
+            if (type?.IsProtoVarint == true)
+                return type.ProtoVarintValueMember;
+            return null;
+        }
+
         public string GetNamespaceForType(string fullTypeName)
         {
             if (string.IsNullOrEmpty(fullTypeName))

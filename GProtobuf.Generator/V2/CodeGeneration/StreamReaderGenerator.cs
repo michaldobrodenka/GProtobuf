@@ -710,6 +710,13 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 _sb.AppendIndentedLine($"{targetVar} = (global::{typeName}){readerVar}.ReadVarInt32();");
             }
+            else if (typeInfo?.IsProtoVarint == true)
+            {
+                // ProtoVarint type - read as simple varint and construct via constructor
+                var readMethod = Helpers.PrimitiveTypeCodeGenerator.GetProtoVarintReadMethod(typeInfo.ProtoVarintType);
+                var globalTypeName = TypeMapping.GetGlobalGenericTypeName(typeName);
+                _sb.AppendIndentedLine($"{targetVar} = new {globalTypeName}({readerVar}.{readMethod}());");
+            }
             else
             {
                 // Complex type - use PushLimit for zero-allocation nested message reading
@@ -3533,6 +3540,20 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 _sb.AppendIndentedLine(primitiveAssignment);
                 return;
+            }
+
+            // Check for ProtoVarint types (types with [ProtoVarint] attribute, e.g., KNXAddress, DeviceId)
+            // These are readonly structs that wrap a varint value and should be read directly via constructor
+            if (_virtualMapRegistry != null)
+            {
+                var typeInfo = _virtualMapRegistry.AnalyzeType(normalizedType);
+                if (typeInfo != null && typeInfo.IsProtoVarint)
+                {
+                    var readMethod = Helpers.PrimitiveTypeCodeGenerator.GetProtoVarintReadMethod(typeInfo.ProtoVarintType);
+                    var globalTypeName = TypeMapping.GetGlobalGenericTypeName(typeName);
+                    _sb.AppendIndentedLine($"{varName} = new {globalTypeName}({readerVar}.{readMethod}());");
+                    return;
+                }
             }
 
             // Complex type handling:

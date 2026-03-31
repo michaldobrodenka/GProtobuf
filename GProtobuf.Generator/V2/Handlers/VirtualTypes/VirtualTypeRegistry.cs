@@ -1,5 +1,7 @@
+using GProtobuf.Generator.Attributes;
 using GProtobuf.Generator.V2.Helpers;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
 {
@@ -349,6 +351,36 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 return info;
             }
 
+            // Check for ProtoVarint type (before IsCustomType check)
+            // ProtoVarint types are treated as primitives (varints), not as custom message types
+            // First try to find in TypeRegistry (types with [ProtoContract])
+            if (_typeRegistry != null && _typeRegistry.IsProtoVarint(normalized))
+            {
+                var varintType = _typeRegistry.GetProtoVarintType(normalized);
+                var valueMember = _typeRegistry.GetProtoVarintValueMember(normalized);
+                info.IsProtoVarint = true;
+                info.ProtoVarintType = varintType ?? ProtoVarintType.UInt32;
+                info.ProtoVarintValueMember = valueMember;
+                info.ShortTypeName = TypeNameHelper.GetClassName(typeName);
+                info.IsStruct = true; // ProtoVarint types are typically readonly structs
+                return info;
+            }
+
+            // If not in TypeRegistry, try to check via Compilation (types without [ProtoContract])
+            if (_compilation != null)
+            {
+                var protoVarintInfo = TryGetProtoVarintInfoFromCompilation(normalized);
+                if (protoVarintInfo != null)
+                {
+                    info.IsProtoVarint = true;
+                    info.ProtoVarintType = protoVarintInfo.Value.VarintType;
+                    info.ProtoVarintValueMember = protoVarintInfo.Value.ValueMember;
+                    info.ShortTypeName = TypeNameHelper.GetClassName(typeName);
+                    info.IsStruct = true;
+                    return info;
+                }
+            }
+
             // Custom class/message type
             info.IsCustomType = true;
             info.ShortTypeName = TypeNameHelper.GetClassName(typeName);
@@ -488,6 +520,81 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             return null;
         }
 
+        /// <summary>
+        /// Result of ProtoVarint info extraction from compilation.
+        /// </summary>
+        private struct ProtoVarintCompilationInfo
+        {
+            public ProtoVarintType VarintType;
+            public string ValueMember;
+        }
+
+        /// <summary>
+        /// Tries to get ProtoVarint info by checking the type's attributes via Compilation.
+        /// This is used for types that don't have [ProtoContract] but have [ProtoVarint].
+        /// </summary>
+        private ProtoVarintCompilationInfo? TryGetProtoVarintInfoFromCompilation(string typeName)
+        {
+            if (_compilation == null || string.IsNullOrEmpty(typeName))
+                return null;
+
+            var typeSymbol = _compilation.GetTypeByMetadataName(typeName);
+            if (typeSymbol == null)
+                return null;
+
+            // Check for [ProtoVarint] attribute
+            var protoVarintAttr = typeSymbol.GetAttributes().FirstOrDefault(a =>
+                a.AttributeClass?.Name == "ProtoVarintAttribute");
+
+            if (protoVarintAttr == null)
+                return null;
+
+            // Get the varint type from attribute (default is UInt32 = 0)
+            var varintType = ProtoVarintType.UInt32;
+            if (protoVarintAttr.ConstructorArguments.Length > 0 &&
+                protoVarintAttr.ConstructorArguments[0].Value is int typeValue)
+            {
+                varintType = (ProtoVarintType)typeValue;
+            }
+
+            // Find [ProtoVarintValue] member
+            string valueMemberName = null;
+            foreach (var member in typeSymbol.GetMembers())
+            {
+                var hasValueAttr = member.GetAttributes().Any(a =>
+                    a.AttributeClass?.Name == "ProtoVarintValueAttribute");
+
+                if (hasValueAttr)
+                {
+                    if (member is Microsoft.CodeAnalysis.IPropertySymbol prop)
+                    {
+                        valueMemberName = prop.Name;
+                        break;
+                    }
+                    else if (member is Microsoft.CodeAnalysis.IFieldSymbol field)
+                    {
+                        valueMemberName = field.Name;
+                        break;
+                    }
+                    else if (member is Microsoft.CodeAnalysis.IMethodSymbol method && method.Parameters.Length == 0)
+                    {
+                        // For methods, we need to add parentheses when calling
+                        valueMemberName = method.Name + "()";
+                        break;
+                    }
+                }
+            }
+
+            if (valueMemberName == null)
+                return null;
+
+            return new ProtoVarintCompilationInfo
+            {
+                VarintType = varintType,
+                ValueMember = valueMemberName
+            };
+        }
+
         #endregion
     }
 
@@ -539,6 +646,11 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         public string DictionaryKeyType { get; set; }
         public string DictionaryValueType { get; set; }
         public string MapEntryTypeName { get; set; }
+
+        // For ProtoVarint types (structs marked with [ProtoVarint])
+        public bool IsProtoVarint { get; set; }
+        public ProtoVarintType ProtoVarintType { get; set; }
+        public string ProtoVarintValueMember { get; set; }
     }
 
     /// <summary>

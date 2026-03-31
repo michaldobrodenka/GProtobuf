@@ -1,3 +1,5 @@
+using GProtobuf.Generator.Attributes;
+
 namespace GProtobuf.Generator.V2.Helpers
 {
     /// <summary>
@@ -144,6 +146,40 @@ namespace GProtobuf.Generator.V2.Helpers
                 "System.String" or "string" => "\"\"",
                 "System.Byte[]" => "global::System.Array.Empty<byte>()",
                 _ => "default"
+            };
+        }
+
+        /// <summary>
+        /// Gets the write method name for a ProtoVarint type.
+        /// </summary>
+        public static string GetProtoVarintWriteMethod(ProtoVarintType type)
+        {
+            return type switch
+            {
+                ProtoVarintType.UInt32 => "WriteVarUInt32",
+                ProtoVarintType.Int32 => "WriteVarInt32",
+                ProtoVarintType.SInt32 => "WriteZigZag32",
+                ProtoVarintType.UInt64 => "WriteVarUInt64",
+                ProtoVarintType.Int64 => "WriteVarInt64",
+                ProtoVarintType.SInt64 => "WriteZigZag64",
+                _ => "WriteVarUInt32"
+            };
+        }
+
+        /// <summary>
+        /// Gets the read method name for a ProtoVarint type.
+        /// </summary>
+        public static string GetProtoVarintReadMethod(ProtoVarintType type)
+        {
+            return type switch
+            {
+                ProtoVarintType.UInt32 => "ReadVarUInt32",
+                ProtoVarintType.Int32 => "ReadVarInt32",
+                ProtoVarintType.SInt32 => "ReadZigZagVarInt32",
+                ProtoVarintType.UInt64 => "ReadVarUInt64",
+                ProtoVarintType.Int64 => "ReadVarInt64",
+                ProtoVarintType.SInt64 => "ReadZigZagVarInt64",
+                _ => "ReadVarUInt32"
             };
         }
     }

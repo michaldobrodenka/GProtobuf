@@ -82,6 +82,9 @@ public sealed class SerializerGenerator : IIncrementalGenerator
 
                 var (beforeCallbacks, afterCallbacks) = GetSerializationCallbacks(typeWithAttribute);
 
+                // Check if this type itself is a ProtoVarint type
+                var typeProtoVarintInfo = GetProtoVarintInfo(typeWithAttribute);
+
                 var typeDefinition = new TypeDefinition(
                     IsStruct: typeWithAttribute.TypeKind == Microsoft.CodeAnalysis.TypeKind.Struct,
                     IsAbstract: typeWithAttribute.IsAbstract,
@@ -97,7 +100,10 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                     IsCustomCollection: isCustomCollection,
                     CustomCollectionElementType: customCollectionElementType,
                     BeforeSerializationCallbacks: beforeCallbacks,
-                    AfterSerializationCallbacks: afterCallbacks);
+                    AfterSerializationCallbacks: afterCallbacks,
+                    IsProtoVarint: typeProtoVarintInfo?.IsValid ?? false,
+                    ProtoVarintType: typeProtoVarintInfo?.VarintType ?? ProtoVarintType.UInt32,
+                    ProtoVarintValueMember: typeProtoVarintInfo?.ValueMemberName);
 
                 return (namespaceName, typeDefinition);
             });
@@ -140,6 +146,9 @@ public sealed class SerializerGenerator : IIncrementalGenerator
 
                 var (beforeCallbacks, afterCallbacks) = GetSerializationCallbacks(typeWithAttribute);
 
+                // Check if this type itself is a ProtoVarint type
+                var typeProtoVarintInfo = GetProtoVarintInfo(typeWithAttribute);
+
                 var typeDefinition = new TypeDefinition(
                     IsStruct: typeWithAttribute.TypeKind == Microsoft.CodeAnalysis.TypeKind.Struct,
                     IsAbstract: typeWithAttribute.IsAbstract,
@@ -155,7 +164,10 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                     IsCustomCollection: isCustomCollection,
                     CustomCollectionElementType: customCollectionElementType,
                     BeforeSerializationCallbacks: beforeCallbacks,
-                    AfterSerializationCallbacks: afterCallbacks);
+                    AfterSerializationCallbacks: afterCallbacks,
+                    IsProtoVarint: typeProtoVarintInfo?.IsValid ?? false,
+                    ProtoVarintType: typeProtoVarintInfo?.VarintType ?? ProtoVarintType.UInt32,
+                    ProtoVarintValueMember: typeProtoVarintInfo?.ValueMemberName);
 
                 return (namespaceName, typeDefinition);
             });

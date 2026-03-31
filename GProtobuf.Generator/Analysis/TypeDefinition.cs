@@ -78,5 +78,8 @@ namespace GProtobuf.Generator.Analysis
         bool IsCustomCollection = false,
         string? CustomCollectionElementType = null,
         List<SerializationCallback>? BeforeSerializationCallbacks = null,
-        List<SerializationCallback>? AfterSerializationCallbacks = null);
+        List<SerializationCallback>? AfterSerializationCallbacks = null,
+        bool IsProtoVarint = false,
+        ProtoVarintType ProtoVarintType = ProtoVarintType.UInt32,
+        string? ProtoVarintValueMember = null);
 }

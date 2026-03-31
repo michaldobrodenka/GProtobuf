@@ -251,4 +251,21 @@ namespace GProtobuf.CrossTests.TestModel
         [ProtoMember(3)]
         public KNXAddress NonZeroAddress { get; set; }
     }
+
+    /// <summary>
+    /// Test model with Dictionary where ProtoVarint type is the key.
+    /// This tests the fix for CalculateMapEntry not calling CalculateXxxContentSize for ProtoVarint types.
+    /// </summary>
+    [ProtoContract]
+    public class DictionaryWithProtoVarintKeyModel
+    {
+        [ProtoMember(1)]
+        public int Id { get; set; }
+
+        [ProtoMember(2)]
+        public System.Collections.Generic.Dictionary<KNXAddress, string> AddressNames { get; set; }
+
+        [ProtoMember(3)]
+        public System.Collections.Generic.Dictionary<DeviceId, int> DeviceValues { get; set; }
+    }
 }

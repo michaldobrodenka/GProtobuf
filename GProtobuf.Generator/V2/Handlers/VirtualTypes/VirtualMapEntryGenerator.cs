@@ -435,6 +435,16 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 return;
             }
 
+            // Check if this is a ProtoVarint type
+            // ProtoVarint types are read as simple varints and constructed via constructor
+            if (typeInfo.IsProtoVarint)
+            {
+                var readMethod = Helpers.PrimitiveTypeCodeGenerator.GetProtoVarintReadMethod(typeInfo.ProtoVarintType);
+                var globalTypeName = TypeMapping.GetGlobalGenericTypeName(typeName);
+                _sb.AppendIndentedLine($"{targetVar} = new {globalTypeName}(reader.{readMethod}());");
+                return;
+            }
+
             if (typeInfo.IsCustomType)
             {
                 // Custom message type - use scoped reader to limit reading to message bounds
@@ -1007,6 +1017,16 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 return;
             }
 
+            // Check if this is a ProtoVarint type (before IsCustomType check)
+            // ProtoVarint types are read as simple varints and constructed via constructor
+            if (typeInfo.IsProtoVarint)
+            {
+                var readMethod = Helpers.PrimitiveTypeCodeGenerator.GetProtoVarintReadMethod(typeInfo.ProtoVarintType);
+                var globalTypeName = TypeMapping.GetGlobalGenericTypeName(typeName);
+                _sb.AppendIndentedLine($"{targetVar} = new {globalTypeName}({readerVar}.{readMethod}());");
+                return;
+            }
+
             if (typeInfo.IsCustomType)
             {
                 // Complex type - use StreamReaders with PushLimit (zero-allocation)
@@ -1507,6 +1527,19 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 return;
             }
 
+            // Check if this is a ProtoVarint type (before IsCustomType check)
+            // ProtoVarint types are serialized as simple varints, not as length-prefixed messages
+            if (typeInfo.IsProtoVarint)
+            {
+                if (string.IsNullOrEmpty(typeInfo.ProtoVarintValueMember))
+                    throw new InvalidOperationException($"ProtoVarint type '{typeName}' has IsProtoVarint=true but ProtoVarintValueMember is not set");
+                var valueMember = typeInfo.ProtoVarintValueMember;
+                var sizeMethod = GetProtoVarintSizeMethod(typeInfo.ProtoVarintType);
+                var castPrefix = GetProtoVarintCastPrefix(typeInfo.ProtoVarintType);
+                _sb.AppendIndentedLine($"{calcVar}.{sizeMethod}({castPrefix}{sourceVar}.{valueMember});");
+                return;
+            }
+
             if (typeInfo.IsCustomType)
             {
                 var sanitizedName = typeInfo.ShortTypeName;
@@ -1770,6 +1803,19 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 return;
             }
 
+            // Check if this is a ProtoVarint type (before IsCustomType check)
+            // ProtoVarint types are serialized as simple varints, not as length-prefixed messages
+            if (typeInfo.IsProtoVarint)
+            {
+                if (string.IsNullOrEmpty(typeInfo.ProtoVarintValueMember))
+                    throw new InvalidOperationException($"ProtoVarint type '{typeName}' has IsProtoVarint=true but ProtoVarintValueMember is not set");
+                var valueMember = typeInfo.ProtoVarintValueMember;
+                var writeMethod = Helpers.PrimitiveTypeCodeGenerator.GetProtoVarintWriteMethod(typeInfo.ProtoVarintType);
+                var castPrefix = GetProtoVarintCastPrefix(typeInfo.ProtoVarintType);
+                _sb.AppendIndentedLine($"writer.{writeMethod}({castPrefix}{sourceVar}.{valueMember});");
+                return;
+            }
+
             if (typeInfo.IsCustomType)
             {
                 var sanitizedName = typeInfo.ShortTypeName;
@@ -1992,6 +2038,38 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         private static string GetNullableValueAccess(string sourceVar, string typeName)
         {
             return typeName.EndsWith("?") ? $"{sourceVar}.Value" : sourceVar;
+        }
+
+        /// <summary>
+        /// Gets the size calculator method name for a ProtoVarint type.
+        /// </summary>
+        private static string GetProtoVarintSizeMethod(ProtoVarintType type)
+        {
+            return type switch
+            {
+                ProtoVarintType.UInt32 => "WriteVarUInt32",
+                ProtoVarintType.Int32 => "WriteVarInt32",
+                ProtoVarintType.SInt32 => "WriteZigZag32",
+                ProtoVarintType.UInt64 => "WriteVarUInt64",
+                ProtoVarintType.Int64 => "WriteVarInt64",
+                ProtoVarintType.SInt64 => "WriteZigZag64",
+                _ => "WriteVarUInt32"
+            };
+        }
+
+        /// <summary>
+        /// Gets the cast prefix for a ProtoVarint type value.
+        /// </summary>
+        private static string GetProtoVarintCastPrefix(ProtoVarintType type)
+        {
+            return type switch
+            {
+                ProtoVarintType.Int32 => "(int)",
+                ProtoVarintType.SInt32 => "(int)",
+                ProtoVarintType.Int64 => "(long)",
+                ProtoVarintType.SInt64 => "(long)",
+                _ => ""
+            };
         }
 
         /// <summary>
@@ -2222,6 +2300,12 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
 
         private static WireType GetWireType(TypeAnalysisInfo typeInfo)
         {
+            // ProtoVarint types are serialized as varints, not length-prefixed
+            if (typeInfo.IsProtoVarint)
+            {
+                return WireType.VarInt;
+            }
+
             if (typeInfo.IsString || typeInfo.IsGuid || typeInfo.IsDictionary ||
                 typeInfo.IsCollection || typeInfo.IsCustomType || typeInfo.IsArray)
             {
