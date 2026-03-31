@@ -313,5 +313,71 @@ namespace GProtobuf.Generator.V2.CodeGeneration.Core
         }
 
         #endregion
+
+        #region Serialization Callbacks
+
+        /// <summary>
+        /// Generates code to invoke [ProtoBeforeSerialization] callback methods.
+        /// Called before serialization to allow pre-processing (e.g., computing checksums).
+        /// </summary>
+        /// <param name="type">The type definition containing callback info</param>
+        /// <param name="instanceVar">The instance variable name (default: "instance")</param>
+        protected void GenerateBeforeSerializationCallbacks(TypeDefinition type, string instanceVar = "instance")
+        {
+            if (type.BeforeSerializationCallbacks == null || type.BeforeSerializationCallbacks.Count == 0)
+                return;
+
+            _sb.AppendIndentedLine("// [ProtoBeforeSerialization] callbacks");
+            foreach (var callback in type.BeforeSerializationCallbacks)
+            {
+                // Skip invalid callbacks (static or with parameters) - these are filtered at analysis time,
+                // but we keep this check for safety
+                if (callback.IsStatic || callback.HasParameters)
+                {
+                    _sb.AppendIndentedLine($"// WARNING: Skipping invalid callback '{callback.MethodName}' (static={callback.IsStatic}, hasParams={callback.HasParameters})");
+                    continue;
+                }
+
+                _sb.AppendIndentedLine($"{instanceVar}.{callback.MethodName}();");
+            }
+            _sb.AppendNewLine();
+        }
+
+        /// <summary>
+        /// Generates code to invoke [ProtoAfterSerialization] callback methods.
+        /// Called after serialization completes (typically in finally block to handle early returns).
+        /// </summary>
+        /// <param name="type">The type definition containing callback info</param>
+        /// <param name="instanceVar">The instance variable name (default: "instance")</param>
+        protected void GenerateAfterSerializationCallbacks(TypeDefinition type, string instanceVar = "instance")
+        {
+            if (type.AfterSerializationCallbacks == null || type.AfterSerializationCallbacks.Count == 0)
+                return;
+
+            _sb.AppendIndentedLine("// [ProtoAfterSerialization] callbacks");
+            foreach (var callback in type.AfterSerializationCallbacks)
+            {
+                // Skip invalid callbacks (static or with parameters) - these are filtered at analysis time,
+                // but we keep this check for safety
+                if (callback.IsStatic || callback.HasParameters)
+                {
+                    _sb.AppendIndentedLine($"// WARNING: Skipping invalid callback '{callback.MethodName}' (static={callback.IsStatic}, hasParams={callback.HasParameters})");
+                    continue;
+                }
+
+                _sb.AppendIndentedLine($"{instanceVar}.{callback.MethodName}();");
+            }
+        }
+
+        /// <summary>
+        /// Checks if a type has any after-serialization callbacks.
+        /// Used to determine if try-finally block is needed.
+        /// </summary>
+        protected bool HasAfterSerializationCallbacks(TypeDefinition type)
+        {
+            return type.AfterSerializationCallbacks != null && type.AfterSerializationCallbacks.Count > 0;
+        }
+
+        #endregion
     }
 }

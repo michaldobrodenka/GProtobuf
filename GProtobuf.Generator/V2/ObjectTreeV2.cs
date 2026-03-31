@@ -753,17 +753,51 @@ namespace GProtobuf.Generator.V2
                     sb.AppendIndentedLine("/// </summary>");
                     sb.AppendIndentedLine($"public static byte[] SerializeToArray{className}(global::{type.FullName} obj)");
                     sb.StartNewBlock();
-                    sb.AppendIndentedLine("// Calculate size first (ContentSize handles polymorphism for inheritance hierarchies)");
+
+                    // Add null check for reference types
+                    if (!type.IsStruct)
+                    {
+                        sb.AppendIndentedLine("if (obj == null) return System.Array.Empty<byte>();");
+                    }
+
+                    // Generate [ProtoBeforeSerialization] callbacks BEFORE size calculation
+                    // This ensures any state changes are reflected in the calculated size
+                    bool hasBeforeCallbacks = type.BeforeSerializationCallbacks != null && type.BeforeSerializationCallbacks.Count > 0;
+                    bool hasAfterCallbacks = type.AfterSerializationCallbacks != null && type.AfterSerializationCallbacks.Count > 0;
+
+                    if (hasBeforeCallbacks)
+                    {
+                        sb.AppendIndentedLine("// [ProtoBeforeSerialization] callbacks - MUST be called BEFORE size calculation");
+                        foreach (var callback in type.BeforeSerializationCallbacks)
+                        {
+                            if (!callback.IsStatic && !callback.HasParameters)
+                            {
+                                sb.AppendIndentedLine($"obj.{callback.MethodName}();");
+                            }
+                        }
+                        sb.AppendNewLine();
+                    }
+
+                    sb.AppendIndentedLine("// Calculate size (callbacks already invoked, state is up to date)");
                     sb.AppendIndentedLine("var sizeCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
                     sb.AppendIndentedLine($"SizeCalculators.Calculate{className}ContentSize(ref sizeCalc, obj);");
                     sb.AppendIndentedLine("int size = sizeCalc.Length;");
                     sb.AppendNewLine();
+
+                    // Wrap in try-finally if we have AfterSerialization callbacks
+                    if (hasAfterCallbacks)
+                    {
+                        sb.AppendIndentedLine("try");
+                        sb.StartNewBlock();
+                    }
+
                     sb.AppendIndentedLine("// Use stackalloc for small messages, ArrayPool for larger");
                     sb.AppendIndentedLine("if (size <= 512)");
                     sb.StartNewBlock();
                     sb.AppendIndentedLine("Span<byte> buffer = stackalloc byte[size];");
                     sb.AppendIndentedLine("var writer = new global::GProtobuf.Core.StackBufferWriter(buffer);");
-                    sb.AppendIndentedLine($"StackBufferWriters.Write{className}(ref writer, obj);");
+                    // Use WriteContent instead of Write to avoid duplicate callback invocation
+                    sb.AppendIndentedLine($"StackBufferWriters.Write{className}Content(ref writer, obj);");
                     sb.AppendIndentedLine("return buffer.Slice(0, writer.Written).ToArray();");
                     sb.EndBlock();
                     sb.AppendIndentedLine("else");
@@ -772,7 +806,8 @@ namespace GProtobuf.Generator.V2
                     sb.AppendIndentedLine("try");
                     sb.StartNewBlock();
                     sb.AppendIndentedLine("var writer = new global::GProtobuf.Core.StackBufferWriter(buffer);");
-                    sb.AppendIndentedLine($"StackBufferWriters.Write{className}(ref writer, obj);");
+                    // Use WriteContent instead of Write to avoid duplicate callback invocation
+                    sb.AppendIndentedLine($"StackBufferWriters.Write{className}Content(ref writer, obj);");
                     sb.AppendIndentedLine("return buffer.AsSpan(0, writer.Written).ToArray();");
                     sb.EndBlock();
                     sb.AppendIndentedLine("finally");
@@ -780,6 +815,24 @@ namespace GProtobuf.Generator.V2
                     sb.AppendIndentedLine("System.Buffers.ArrayPool<byte>.Shared.Return(buffer);");
                     sb.EndBlock();
                     sb.EndBlock();
+
+                    // Generate [ProtoAfterSerialization] callbacks
+                    if (hasAfterCallbacks)
+                    {
+                        sb.EndBlock(); // try
+                        sb.AppendIndentedLine("finally");
+                        sb.StartNewBlock();
+                        sb.AppendIndentedLine("// [ProtoAfterSerialization] callbacks");
+                        foreach (var callback in type.AfterSerializationCallbacks)
+                        {
+                            if (!callback.IsStatic && !callback.HasParameters)
+                            {
+                                sb.AppendIndentedLine($"obj.{callback.MethodName}();");
+                            }
+                        }
+                        sb.EndBlock(); // finally
+                    }
+
                     sb.EndBlock();
                     sb.AppendNewLine();
                 }

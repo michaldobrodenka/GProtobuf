@@ -80,6 +80,8 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                     }
                 }
 
+                var (beforeCallbacks, afterCallbacks) = GetSerializationCallbacks(typeWithAttribute);
+
                 var typeDefinition = new TypeDefinition(
                     IsStruct: typeWithAttribute.TypeKind == Microsoft.CodeAnalysis.TypeKind.Struct,
                     IsAbstract: typeWithAttribute.IsAbstract,
@@ -93,7 +95,9 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                     CustomBufferMembers: customBufferMembers,
                     EnableRecursionGuard: enableRecursionGuard,
                     IsCustomCollection: isCustomCollection,
-                    CustomCollectionElementType: customCollectionElementType);
+                    CustomCollectionElementType: customCollectionElementType,
+                    BeforeSerializationCallbacks: beforeCallbacks,
+                    AfterSerializationCallbacks: afterCallbacks);
 
                 return (namespaceName, typeDefinition);
             });
@@ -134,6 +138,8 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                     }
                 }
 
+                var (beforeCallbacks, afterCallbacks) = GetSerializationCallbacks(typeWithAttribute);
+
                 var typeDefinition = new TypeDefinition(
                     IsStruct: typeWithAttribute.TypeKind == Microsoft.CodeAnalysis.TypeKind.Struct,
                     IsAbstract: typeWithAttribute.IsAbstract,
@@ -147,7 +153,9 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                     CustomBufferMembers: customBufferMembers,
                     EnableRecursionGuard: false,
                     IsCustomCollection: isCustomCollection,
-                    CustomCollectionElementType: customCollectionElementType);
+                    CustomCollectionElementType: customCollectionElementType,
+                    BeforeSerializationCallbacks: beforeCallbacks,
+                    AfterSerializationCallbacks: afterCallbacks);
 
                 return (namespaceName, typeDefinition);
             });
@@ -1198,5 +1206,66 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                 return value;
         }
         return false;
+    }
+
+    /// <summary>
+    /// Extracts serialization callback methods from a type.
+    /// Looks for methods marked with [ProtoBeforeSerialization] and [ProtoAfterSerialization].
+    /// Only includes methods that can be invoked from generated code:
+    /// - Non-private (must be accessible)
+    /// - Non-static (need instance context)
+    /// - Parameterless (we don't support StreamingContext parameter)
+    /// </summary>
+    private static (List<SerializationCallback> before, List<SerializationCallback> after) GetSerializationCallbacks(INamedTypeSymbol typeSymbol)
+    {
+        List<SerializationCallback> beforeCallbacks = null;
+        List<SerializationCallback> afterCallbacks = null;
+
+        foreach (var method in typeSymbol.GetMembers().OfType<IMethodSymbol>())
+        {
+            // Skip constructors, property accessors, etc.
+            if (method.MethodKind != MethodKind.Ordinary)
+                continue;
+
+            // Skip private methods - they can't be called from generated code
+            if (method.DeclaredAccessibility == Accessibility.Private)
+                continue;
+
+            // Skip static methods - callbacks need instance context
+            if (method.IsStatic)
+                continue;
+
+            // Skip methods with parameters - we only support parameterless callbacks
+            if (method.Parameters.Length > 0)
+                continue;
+
+            foreach (var attribute in method.GetAttributes())
+            {
+                var attrName = attribute.AttributeClass?.Name;
+
+                if (attrName == "ProtoBeforeSerializationAttribute")
+                {
+                    beforeCallbacks ??= new List<SerializationCallback>();
+                    beforeCallbacks.Add(new SerializationCallback
+                    {
+                        MethodName = method.Name,
+                        IsStatic = false,
+                        HasParameters = false
+                    });
+                }
+                else if (attrName == "ProtoAfterSerializationAttribute")
+                {
+                    afterCallbacks ??= new List<SerializationCallback>();
+                    afterCallbacks.Add(new SerializationCallback
+                    {
+                        MethodName = method.Name,
+                        IsStatic = false,
+                        HasParameters = false
+                    });
+                }
+            }
+        }
+
+        return (beforeCallbacks, afterCallbacks);
     }
 }

@@ -683,8 +683,27 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 _sb.AppendIndentedLine("if (instance == null) return;");
             }
 
+            GenerateBeforeSerializationCallbacks(type);
+
+            bool hasAfterCallbacks = HasAfterSerializationCallbacks(type);
+
+            if (hasAfterCallbacks)
+            {
+                _sb.AppendIndentedLine("try");
+                _sb.StartNewBlock();
+            }
+
             // For OnePass, we simply write content directly
             _sb.AppendIndentedLine($"Write{className}Content(ref writer, instance);");
+
+            if (hasAfterCallbacks)
+            {
+                _sb.EndBlock(); // try
+                _sb.AppendIndentedLine("finally");
+                _sb.StartNewBlock();
+                GenerateAfterSerializationCallbacks(type);
+                _sb.EndBlock(); // finally
+            }
 
             _sb.EndBlock();
             _sb.AppendNewLine();

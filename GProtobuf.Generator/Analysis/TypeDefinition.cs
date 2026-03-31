@@ -76,5 +76,7 @@ namespace GProtobuf.Generator.Analysis
         List<CustomBufferMember>? CustomBufferMembers = null,
         bool EnableRecursionGuard = false,
         bool IsCustomCollection = false,
-        string? CustomCollectionElementType = null);
+        string? CustomCollectionElementType = null,
+        List<SerializationCallback>? BeforeSerializationCallbacks = null,
+        List<SerializationCallback>? AfterSerializationCallbacks = null);
 }
