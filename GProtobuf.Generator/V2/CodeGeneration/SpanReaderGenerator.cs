@@ -180,13 +180,16 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     throw new System.Exception($"Error in GenerateReadContentMethod for type '{type.FullName}'", ex);
                 }
 
-                try
+                if (!_registry.IsReadonlyStruct(type.FullName))
                 {
-                    GeneratePopulateMethod(type);
-                }
-                catch (System.Exception ex)
-                {
-                    throw new System.Exception($"Error in GeneratePopulateMethod for type '{type.FullName}'", ex);
+                    try
+                    {
+                        GeneratePopulateMethod(type);
+                    }
+                    catch (System.Exception ex)
+                    {
+                        throw new System.Exception($"Error in GeneratePopulateMethod for type '{type.FullName}'", ex);
+                    }
                 }
 
                 // Generate OwnFieldsPopulate for derived types
@@ -224,13 +227,16 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                         throw new System.Exception($"Error in GenerateReadContentMethod for ProtoInclude type '{protoIncludeTypeName}'", ex);
                     }
 
-                    try
+                    if (!_registry.IsReadonlyStruct(protoIncludeTypeName))
                     {
-                        GeneratePopulateMethod(protoIncludeType);
-                    }
-                    catch (System.Exception ex)
-                    {
-                        throw new System.Exception($"Error in GeneratePopulateMethod for ProtoInclude type '{protoIncludeTypeName}'", ex);
+                        try
+                        {
+                            GeneratePopulateMethod(protoIncludeType);
+                        }
+                        catch (System.Exception ex)
+                        {
+                            throw new System.Exception($"Error in GeneratePopulateMethod for ProtoInclude type '{protoIncludeTypeName}'", ex);
+                        }
                     }
 
                     // Generate OwnFieldsPopulate for ProtoInclude derived types
@@ -1948,9 +1954,20 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     }
                     else
                     {
-                        _sb.AppendIndentedLine($"var _temp_{member.Name} = new global::{instanceType}();");
-                        _sb.AppendIndentedLine($"{nsPrefix}SpanReaders.Populate{typeName}(ref complexReader_{member.FieldId}, ref _temp_{member.Name});");
-                        _sb.AppendIndentedLine($"instance.{member.Name} = _temp_{member.Name};");
+                        // Check if this is a readonly struct - use ReadContent instead of Populate
+                        bool isReadonlyStruct = _registry?.IsReadonlyStruct(instanceType) ?? false;
+                        if (isReadonlyStruct)
+                        {
+                            // Readonly struct - use ReadContent which uses constructor
+                            _sb.AppendIndentedLine($"instance.{member.Name} = {nsPrefix}SpanReaders.Read{typeName}Content(ref complexReader_{member.FieldId});");
+                        }
+                        else
+                        {
+                            // Mutable struct - use Populate pattern
+                            _sb.AppendIndentedLine($"var _temp_{member.Name} = new global::{instanceType}();");
+                            _sb.AppendIndentedLine($"{nsPrefix}SpanReaders.Populate{typeName}(ref complexReader_{member.FieldId}, ref _temp_{member.Name});");
+                            _sb.AppendIndentedLine($"instance.{member.Name} = _temp_{member.Name};");
+                        }
                     }
                 }
             }
@@ -2287,9 +2304,20 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     }
                     else
                     {
-                        _sb.AppendIndentedLine($"var _temp_{member.Name} = new global::{instanceType}();");
-                        _sb.AppendIndentedLine($"{nsPrefix}SpanReaders.Populate{typeName}(ref nestedReader, ref _temp_{member.Name});");
-                        _sb.AppendIndentedLine($"instance.{member.Name} = _temp_{member.Name};");
+                        // Check if this is a readonly struct - use ReadContent instead of Populate
+                        bool isReadonlyStruct = _registry?.IsReadonlyStruct(instanceType) ?? false;
+                        if (isReadonlyStruct)
+                        {
+                            // Readonly struct - use ReadContent which uses constructor
+                            _sb.AppendIndentedLine($"instance.{member.Name} = {nsPrefix}SpanReaders.Read{typeName}Content(ref nestedReader);");
+                        }
+                        else
+                        {
+                            // Mutable struct - use Populate pattern
+                            _sb.AppendIndentedLine($"var _temp_{member.Name} = new global::{instanceType}();");
+                            _sb.AppendIndentedLine($"{nsPrefix}SpanReaders.Populate{typeName}(ref nestedReader, ref _temp_{member.Name});");
+                            _sb.AppendIndentedLine($"instance.{member.Name} = _temp_{member.Name};");
+                        }
                     }
                 }
             }

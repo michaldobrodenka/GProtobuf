@@ -524,7 +524,8 @@ namespace GProtobuf.Generator.V2
                 var className = TypeNameHelper.GetClassName(type.FullName);
                 // Reference types can have optional null parameter; value types (structs, enums) cannot
                 bool isReferenceType = !type.IsStruct && !type.IsEnum;
-                bool canPopulate = !type.IsAbstract;
+                bool isReadonlyStruct = _registry.IsReadonlyStruct(type.FullName);
+                bool canPopulate = !type.IsAbstract && !isReadonlyStruct;
 
                 if (isReferenceType && canPopulate)
                 {

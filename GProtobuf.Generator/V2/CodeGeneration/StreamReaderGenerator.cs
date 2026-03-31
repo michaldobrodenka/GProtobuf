@@ -136,7 +136,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 GenerateReadMethod(type);
                 GenerateReadContentMethod(type);
-                GeneratePopulateMethod(type);
+
+                if (!_registry.IsReadonlyStruct(type.FullName))
+                {
+                    GeneratePopulateMethod(type);
+                }
 
                 // Generate OwnFieldsPopulate method for derived types (used in ProtoInclude wrapper reading)
                 // Skip if type has fields that need temp lists (arrays/IEnumerable) - those can't work with per-field helper
@@ -2952,9 +2956,20 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 }
                 else
                 {
-                    _sb.AppendIndentedLine($"var _temp_{member.Name} = new global::{instanceType}();");
-                    _sb.AppendIndentedLine($"{typeNsPrefix}StreamReaders.Populate{typeName}(ref reader, ref _temp_{member.Name});");
-                    _sb.AppendIndentedLine($"instance.{member.Name} = _temp_{member.Name};");
+                    // Check if this is a readonly struct - use ReadContent instead of Populate
+                    bool isReadonlyStruct = _registry?.IsReadonlyStruct(instanceType) ?? false;
+                    if (isReadonlyStruct)
+                    {
+                        // Readonly struct - use ReadContent which uses constructor
+                        _sb.AppendIndentedLine($"instance.{member.Name} = {typeNsPrefix}StreamReaders.Read{typeName}Content(ref reader);");
+                    }
+                    else
+                    {
+                        // Mutable struct - use Populate pattern
+                        _sb.AppendIndentedLine($"var _temp_{member.Name} = new global::{instanceType}();");
+                        _sb.AppendIndentedLine($"{typeNsPrefix}StreamReaders.Populate{typeName}(ref reader, ref _temp_{member.Name});");
+                        _sb.AppendIndentedLine($"instance.{member.Name} = _temp_{member.Name};");
+                    }
                 }
             }
 
