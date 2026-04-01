@@ -32,6 +32,22 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _options = options ?? GeneratorOptions.Default;
         }
 
+        /// <summary>
+        /// Returns the write method suffix: "" for derived types or simple types without callbacks,
+        /// "Content" for types that still need WriteXContent (base types with ProtoIncludes, types with callbacks).
+        /// </summary>
+        private string GetWriteMethodSuffix(string typeName)
+        {
+            bool isDerivedType = _registry.IsDerivedType(typeName);
+            if (isDerivedType) return "";
+            var typeDef = _registry.GetByFullName(TypeMapping.NormalizeTypeName(typeName));
+            if (typeDef == null) return "Content"; // fallback for unknown types
+            bool hasProtoIncludes = typeDef.ProtoIncludes != null && typeDef.ProtoIncludes.Count > 0;
+            bool hasCallbacks = (typeDef.BeforeSerializationCallbacks != null && typeDef.BeforeSerializationCallbacks.Count > 0)
+                || (typeDef.AfterSerializationCallbacks != null && typeDef.AfterSerializationCallbacks.Count > 0);
+            return (!hasProtoIncludes && !hasCallbacks) ? "" : "Content";
+        }
+
         #region Deserializers
 
         public void GenerateDeserializers(List<StandaloneTypeInfo> standaloneTypes)
@@ -743,10 +759,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     var className = TypeNameHelper.GetClassName(elementType);
                     var sizeCalcClass = NamespaceHelper.GetSizeCalculatorsClass(elementType, _registry);
                     var writerClass = NamespaceHelper.GetWritersClass(elementType, isBufferWriter ? "BufferWriters" : "StreamWriters", _registry);
-                    // For derived types with ProtoInclude, use full methods (handles wrapper)
-                    // For non-derived types, use Content methods
-                    bool isDerivedType = _registry.IsDerivedType(elementType);
-                    var methodSuffix = isDerivedType ? "" : "Content";
+                    var methodSuffix = GetWriteMethodSuffix(elementType);
                     var sizeSuffix = "ContentSize";
                     _sb.AppendIndentedLine("var sizeCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
                     _sb.AppendIndentedLine($"{sizeCalcClass}.Calculate{className}{sizeSuffix}(ref sizeCalc, {varName});");
@@ -970,8 +983,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 var className = TypeNameHelper.GetClassName(elementType);
                 var sizeCalcClass = NamespaceHelper.GetSizeCalculatorsClass(elementType, _registry);
                 var writerClass = NamespaceHelper.GetWritersClass(elementType, writerClassName, _registry);
-                bool isDerivedType = _registry.IsDerivedType(elementType);
-                var methodSuffix = isDerivedType ? "" : "Content";
+                var methodSuffix = GetWriteMethodSuffix(elementType);
                 var sizeSuffix = "ContentSize";
 
                 _sb.AppendIndentedLine($"var _elemWriteCalc_{safeVarName}_{fieldNumber} = new global::GProtobuf.Core.WriteSizeCalculator();");
@@ -1169,10 +1181,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 var className = TypeNameHelper.GetClassName(typeName);
                 var sizeCalcClass = NamespaceHelper.GetSizeCalculatorsClass(typeName, _registry);
                 var writerClass = NamespaceHelper.GetWritersClass(typeName, writerClassName, _registry);
-                // For derived types with ProtoInclude, use full methods (handles wrapper)
-                // For non-derived types, use Content methods
-                bool isDerivedType = _registry.IsDerivedType(typeName);
-                var methodSuffix = isDerivedType ? "" : "Content";
+                var methodSuffix = GetWriteMethodSuffix(typeName);
                 var sizeSuffix = "ContentSize";
                 _sb.AppendIndentedLine($"var sizeCalc_{fieldNumber} = new global::GProtobuf.Core.WriteSizeCalculator();");
                 _sb.AppendIndentedLine($"{sizeCalcClass}.Calculate{className}{sizeSuffix}(ref sizeCalc_{fieldNumber}, {varName});");
@@ -1289,10 +1298,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     var className = TypeNameHelper.GetClassName(elementType);
                     var sizeCalcClass = NamespaceHelper.GetSizeCalculatorsClass(elementType, _registry);
                     var writerClass = NamespaceHelper.GetWritersClass(elementType, writerClassName, _registry);
-                    // For derived types with ProtoInclude, use full methods (handles wrapper)
-                    // For non-derived types, use Content methods
-                    bool isDerivedType = _registry.IsDerivedType(elementType);
-                    var methodSuffix = isDerivedType ? "" : "Content";
+                    var methodSuffix = GetWriteMethodSuffix(elementType);
                     var sizeSuffix = "ContentSize";
                     _sb.AppendIndentedLine("writer.WriteVarUInt32(0x0A); // field 1, wire type 2");
                     _sb.AppendIndentedLine($"var itemWriteCalc_{fieldNumber} = new global::GProtobuf.Core.WriteSizeCalculator();");

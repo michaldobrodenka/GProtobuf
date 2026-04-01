@@ -473,16 +473,27 @@ namespace GProtobuf.Generator.V2.Handlers
         }
 
         /// <summary>
-        /// Builds fully qualified call to StreamWriters/BufferWriters.Write{ClassName}Content method.
+        /// Builds fully qualified call to StreamWriters/BufferWriters.Write{ClassName} or Write{ClassName}Content method.
+        /// Uses WriteX for simple types without callbacks (where WriteXContent is not generated).
         /// </summary>
         private string GetQualifiedWriteContentCall(string elementTypeName, string elementClassName, string writerClassName)
         {
+            // Determine write method: use WriteX for simple types without callbacks (WriteXContent not generated),
+            // and for unknown cross-project types (WriteX always exists as safe default)
+            var typeDef = _registry.GetByFullName(TypeMapping.NormalizeTypeName(elementTypeName));
+            bool needsContent = typeDef != null
+                && !_registry.IsDerivedType(typeDef.FullName)
+                && (typeDef.ProtoIncludes != null && typeDef.ProtoIncludes.Count > 0
+                    || (typeDef.BeforeSerializationCallbacks != null && typeDef.BeforeSerializationCallbacks.Count > 0)
+                    || (typeDef.AfterSerializationCallbacks != null && typeDef.AfterSerializationCallbacks.Count > 0));
+            var methodName = needsContent ? $"Write{elementClassName}Content" : $"Write{elementClassName}";
+
             var ns = GetTypeNamespace(elementTypeName);
             if (ns == null)
             {
-                return $"Write{elementClassName}Content";
+                return methodName;
             }
-            return $"global::{ns}.Serialization.{writerClassName}.Write{elementClassName}Content";
+            return $"global::{ns}.Serialization.{writerClassName}.{methodName}";
         }
 
         /// <summary>

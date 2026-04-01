@@ -1866,9 +1866,15 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 // Handle nullable types - append .Value for Content method calls
                 var valueAccess = GetNullableValueAccess(sourceVar, typeName);
 
-                // Check if type is a derived type with ProtoInclude - needs full serialization with wrapper
+                // Determine write method: derived types use WriteX (no Content suffix)
+                // Simple types without callbacks also use WriteX (WriteXContent not generated for them)
                 bool isDerivedType = _typeRegistry?.IsDerivedType(typeName) ?? false;
-                var methodSuffix = isDerivedType ? "" : "Content";
+                var typeDef = _typeRegistry?.GetByFullName(TypeMapping.NormalizeTypeName(typeName));
+                bool hasProtoIncludes = typeDef?.ProtoIncludes != null && typeDef.ProtoIncludes.Count > 0;
+                bool hasCallbacks = (typeDef?.BeforeSerializationCallbacks != null && typeDef.BeforeSerializationCallbacks.Count > 0)
+                    || (typeDef?.AfterSerializationCallbacks != null && typeDef.AfterSerializationCallbacks.Count > 0);
+                bool canSkipContent = !isDerivedType && !hasProtoIncludes && !hasCallbacks;
+                var methodSuffix = (isDerivedType || canSkipContent) ? "" : "Content";
                 var sizeMethodSuffix = "ContentSize";
 
                 // Use cached length if available, otherwise recalculate
@@ -2017,9 +2023,14 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 var sizeCalcClass = NamespaceHelper.GetSizeCalculatorsClass(typeInfo.CollectionElementType, _typeRegistry);
                 var writersClass = NamespaceHelper.GetWritersClass(typeInfo.CollectionElementType, _writerClassName, _typeRegistry);
 
-                // Check if element type is a derived type with ProtoInclude - needs full serialization with wrapper
+                // Determine write method: derived types and simple types without callbacks use WriteX (no Content suffix)
                 bool isDerivedType = _typeRegistry?.IsDerivedType(typeInfo.CollectionElementType) ?? false;
-                var methodSuffix = isDerivedType ? "" : "Content";
+                var elemTypeDef = _typeRegistry?.GetByFullName(TypeMapping.NormalizeTypeName(typeInfo.CollectionElementType));
+                bool elemHasProtoIncludes = elemTypeDef?.ProtoIncludes != null && elemTypeDef.ProtoIncludes.Count > 0;
+                bool elemHasCallbacks = (elemTypeDef?.BeforeSerializationCallbacks != null && elemTypeDef.BeforeSerializationCallbacks.Count > 0)
+                    || (elemTypeDef?.AfterSerializationCallbacks != null && elemTypeDef.AfterSerializationCallbacks.Count > 0);
+                bool elemCanSkipContent = !isDerivedType && !elemHasProtoIncludes && !elemHasCallbacks;
+                var methodSuffix = (isDerivedType || elemCanSkipContent) ? "" : "Content";
                 var sizeMethodSuffix = "ContentSize";
 
                 _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");

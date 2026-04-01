@@ -884,13 +884,20 @@ namespace GProtobuf.Generator.V2
                         sb.StartNewBlock();
                     }
 
+                    // For simple types without callbacks, WriteXContent is not generated — use WriteX instead.
+                    // For types with callbacks, use WriteContent to avoid duplicate callback invocation.
+                    bool isDerived = _registry.IsDerivedType(type.FullName);
+                    bool hasProtoIncludes = type.ProtoIncludes != null && type.ProtoIncludes.Count > 0;
+                    var writeMethodName = (!isDerived && !hasProtoIncludes && !hasBeforeCallbacks && !hasAfterCallbacks)
+                        ? $"Write{className}"
+                        : $"Write{className}Content";
+
                     sb.AppendIndentedLine("// Use stackalloc for small messages, ArrayPool for larger");
                     sb.AppendIndentedLine("if (size <= 512)");
                     sb.StartNewBlock();
                     sb.AppendIndentedLine("Span<byte> buffer = stackalloc byte[size];");
                     sb.AppendIndentedLine("var writer = new global::GProtobuf.Core.StackBufferWriter(buffer);");
-                    // Use WriteContent instead of Write to avoid duplicate callback invocation
-                    sb.AppendIndentedLine($"StackBufferWriters.Write{className}Content(ref writer, obj);");
+                    sb.AppendIndentedLine($"StackBufferWriters.{writeMethodName}(ref writer, obj);");
                     sb.AppendIndentedLine("return buffer.Slice(0, writer.Written).ToArray();");
                     sb.EndBlock();
                     sb.AppendIndentedLine("else");
@@ -899,8 +906,7 @@ namespace GProtobuf.Generator.V2
                     sb.AppendIndentedLine("try");
                     sb.StartNewBlock();
                     sb.AppendIndentedLine("var writer = new global::GProtobuf.Core.StackBufferWriter(buffer);");
-                    // Use WriteContent instead of Write to avoid duplicate callback invocation
-                    sb.AppendIndentedLine($"StackBufferWriters.Write{className}Content(ref writer, obj);");
+                    sb.AppendIndentedLine($"StackBufferWriters.{writeMethodName}(ref writer, obj);");
                     sb.AppendIndentedLine("return buffer.AsSpan(0, writer.Written).ToArray();");
                     sb.EndBlock();
                     sb.AppendIndentedLine("finally");

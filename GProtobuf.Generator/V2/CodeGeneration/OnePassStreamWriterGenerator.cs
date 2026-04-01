@@ -181,9 +181,13 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 // Custom ProtoContract key type - use namespace-qualified call
                 var keyClassName = TypeNameHelper.GetClassName(virtualType.KeyType);
                 var writersClass = GetWritersClass(virtualType.KeyType);
+                var keyTypeDef = _registry.GetByFullName(TypeMapping.NormalizeTypeName(virtualType.KeyType));
+                var keyWriteMethod = (keyTypeDef != null && CanSkipWriteContentMethod(keyTypeDef))
+                    ? $"Write{keyClassName}"
+                    : $"Write{keyClassName}Content";
                 TagCodeHelper.WriteTag(_sb, 1, WireType.Len);
                 _sb.AppendIndentedLine("writer.BeginSubMessage();");
-                _sb.AppendIndentedLine($"{writersClass}.Write{keyClassName}Content(ref writer, {sourceVar});");
+                _sb.AppendIndentedLine($"{writersClass}.{keyWriteMethod}(ref writer, {sourceVar});");
                 _sb.AppendIndentedLine("writer.EndSubMessage();");
             }
         }
@@ -339,12 +343,16 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         {
             var valueClassName = TypeNameHelper.GetClassName(underlyingType);
             var writersClass = GetWritersClass(underlyingType);
+            var valTypeDef = _registry.GetByFullName(TypeMapping.NormalizeTypeName(underlyingType));
+            var valWriteMethod = (valTypeDef != null && CanSkipWriteContentMethod(valTypeDef))
+                ? $"Write{valueClassName}"
+                : $"Write{valueClassName}Content";
 
             _sb.AppendIndentedLine($"if ({sourceVar} != null)");
             _sb.StartNewBlock();
             TagCodeHelper.WriteTag(_sb, 2, WireType.Len);
             _sb.AppendIndentedLine("writer.BeginSubMessage();");
-            _sb.AppendIndentedLine($"{writersClass}.Write{valueClassName}Content(ref writer, {sourceVar}.Value);");
+            _sb.AppendIndentedLine($"{writersClass}.{valWriteMethod}(ref writer, {sourceVar}.Value);");
             _sb.AppendIndentedLine("writer.EndSubMessage();");
             _sb.EndBlock();
         }
@@ -426,6 +434,10 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         {
             var valueClassName = TypeNameHelper.GetClassName(virtualType.ValueType);
             var writersClass = GetWritersClass(virtualType.ValueType);
+            var valTypeDef = _registry.GetByFullName(TypeMapping.NormalizeTypeName(virtualType.ValueType));
+            var valWriteMethod = (valTypeDef != null && CanSkipWriteContentMethod(valTypeDef))
+                ? $"Write{valueClassName}"
+                : $"Write{valueClassName}Content";
             bool needsNullCheck = valueTypeInfo != null && !valueTypeInfo.IsPrimitive && !valueTypeInfo.IsStruct;
 
             if (needsNullCheck)
@@ -436,7 +448,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             TagCodeHelper.WriteTag(_sb, 2, WireType.Len);
             _sb.AppendIndentedLine("writer.BeginSubMessage();");
-            _sb.AppendIndentedLine($"{writersClass}.Write{valueClassName}Content(ref writer, {sourceVar});");
+            _sb.AppendIndentedLine($"{writersClass}.{valWriteMethod}(ref writer, {sourceVar});");
             _sb.AppendIndentedLine("writer.EndSubMessage();");
 
             if (needsNullCheck)
@@ -510,11 +522,15 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // Custom type elements (ProtoContract classes)
             var elementClassName = TypeNameHelper.GetClassName(elementType);
             var writersClass = GetWritersClass(elementType);
+            var elementTypeDef = _registry.GetByFullName(TypeMapping.NormalizeTypeName(elementType));
+            var elementWriteMethod = (elementTypeDef != null && CanSkipWriteContentMethod(elementTypeDef))
+                ? $"Write{elementClassName}"
+                : $"Write{elementClassName}Content";
             _sb.AppendIndentedLine($"if ({itemVar} != null)");
             _sb.StartNewBlock();
             TagCodeHelper.WriteTag(_sb, fieldId, WireType.Len);
             _sb.AppendIndentedLine("writer.BeginSubMessage();");
-            _sb.AppendIndentedLine($"{writersClass}.Write{elementClassName}Content(ref writer, {itemVar});");
+            _sb.AppendIndentedLine($"{writersClass}.{elementWriteMethod}(ref writer, {itemVar});");
             _sb.AppendIndentedLine("writer.EndSubMessage();");
             _sb.EndBlock();
         }
@@ -599,11 +615,15 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     // ProtoContract custom type element
                     var elementClassName = TypeNameHelper.GetClassName(elementType);
                     var writersClass = GetWritersClass(elementType);
+                    var elemTypeDef = _registry.GetByFullName(TypeMapping.NormalizeTypeName(elementType));
+                    var elemWriteMethod = (elemTypeDef != null && CanSkipWriteContentMethod(elemTypeDef))
+                        ? $"Write{elementClassName}"
+                        : $"Write{elementClassName}Content";
                     _sb.AppendIndentedLine($"if ({itemAccess} != null)");
                     _sb.StartNewBlock();
                     TagCodeHelper.WriteTag(_sb, fieldId, WireType.Len);
                     _sb.AppendIndentedLine("writer.BeginSubMessage();");
-                    _sb.AppendIndentedLine($"{writersClass}.Write{elementClassName}Content(ref writer, {itemAccess});");
+                    _sb.AppendIndentedLine($"{writersClass}.{elemWriteMethod}(ref writer, {itemAccess});");
                     _sb.AppendIndentedLine("writer.EndSubMessage();");
                     _sb.EndBlock();
                 }
@@ -711,8 +731,15 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 _sb.StartNewBlock();
             }
 
-            // For OnePass, we simply write content directly
-            _sb.AppendIndentedLine($"Write{className}Content(ref writer, instance);");
+            // For simple types without callbacks, inline the body directly into WriteX
+            if (CanSkipWriteContentMethod(type))
+            {
+                GenerateWriteContentBodyOnePass(type, className);
+            }
+            else
+            {
+                _sb.AppendIndentedLine($"Write{className}Content(ref writer, instance);");
+            }
 
             if (hasAfterCallbacks)
             {
@@ -726,15 +753,20 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.EndBlock();
             _sb.AppendNewLine();
 
-            // Generate WriteContent method
+            // Generate WriteContent method (skipped for simple types without callbacks)
             GenerateWriteContentMethod(type, className);
         }
 
         /// <summary>
         /// Generates Write{ClassName}Content method.
+        /// Skipped for simple types without callbacks — their body is inlined into WriteX.
         /// </summary>
         private void GenerateWriteContentMethod(TypeDefinition type, string className)
         {
+            // Simple types without callbacks don't need WriteXContent — body is inlined into WriteX
+            if (CanSkipWriteContentMethod(type))
+                return;
+
             _sb.AppendIndentedLine($"public static void Write{className}Content(ref {WriterType} writer, global::{type.FullName} instance)");
             _sb.StartNewBlock();
 
@@ -768,12 +800,27 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
             else
             {
-                // Simple type - just write own fields
-                WriteTypeFields(type, "instance");
+                // Simple type with callbacks — still need WriteXContent for callback-free callers
+                GenerateWriteContentBodyOnePass(type, className);
             }
 
             _sb.EndBlock();
             _sb.AppendNewLine();
+        }
+
+        /// <summary>
+        /// Generates the body of write content (field writes) without method signature.
+        /// Used by both WriteX (inlined) and WriteXContent.
+        /// </summary>
+        private void GenerateWriteContentBodyOnePass(TypeDefinition type, string className)
+        {
+            if (type.IsEnum)
+            {
+                _sb.AppendIndentedLine("writer.WriteVarInt32((int)instance);");
+                return;
+            }
+
+            WriteTypeFields(type, "instance");
         }
 
         private void WriteTypeFields(TypeDefinition type, string objectName)
@@ -1169,7 +1216,10 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             TagCodeHelper.WriteTag(_sb, member.FieldId, WireType.Len);
             _sb.AppendIndentedLine("writer.BeginSubMessage();");
-            _sb.AppendIndentedLine($"{writersClass}.Write{elementClassName}Content(ref writer, item);");
+            var collWriteMethod = (elementTypeDef != null && CanSkipWriteContentMethod(elementTypeDef))
+                ? $"Write{elementClassName}"
+                : $"Write{elementClassName}Content";
+            _sb.AppendIndentedLine($"{writersClass}.{collWriteMethod}(ref writer, item);");
             _sb.AppendIndentedLine("writer.EndSubMessage();");
 
             if (!elementIsStruct)
@@ -1227,7 +1277,10 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             var typeNamespace = _registry.GetNamespaceForType(actualType);
             var nsPrefix = GeneratorHelpers.GetNamespacePrefix(typeNamespace, _currentNamespace);
-            _sb.AppendIndentedLine($"{nsPrefix}{ClassName}.Write{typeName}Content(ref writer, {valueArg});");
+            var complexWriteMethod = (typeDef != null && CanSkipWriteContentMethod(typeDef))
+                ? $"Write{typeName}"
+                : $"Write{typeName}Content";
+            _sb.AppendIndentedLine($"{nsPrefix}{ClassName}.{complexWriteMethod}(ref writer, {valueArg});");
             _sb.AppendIndentedLine("writer.EndSubMessage();");
 
             if (!isNonNullableStruct)

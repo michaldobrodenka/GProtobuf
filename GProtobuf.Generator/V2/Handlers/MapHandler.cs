@@ -661,7 +661,15 @@ namespace GProtobuf.Generator.V2.Handlers
                 _sb.AppendIndentedLine("nestedCalc.Reset();");
                 _sb.AppendIndentedLine($"SizeCalculators.Calculate{sanitizedName}ContentSize(ref nestedCalc, {sourceVar});");
                 _sb.AppendIndentedLine("writer.WriteVarUInt32((uint)nestedCalc.Length);");
-                _sb.AppendIndentedLine($"{_writerClassName}.Write{sanitizedName}Content(ref writer, {sourceVar});");
+                // Use WriteX for simple types without callbacks (WriteXContent not generated for them)
+                var valueTypeDef = _typeRegistry.GetByFullName(TypeMapping.NormalizeTypeName(valueType));
+                bool canSkipContent = valueTypeDef != null
+                    && !_typeRegistry.IsDerivedType(valueTypeDef.FullName)
+                    && (valueTypeDef.ProtoIncludes == null || valueTypeDef.ProtoIncludes.Count == 0)
+                    && (valueTypeDef.BeforeSerializationCallbacks == null || valueTypeDef.BeforeSerializationCallbacks.Count == 0)
+                    && (valueTypeDef.AfterSerializationCallbacks == null || valueTypeDef.AfterSerializationCallbacks.Count == 0);
+                var writeMethodName = canSkipContent ? $"Write{sanitizedName}" : $"Write{sanitizedName}Content";
+                _sb.AppendIndentedLine($"{_writerClassName}.{writeMethodName}(ref writer, {sourceVar});");
             }
         }
 

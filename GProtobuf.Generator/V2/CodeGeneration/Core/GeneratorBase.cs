@@ -378,6 +378,27 @@ namespace GProtobuf.Generator.V2.CodeGeneration.Core
             return type.AfterSerializationCallbacks != null && type.AfterSerializationCallbacks.Count > 0;
         }
 
+        /// <summary>
+        /// Checks if a type has any serialization callbacks (before or after).
+        /// </summary>
+        protected bool HasSerializationCallbacks(TypeDefinition type)
+        {
+            return (type.BeforeSerializationCallbacks != null && type.BeforeSerializationCallbacks.Count > 0)
+                || (type.AfterSerializationCallbacks != null && type.AfterSerializationCallbacks.Count > 0);
+        }
+
+        /// <summary>
+        /// Returns true if WriteXContent can be skipped for this type.
+        /// Simple types (no inheritance, no callbacks) can have their WriteXContent body inlined into WriteX,
+        /// and callers can use WriteX instead of WriteXContent.
+        /// </summary>
+        protected bool CanSkipWriteContentMethod(TypeDefinition type)
+        {
+            bool isDerived = _registry.IsDerivedType(type.FullName);
+            bool hasProtoIncludes = type.ProtoIncludes != null && type.ProtoIncludes.Count > 0;
+            return !isDerived && !hasProtoIncludes && !HasSerializationCallbacks(type);
+        }
+
         #endregion
     }
 }

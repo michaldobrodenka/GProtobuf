@@ -301,9 +301,15 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// <summary>
         /// Generates WriteXxxContent method.
         /// For types with ProtoInclude hierarchy, this includes type dispatch and wrapper generation.
+        /// Skipped for simple types without callbacks — their body is inlined into WriteX.
         /// </summary>
         private void GenerateWriteContentMethod(TypeDefinition type, string className)
         {
+            // Simple types without callbacks don't need WriteXContent — body is inlined into WriteX
+            // and callers use WriteX instead
+            if (CanSkipWriteContentMethod(type))
+                return;
+
             _sb.AppendIndentedLine($"public static void Write{className}Content(ref {_writerType} writer, global::{type.FullName} instance)");
             _sb.StartNewBlock();
 
@@ -347,27 +353,51 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
             else
             {
-                // Simple type - just own fields
-                if (type.ProtoMembers != null)
-                {
-                    foreach (var member in type.ProtoMembers)
-                    {
-                        GenerateFieldWrite(member, "instance");
-                    }
-                }
-
-                // Write custom buffer fields
-                if (type.CustomBufferMembers != null)
-                {
-                    foreach (var customMember in type.CustomBufferMembers)
-                    {
-                        GenerateCustomBufferFieldWrite(customMember, "instance");
-                    }
-                }
+                // Simple type with callbacks — still need WriteXContent for callback-free callers
+                GenerateWriteContentBody(type, className);
             }
 
             _sb.EndBlock();
             _sb.AppendNewLine();
+        }
+
+        /// <summary>
+        /// Generates the body of write content (field writes) without method signature.
+        /// Used by both GenerateSimpleWriteMethod (inlined into WriteX) and GenerateWriteContentMethod.
+        /// </summary>
+        private void GenerateWriteContentBody(TypeDefinition type, string className)
+        {
+            // For enum types, generate simple VarInt write
+            if (type.IsEnum)
+            {
+                _sb.AppendIndentedLine("writer.WriteVarInt32((int)instance);");
+                return;
+            }
+
+            // For custom collection types (implements IEnumerable<T> + Add(T))
+            if (type.IsCustomCollection && !string.IsNullOrEmpty(type.CustomCollectionElementType))
+            {
+                GenerateCustomCollectionWriteContent(type, className);
+                return;
+            }
+
+            // Simple type - just own fields
+            if (type.ProtoMembers != null)
+            {
+                foreach (var member in type.ProtoMembers)
+                {
+                    GenerateFieldWrite(member, "instance");
+                }
+            }
+
+            // Write custom buffer fields
+            if (type.CustomBufferMembers != null)
+            {
+                foreach (var customMember in type.CustomBufferMembers)
+                {
+                    GenerateCustomBufferFieldWrite(customMember, "instance");
+                }
+            }
         }
 
         /// <summary>
@@ -462,9 +492,14 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 var sizeCalcNs = string.IsNullOrEmpty(elementNs) || elementNs == _currentNamespace
                     ? "SizeCalculators"
                     : $"global::{elementNs}.Serialization.SizeCalculators";
+                // Use WriteX for simple types without callbacks, WriteXContent otherwise
+                var elementTypeDef = _registry.GetByFullName(TypeMapping.NormalizeTypeName(elementType));
+                var elementWriteMethodName = (elementTypeDef != null && CanSkipWriteContentMethod(elementTypeDef))
+                    ? $"Write{elementClassName}"
+                    : $"Write{elementClassName}Content";
                 var writeNs = string.IsNullOrEmpty(elementNs) || elementNs == _currentNamespace
-                    ? $"Write{elementClassName}Content"
-                    : $"global::{elementNs}.Serialization.{_className}.Write{elementClassName}Content";
+                    ? elementWriteMethodName
+                    : $"global::{elementNs}.Serialization.{_className}.{elementWriteMethodName}";
 
                 _sb.AppendIndentedLine("var sizeCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
                 _sb.AppendIndentedLine($"{sizeCalcNs}.Calculate{elementClassName}ContentSize(ref sizeCalc, item);");
@@ -918,9 +953,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateSimpleWriteMethod(TypeDefinition type, string className)
         {
-            // Delegate to WriteXContent to avoid code duplication
-            // For simple types (no ProtoIncludes, not derived), WriteX and WriteXContent are identical
-            _sb.AppendIndentedLine($"Write{className}Content(ref writer, instance);");
+            // Inline the body directly into WriteX (no separate WriteXContent needed for simple types without callbacks)
+            GenerateWriteContentBody(type, className);
         }
 
         private void GenerateWriteMethodWithInheritance(TypeDefinition type, string className)
@@ -1353,8 +1387,13 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             _sb.AppendIndentedLine($"writer.WriteVarUInt32((uint){calcVar}.Length);");
 
-            // Write content
-            _sb.AppendIndentedLine($"{nsPrefix}{_writerKind}Writers.Write{typeName}Content(ref writer, {valueArg});");
+            // Write content — use WriteX for simple types without callbacks, WriteXContent otherwise
+            // For nullable types, typeDef may be null — resolve via type namespace lookup
+            var resolvedTypeDef = typeDef ?? _registry.GetByFullName(TypeMapping.NormalizeTypeName(member.Type));
+            var writeMethodName = (resolvedTypeDef != null && CanSkipWriteContentMethod(resolvedTypeDef))
+                ? $"Write{typeName}"
+                : $"Write{typeName}Content";
+            _sb.AppendIndentedLine($"{nsPrefix}{_writerKind}Writers.{writeMethodName}(ref writer, {valueArg});");
         }
 
         /// <summary>
@@ -1448,23 +1487,23 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 _sb.DecreaseIndent();
             }
 
-            // Default case - base type instance (always generate, even if no ProtoMembers)
-            // This handles cases where base class is non-abstract and can be instantiated,
-            // even without explicit ProtoMember fields (e.g., LongRunningTaskParameters)
+            // Default case - base type instance (already dispatched all derived types above)
+            // Use BaseFieldsOnly to avoid redundant type dispatch in WriteXContent
             _sb.AppendIndentedLine("default:");
             _sb.IncreaseIndent();
             _sb.AppendIndentedLine($"// Base type instance: {typeName}");
 
-            // Generate write code if base type has own fields, otherwise write empty message
-            if (typeDef != null && typeDef.ProtoMembers != null && typeDef.ProtoMembers.Count > 0)
             {
-                GenerateStandardComplexTypeWrite(member, sourceVar, typeName, typeDef);
-            }
-            else
-            {
-                // Base type has no fields - write empty message
+                var typeNamespace = _registry.GetNamespaceForType(member.Type);
+                string valueArg = GeneratorHelpers.GetNullableValueAccess(sourceVar, member, typeDef, _registry);
+
                 TagCodeHelper.WriteTag(_sb, member.FieldId, WireType.Len);
-                _sb.AppendIndentedLine("writer.WriteVarUInt32(0u); // Empty base type message");
+
+                _sb.AppendIndentedLine($"var calculator = new global::GProtobuf.Core.WriteSizeCalculator();");
+                var nsPrefix = GeneratorHelpers.GetNamespacePrefix(typeNamespace, _currentNamespace);
+                _sb.AppendIndentedLine($"{nsPrefix}SizeCalculators.Calculate{typeName}BaseFieldsOnlySize(ref calculator, {valueArg});");
+                _sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)calculator.Length);");
+                _sb.AppendIndentedLine($"{nsPrefix}{_writerKind}Writers.Write{typeName}BaseFieldsOnly(ref writer, {valueArg});");
             }
 
             _sb.AppendIndentedLine("break;");

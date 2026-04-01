@@ -1081,31 +1081,22 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 _sb.DecreaseIndent();
             }
 
-            // Default case - base type instance (always generate, even if no ProtoMembers)
-            // This handles cases where base class is non-abstract and can be instantiated,
-            // even without explicit ProtoMember fields (e.g., LongRunningTaskParameters)
+            // Default case - base type instance (already dispatched all derived types above)
+            // Use BaseFieldsOnlySize to avoid redundant type dispatch in CalculateXContentSize
             _sb.AppendIndentedLine("default:");
             _sb.IncreaseIndent();
             _sb.AppendIndentedLine($"// Base type instance: {typeName}");
 
-            // Calculate size if base type has own fields, otherwise calculate empty message size
-            if (typeDef != null && typeDef.ProtoMembers != null && typeDef.ProtoMembers.Count > 0)
             {
-                // Calculate size using standard method (no wrapper for base type instance)
                 var lengthVar = "lengthBefore";
                 var contentLengthVar = "contentLength";
                 var typeNamespace = _registry.GetNamespaceForType(member.Type);
 
                 _sb.AppendIndentedLine($"var {lengthVar} = calculator.Length;");
                 var sizeCalcPrefix = GeneratorHelpers.GetNamespacePrefix(typeNamespace, _currentNamespace);
-                _sb.AppendIndentedLine($"{sizeCalcPrefix}SizeCalculators.Calculate{typeName}ContentSize(ref calculator, {sourceVar});");
+                _sb.AppendIndentedLine($"{sizeCalcPrefix}SizeCalculators.Calculate{typeName}BaseFieldsOnlySize(ref calculator, {sourceVar});");
                 _sb.AppendIndentedLine($"var {contentLengthVar} = calculator.Length - {lengthVar};");
                 _sb.AppendIndentedLine($"calculator.WriteVarUInt32((uint){contentLengthVar});");
-            }
-            else
-            {
-                // Base type has no fields - empty message (length = 0)
-                _sb.AppendIndentedLine("calculator.WriteVarUInt32(0u); // Empty base type message");
             }
 
             _sb.AppendIndentedLine("break;");
