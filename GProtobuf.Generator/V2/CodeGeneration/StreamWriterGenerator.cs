@@ -999,6 +999,14 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 return;
             }
 
+            // For single-level derived types (chain length == 2), WriteX and WriteX_AsParent
+            // are identical in logic — delegate to avoid duplication
+            if (inheritanceChain.Count == 2)
+            {
+                _sb.AppendIndentedLine($"Write{className}_As{TypeNameHelper.GetClassName(inheritanceChain[0])}(ref writer, instance);");
+                return;
+            }
+
             // Reset nested calculator counter for this method
             ResetNestedCalcCounter();
 
