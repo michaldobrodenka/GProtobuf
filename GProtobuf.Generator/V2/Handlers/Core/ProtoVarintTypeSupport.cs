@@ -1,3 +1,5 @@
+using GProtobuf.Generator.V2.Helpers;
+
 namespace GProtobuf.Generator.V2.Handlers.Core
 {
     /// <summary>
@@ -11,8 +13,7 @@ namespace GProtobuf.Generator.V2.Handlers.Core
         #region Read Generation
 
         /// <summary>
-        /// Generates code to read a ProtoVarint field.
-        /// Reads the varint and constructs the ProtoVarint type using the marked constructor.
+        /// Generates code to read a ProtoVarint field using ProtoMemberAttribute info.
         /// </summary>
         public static void GenerateRead(
             StringBuilderWithIndent sb,
@@ -20,12 +21,23 @@ namespace GProtobuf.Generator.V2.Handlers.Core
             string targetVar,
             string readerVar = "reader")
         {
-            // Determine the read method based on ProtoVarintType
-            string readMethod = GetReadMethod(member.ProtoVarintType);
+            GenerateRead(sb, member.Type, member.ProtoVarintType, targetVar, readerVar);
+        }
 
-            // Construct the ProtoVarint type using the constructor
-            // For structs, use: new TypeName(reader.ReadVarUInt32())
-            sb.AppendIndentedLine($"{targetVar} = new global::{member.Type}({readerVar}.{readMethod}());");
+        /// <summary>
+        /// Generates code to read a ProtoVarint field with explicit varint type.
+        /// Reads the varint and constructs the ProtoVarint type using the marked constructor.
+        /// </summary>
+        public static void GenerateRead(
+            StringBuilderWithIndent sb,
+            string typeName,
+            ProtoVarintType varintType,
+            string targetVar,
+            string readerVar = "reader")
+        {
+            string readMethod = PrimitiveTypeCodeGenerator.GetProtoVarintReadMethod(varintType);
+            var globalTypeName = WireFormat.TypeMapping.GetGlobalGenericTypeName(typeName);
+            sb.AppendIndentedLine($"{targetVar} = new {globalTypeName}({readerVar}.{readMethod}());");
         }
 
         #endregion
@@ -33,8 +45,7 @@ namespace GProtobuf.Generator.V2.Handlers.Core
         #region Write Generation
 
         /// <summary>
-        /// Generates code to write a ProtoVarint field.
-        /// Extracts the value using the marked accessor and writes as varint.
+        /// Generates code to write a ProtoVarint field using ProtoMemberAttribute info.
         /// </summary>
         public static void GenerateWrite(
             StringBuilderWithIndent sb,
@@ -42,41 +53,47 @@ namespace GProtobuf.Generator.V2.Handlers.Core
             string sourceVar,
             string writerVar = "writer")
         {
-            // Get the value accessor (method call or property access)
-            string valueAccess = member.ProtoVarintValueIsProperty
-                ? $"{sourceVar}.{member.ProtoVarintValueMember}"
-                : $"{sourceVar}.{member.ProtoVarintValueMember}()";
-
-            // Determine the write method based on ProtoVarintType
-            string writeMethod = GetWriteMethod(member.ProtoVarintType);
-
-            // Cast for signed types if needed
-            string castPrefix = GetCastPrefix(member.ProtoVarintType);
+            string valueAccess = GetValueAccess(sourceVar, member.ProtoVarintValueMember, member.ProtoVarintValueIsProperty);
+            string writeMethod = PrimitiveTypeCodeGenerator.GetProtoVarintWriteMethod(member.ProtoVarintType);
+            string castPrefix = PrimitiveTypeCodeGenerator.GetProtoVarintCastPrefix(member.ProtoVarintType);
 
             if (member.IsNullable)
             {
-                // Nullable ProtoVarint
                 sb.AppendIndentedLine($"if ({sourceVar}.HasValue)");
                 sb.StartNewBlock();
                 TagCodeHelper.WriteTag(sb, member.FieldId, WireType.VarInt);
-                sb.AppendIndentedLine($"{writerVar}.{writeMethod}({castPrefix}{sourceVar}.Value.{member.ProtoVarintValueMember}{(member.ProtoVarintValueIsProperty ? "" : "()")});");
+                string nullableValueAccess = GetValueAccess($"{sourceVar}.Value", member.ProtoVarintValueMember, member.ProtoVarintValueIsProperty);
+                sb.AppendIndentedLine($"{writerVar}.{writeMethod}({castPrefix}{nullableValueAccess});");
                 sb.EndBlock();
             }
             else if (member.IsRequired)
             {
-                // Required ProtoVarint - always write
                 TagCodeHelper.WriteTag(sb, member.FieldId, WireType.VarInt);
                 sb.AppendIndentedLine($"{writerVar}.{writeMethod}({castPrefix}{valueAccess});");
             }
             else
             {
-                // Optional ProtoVarint - check for non-default value
                 sb.AppendIndentedLine($"if ({valueAccess} != 0)");
                 sb.StartNewBlock();
                 TagCodeHelper.WriteTag(sb, member.FieldId, WireType.VarInt);
                 sb.AppendIndentedLine($"{writerVar}.{writeMethod}({castPrefix}{valueAccess});");
                 sb.EndBlock();
             }
+        }
+
+        /// <summary>
+        /// Generates code to write a ProtoVarint field with explicit parameters (no tag).
+        /// Used for collection elements where tag is written separately.
+        /// </summary>
+        public static void GenerateWriteValue(
+            StringBuilderWithIndent sb,
+            ProtoVarintType varintType,
+            string valueMember,
+            string sourceVar,
+            string writerVar = "writer")
+        {
+            string writeMethod = PrimitiveTypeCodeGenerator.GetProtoVarintWriteMethod(varintType);
+            sb.AppendIndentedLine($"{writerVar}.{writeMethod}({sourceVar}.{valueMember});");
         }
 
         #endregion
@@ -84,7 +101,7 @@ namespace GProtobuf.Generator.V2.Handlers.Core
         #region Size Calculation Generation
 
         /// <summary>
-        /// Generates code to calculate size of a ProtoVarint field.
+        /// Generates code to calculate size of a ProtoVarint field using ProtoMemberAttribute info.
         /// </summary>
         public static void GenerateSize(
             StringBuilderWithIndent sb,
@@ -92,35 +109,26 @@ namespace GProtobuf.Generator.V2.Handlers.Core
             string sourceVar,
             string calculatorVar = "calculator")
         {
-            // Get the value accessor (method call or property access)
-            string valueAccess = member.ProtoVarintValueIsProperty
-                ? $"{sourceVar}.{member.ProtoVarintValueMember}"
-                : $"{sourceVar}.{member.ProtoVarintValueMember}()";
-
-            // Determine the size method based on ProtoVarintType
-            string sizeMethod = GetSizeMethod(member.ProtoVarintType);
-
-            // Cast for signed types if needed
-            string castPrefix = GetCastPrefix(member.ProtoVarintType);
+            string valueAccess = GetValueAccess(sourceVar, member.ProtoVarintValueMember, member.ProtoVarintValueIsProperty);
+            string sizeMethod = PrimitiveTypeCodeGenerator.GetProtoVarintWriteMethod(member.ProtoVarintType); // Size uses same method names as write
+            string castPrefix = PrimitiveTypeCodeGenerator.GetProtoVarintCastPrefix(member.ProtoVarintType);
 
             if (member.IsNullable)
             {
-                // Nullable ProtoVarint
                 sb.AppendIndentedLine($"if ({sourceVar}.HasValue)");
                 sb.StartNewBlock();
                 TagCodeHelper.AddTagSize(sb, member.FieldId, WireType.VarInt, calculatorVar);
-                sb.AppendIndentedLine($"{calculatorVar}.{sizeMethod}({castPrefix}{sourceVar}.Value.{member.ProtoVarintValueMember}{(member.ProtoVarintValueIsProperty ? "" : "()")});");
+                string nullableValueAccess = GetValueAccess($"{sourceVar}.Value", member.ProtoVarintValueMember, member.ProtoVarintValueIsProperty);
+                sb.AppendIndentedLine($"{calculatorVar}.{sizeMethod}({castPrefix}{nullableValueAccess});");
                 sb.EndBlock();
             }
             else if (member.IsRequired)
             {
-                // Required ProtoVarint - always calculate size
                 TagCodeHelper.AddTagSize(sb, member.FieldId, WireType.VarInt, calculatorVar);
                 sb.AppendIndentedLine($"{calculatorVar}.{sizeMethod}({castPrefix}{valueAccess});");
             }
             else
             {
-                // Optional ProtoVarint - check for non-default value
                 sb.AppendIndentedLine($"if ({valueAccess} != 0)");
                 sb.StartNewBlock();
                 TagCodeHelper.AddTagSize(sb, member.FieldId, WireType.VarInt, calculatorVar);
@@ -129,74 +137,31 @@ namespace GProtobuf.Generator.V2.Handlers.Core
             }
         }
 
+        /// <summary>
+        /// Generates code to calculate size of a ProtoVarint value with explicit parameters (no tag).
+        /// Used for collection elements where tag size is calculated separately.
+        /// </summary>
+        public static void GenerateSizeValue(
+            StringBuilderWithIndent sb,
+            ProtoVarintType varintType,
+            string valueMember,
+            string sourceVar,
+            string calculatorVar = "calculator")
+        {
+            string sizeMethod = PrimitiveTypeCodeGenerator.GetProtoVarintWriteMethod(varintType);
+            sb.AppendIndentedLine($"{calculatorVar}.{sizeMethod}({sourceVar}.{valueMember});");
+        }
+
         #endregion
 
-        #region Method Mapping
+        #region Helper Methods
 
         /// <summary>
-        /// Gets the SpanReader method name for reading the specified varint type.
+        /// Gets the value accessor expression (method call or property access).
         /// </summary>
-        private static string GetReadMethod(ProtoVarintType type)
+        private static string GetValueAccess(string sourceVar, string valueMember, bool isProperty)
         {
-            return type switch
-            {
-                ProtoVarintType.UInt32 => "ReadVarUInt32",
-                ProtoVarintType.Int32 => "ReadVarInt32",
-                ProtoVarintType.SInt32 => "ReadZigZagVarInt32",
-                ProtoVarintType.UInt64 => "ReadVarUInt64",
-                ProtoVarintType.Int64 => "ReadVarInt64",
-                ProtoVarintType.SInt64 => "ReadZigZagVarInt64",
-                _ => "ReadVarUInt32"
-            };
-        }
-
-        /// <summary>
-        /// Gets the StreamWriter/SpanWriter method name for writing the specified varint type.
-        /// </summary>
-        private static string GetWriteMethod(ProtoVarintType type)
-        {
-            return type switch
-            {
-                ProtoVarintType.UInt32 => "WriteVarUInt32",
-                ProtoVarintType.Int32 => "WriteVarInt32",
-                ProtoVarintType.SInt32 => "WriteZigZag32",
-                ProtoVarintType.UInt64 => "WriteVarUInt64",
-                ProtoVarintType.Int64 => "WriteVarInt64",
-                ProtoVarintType.SInt64 => "WriteZigZag64",
-                _ => "WriteVarUInt32"
-            };
-        }
-
-        /// <summary>
-        /// Gets the WriteSizeCalculator method name for calculating size of the specified varint type.
-        /// </summary>
-        private static string GetSizeMethod(ProtoVarintType type)
-        {
-            return type switch
-            {
-                ProtoVarintType.UInt32 => "WriteVarUInt32",
-                ProtoVarintType.Int32 => "WriteVarInt32",
-                ProtoVarintType.SInt32 => "WriteZigZag32",
-                ProtoVarintType.UInt64 => "WriteVarUInt64",
-                ProtoVarintType.Int64 => "WriteVarInt64",
-                ProtoVarintType.SInt64 => "WriteZigZag64",
-                _ => "WriteVarUInt32"
-            };
-        }
-
-        /// <summary>
-        /// Gets the cast prefix for signed types.
-        /// </summary>
-        private static string GetCastPrefix(ProtoVarintType type)
-        {
-            return type switch
-            {
-                ProtoVarintType.Int32 => "(int)",
-                ProtoVarintType.SInt32 => "(int)",
-                ProtoVarintType.Int64 => "(long)",
-                ProtoVarintType.SInt64 => "(long)",
-                _ => ""
-            };
+            return isProperty ? $"{sourceVar}.{valueMember}" : $"{sourceVar}.{valueMember}()";
         }
 
         #endregion

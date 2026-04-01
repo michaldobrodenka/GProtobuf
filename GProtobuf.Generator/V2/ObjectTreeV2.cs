@@ -1,9 +1,12 @@
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using GProtobuf.Generator.Attributes;
 using GProtobuf.Generator.V2.CodeGeneration;
 using GProtobuf.Generator.V2.CodeGeneration.Core;
+using GProtobuf.Generator.V2.Handlers.Core;
 using GProtobuf.Generator.V2.Handlers.VirtualTypes;
+using GProtobuf.Generator.WireFormat;
 using Microsoft.CodeAnalysis;
 
 namespace GProtobuf.Generator.V2
@@ -140,6 +143,10 @@ namespace GProtobuf.Generator.V2
         /// </remarks>
         public IEnumerable<(string FileName, string FileCode)> GenerateCode()
         {
+            // STEP 0: Discover and register ProtoVarint types that aren't in the registry
+            // (types with [ProtoVarint] but without [ProtoContract], used as collection elements, dict keys/values, etc.)
+            DiscoverAndRegisterProtoVarintTypes();
+
             // Collect all namespaces (from registry + standalone types)
             var allNamespaces = new HashSet<string>(_registry.GetAllNamespaces());
             foreach (var ns in _standaloneTypesByNamespace.Keys)
@@ -201,6 +208,91 @@ namespace GProtobuf.Generator.V2
 
             // Create assembly-specific virtual types namespace: {RootNamespace}.GProtobuf
             return $"{rootNamespace}.GProtobuf";
+        }
+
+        /// <summary>
+        /// Discovers ProtoVarint types referenced by registered types (as member types,
+        /// collection elements, dictionary keys/values) that aren't yet in TypeRegistry.
+        /// Registers them so code generators can find them via _registry.IsProtoVarint().
+        /// </summary>
+        private void DiscoverAndRegisterProtoVarintTypes()
+        {
+            if (_compilation == null)
+                return;
+
+            // Collect all unique type names referenced by members
+            var candidateTypes = new HashSet<string>();
+            foreach (var type in _registry.GetAllTypes())
+            {
+                if (type.ProtoMembers == null) continue;
+                foreach (var member in type.ProtoMembers)
+                {
+                    // Direct member type
+                    if (!string.IsNullOrEmpty(member.Type))
+                        candidateTypes.Add(TypeMapping.NormalizeTypeName(member.Type));
+
+                    // Collection element type
+                    if (!string.IsNullOrEmpty(member.CollectionElementType))
+                        candidateTypes.Add(TypeMapping.NormalizeTypeName(member.CollectionElementType));
+
+                    // Dictionary key/value types
+                    if (!string.IsNullOrEmpty(member.MapKeyType))
+                        candidateTypes.Add(TypeMapping.NormalizeTypeName(member.MapKeyType));
+                    if (!string.IsNullOrEmpty(member.MapValueType))
+                        candidateTypes.Add(TypeMapping.NormalizeTypeName(member.MapValueType));
+                }
+
+                // Custom collection element type
+                if (!string.IsNullOrEmpty(type.CustomCollectionElementType))
+                    candidateTypes.Add(TypeMapping.NormalizeTypeName(type.CustomCollectionElementType));
+            }
+
+            // For each candidate, check if it's an unregistered ProtoVarint type
+            foreach (var typeName in candidateTypes)
+            {
+                if (_registry.GetByFullName(typeName) != null)
+                    continue; // Already registered
+
+                var typeSymbol = _compilation.GetTypeByMetadataName(typeName);
+                if (typeSymbol == null)
+                    continue;
+
+                var protoVarintAttr = typeSymbol.GetAttributes().FirstOrDefault(a =>
+                    a.AttributeClass?.Name == ProtoVarintConstants.AttributeName);
+                if (protoVarintAttr == null)
+                    continue;
+
+                // Extract varint type
+                var varintType = ProtoVarintType.UInt32;
+                if (protoVarintAttr.ConstructorArguments.Length > 0 &&
+                    protoVarintAttr.ConstructorArguments[0].Value is int typeValue)
+                {
+                    varintType = (ProtoVarintType)typeValue;
+                }
+
+                // Find [ProtoVarintValue] member
+                string valueMember = null;
+                foreach (var member in typeSymbol.GetMembers())
+                {
+                    var hasValueAttr = member.GetAttributes().Any(a =>
+                        a.AttributeClass?.Name == ProtoVarintConstants.ValueAttributeName);
+                    if (hasValueAttr)
+                    {
+                        if (member is IPropertySymbol prop)
+                            valueMember = prop.Name;
+                        else if (member is IFieldSymbol field)
+                            valueMember = field.Name;
+                        else if (member is IMethodSymbol method && method.Parameters.Length == 0)
+                            valueMember = method.Name + "()";
+                        break;
+                    }
+                }
+
+                if (valueMember == null)
+                    valueMember = ProtoVarintConstants.DefaultValueMember;
+
+                _registry.RegisterProtoVarintType(typeName, varintType, valueMember);
+            }
         }
 
         /// <summary>

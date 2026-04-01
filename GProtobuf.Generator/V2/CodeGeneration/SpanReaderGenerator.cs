@@ -1,11 +1,13 @@
 using System.Collections.Generic;
 using System.Linq;
+using GProtobuf.Generator.Attributes;
 using GProtobuf.Generator.CodeGeneration;
 using GProtobuf.Generator.V2.CodeGeneration.Core;
 using GProtobuf.Generator.V2.Handlers;
 using GProtobuf.Generator.V2.Handlers.Core;
 using GProtobuf.Generator.V2.Handlers.VirtualTypes;
 using GProtobuf.Generator.V2.Helpers;
+using GProtobuf.Generator.WireFormat;
 
 namespace GProtobuf.Generator.V2.CodeGeneration
 {
@@ -1055,6 +1057,14 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 _sb.AppendIndentedLine($"result.Add(({globalElementType})reader.ReadVarInt32());");
             }
+            else if (_registry.IsProtoVarint(TypeMapping.NormalizeTypeName(elementType)))
+            {
+                // ProtoVarint type - read varint and construct using the constructor
+                var varintType = _registry.GetProtoVarintType(TypeMapping.NormalizeTypeName(elementType)) ?? Attributes.ProtoVarintType.UInt32;
+                var valueMember = _registry.GetProtoVarintValueMember(TypeMapping.NormalizeTypeName(elementType));
+                var readMethod = PrimitiveTypeCodeGenerator.GetProtoVarintReadMethod(varintType);
+                _sb.AppendIndentedLine($"result.Add(new {globalElementType}(reader.{readMethod}()));");
+            }
             else
             {
                 // Complex type - need to read length-prefixed message
@@ -2079,6 +2089,14 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             else if (isEnum)
             {
                 _sb.AppendIndentedLine($"instance.Add(({globalElementType})reader.ReadVarInt32());");
+            }
+            else if (_registry.IsProtoVarint(TypeMapping.NormalizeTypeName(elementType)))
+            {
+                // ProtoVarint type - read varint and construct using the constructor
+                var varintType2 = _registry.GetProtoVarintType(TypeMapping.NormalizeTypeName(elementType)) ?? Attributes.ProtoVarintType.UInt32;
+                var valueMember2 = _registry.GetProtoVarintValueMember(TypeMapping.NormalizeTypeName(elementType));
+                var readMethod = PrimitiveTypeCodeGenerator.GetProtoVarintReadMethod(varintType2);
+                _sb.AppendIndentedLine($"instance.Add(new {globalElementType}(reader.{readMethod}()));");
             }
             else
             {

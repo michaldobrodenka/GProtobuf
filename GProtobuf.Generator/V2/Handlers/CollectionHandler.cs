@@ -1,4 +1,7 @@
+using GProtobuf.Generator.Attributes;
 using GProtobuf.Generator.V2.Handlers.Core;
+using GProtobuf.Generator.V2.Helpers;
+using GProtobuf.Generator.WireFormat;
 
 namespace GProtobuf.Generator.V2.Handlers
 {
@@ -15,6 +18,20 @@ namespace GProtobuf.Generator.V2.Handlers
         {
             _sb = sb;
             _registry = registry;
+        }
+
+        private bool IsProtoVarintType(string typeName, out ProtoVarintType varintType, out string valueMember)
+        {
+            var normalizedTypeName = TypeMapping.NormalizeTypeName(typeName);
+            if (_registry.IsProtoVarint(normalizedTypeName))
+            {
+                varintType = _registry.GetProtoVarintType(normalizedTypeName) ?? ProtoVarintType.UInt32;
+                valueMember = _registry.GetProtoVarintValueMember(normalizedTypeName);
+                return true;
+            }
+            varintType = default;
+            valueMember = null;
+            return false;
         }
 
         #region Write (Serialization)
@@ -73,6 +90,13 @@ namespace GProtobuf.Generator.V2.Handlers
                 {
                     _sb.AppendIndentedLine($"// WARNING: No write expression for {elementTypeName}");
                 }
+            }
+            else if (IsProtoVarintType(elementTypeName, out var writeVarintType, out var writeValueMember))
+            {
+                // ProtoVarint type - write tag and varint value directly
+                TagCodeHelper.WriteTag(_sb, fieldId, WireType.VarInt);
+                var writeMethod = PrimitiveTypeCodeGenerator.GetProtoVarintWriteMethod(writeVarintType);
+                _sb.AppendIndentedLine($"writer.{writeMethod}(item.{writeValueMember});");
             }
             else
             {
@@ -216,6 +240,13 @@ namespace GProtobuf.Generator.V2.Handlers
                     _sb.AppendIndentedLine($"// WARNING: No read expression for {elementTypeName}");
                     _sb.AppendIndentedLine($"var item = default({shortElementType});");
                 }
+            }
+            else if (IsProtoVarintType(elementTypeName, out var varintType, out var valueMember))
+            {
+                // ProtoVarint type - read as simple varint and construct via constructor
+                var readMethod = PrimitiveTypeCodeGenerator.GetProtoVarintReadMethod(varintType);
+                var globalTypeName = TypeMapping.GetGlobalGenericTypeName(elementTypeName);
+                _sb.AppendIndentedLine($"var item = new {globalTypeName}({readerVar}.{readMethod}());");
             }
             else
             {
@@ -364,6 +395,13 @@ namespace GProtobuf.Generator.V2.Handlers
                 {
                     _sb.AppendIndentedLine($"// WARNING: No size expression for {elementTypeName}");
                 }
+            }
+            else if (IsProtoVarintType(elementTypeName, out var sizeVarintType, out var sizeValueMember))
+            {
+                // ProtoVarint type - add tag size and varint value size
+                TagCodeHelper.AddTagSize(_sb, fieldId, WireType.VarInt, calculatorVar);
+                var writeMethod = PrimitiveTypeCodeGenerator.GetProtoVarintWriteMethod(sizeVarintType);
+                _sb.AppendIndentedLine($"{calculatorVar}.{writeMethod}(item.{sizeValueMember});");
             }
             else
             {

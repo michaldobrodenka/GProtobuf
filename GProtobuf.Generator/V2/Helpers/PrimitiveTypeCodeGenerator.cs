@@ -182,5 +182,38 @@ namespace GProtobuf.Generator.V2.Helpers
                 _ => "ReadVarUInt32"
             };
         }
+
+        /// <summary>
+        /// Gets the size expression for a ProtoVarint type.
+        /// </summary>
+        public static string GetProtoVarintSizeExpression(ProtoVarintType type, string valueExpression)
+        {
+            return type switch
+            {
+                ProtoVarintType.UInt32 => $"global::GProtobuf.Core.Utils.GetVarintSize((uint){valueExpression})",
+                ProtoVarintType.Int32 => $"global::GProtobuf.Core.Utils.GetVarintSize({valueExpression})",
+                ProtoVarintType.SInt32 => $"global::GProtobuf.Core.Utils.GetVarintSize(global::GProtobuf.Core.Utils.EncodeZigZag32({valueExpression}))",
+                ProtoVarintType.UInt64 => $"global::GProtobuf.Core.Utils.GetVarintSize((ulong){valueExpression})",
+                ProtoVarintType.Int64 => $"global::GProtobuf.Core.Utils.GetVarintSize({valueExpression})",
+                ProtoVarintType.SInt64 => $"global::GProtobuf.Core.Utils.GetVarintSize(global::GProtobuf.Core.Utils.EncodeZigZag64({valueExpression}))",
+                _ => $"global::GProtobuf.Core.Utils.GetVarintSize((uint){valueExpression})"
+            };
+        }
+
+        /// <summary>
+        /// Gets the cast prefix for signed ProtoVarint types.
+        /// Returns empty string for unsigned types.
+        /// </summary>
+        public static string GetProtoVarintCastPrefix(ProtoVarintType type)
+        {
+            return type switch
+            {
+                ProtoVarintType.Int32 => "(int)",
+                ProtoVarintType.SInt32 => "(int)",
+                ProtoVarintType.Int64 => "(long)",
+                ProtoVarintType.SInt64 => "(long)",
+                _ => ""
+            };
+        }
     }
 }

@@ -1,10 +1,12 @@
 using System.Collections.Generic;
 using System.Linq;
+using GProtobuf.Generator.Attributes;
 using GProtobuf.Generator.V2.CodeGeneration.Core;
 using GProtobuf.Generator.V2.Handlers;
 using GProtobuf.Generator.V2.Handlers.Core;
 using GProtobuf.Generator.V2.Handlers.VirtualTypes;
 using GProtobuf.Generator.V2.Helpers;
+using GProtobuf.Generator.WireFormat;
 
 namespace GProtobuf.Generator.V2.CodeGeneration
 {
@@ -424,6 +426,15 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 // Enums are VarInt with field id 1
                 _sb.AppendIndentedLine("writer.WriteSingleByte(0x08);"); // Field 1, VarInt
                 _sb.AppendIndentedLine("writer.WriteVarInt32((int)item);");
+            }
+            else if (_registry.IsProtoVarint(TypeMapping.NormalizeTypeName(elementType)))
+            {
+                var varintType = _registry.GetProtoVarintType(TypeMapping.NormalizeTypeName(elementType)) ?? ProtoVarintType.UInt32;
+                var valueMember = _registry.GetProtoVarintValueMember(TypeMapping.NormalizeTypeName(elementType));
+                // ProtoVarint type - write as VarInt with field id 1
+                _sb.AppendIndentedLine("writer.WriteSingleByte(0x08);"); // Field 1, VarInt
+                var writeMethod = PrimitiveTypeCodeGenerator.GetProtoVarintWriteMethod(varintType);
+                _sb.AppendIndentedLine($"writer.{writeMethod}(item.{valueMember});");
             }
             else
             {

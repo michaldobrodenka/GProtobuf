@@ -3,6 +3,7 @@ using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Linq;
 using GProtobuf.Generator.V2;
+using GProtobuf.Generator.V2.Handlers.Core;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
@@ -600,7 +601,7 @@ public sealed class SerializerGenerator : IIncrementalGenerator
 
         // Check for [ProtoVarint] attribute
         var protoVarintAttr = namedType.GetAttributes().FirstOrDefault(a =>
-            a.AttributeClass?.Name == "ProtoVarintAttribute");
+            a.AttributeClass?.Name == ProtoVarintConstants.AttributeName);
 
         if (protoVarintAttr == null)
             return null;
@@ -620,7 +621,7 @@ public sealed class SerializerGenerator : IIncrementalGenerator
         foreach (var member in namedType.GetMembers())
         {
             var hasValueAttr = member.GetAttributes().Any(a =>
-                a.AttributeClass?.Name == "ProtoVarintValueAttribute");
+                a.AttributeClass?.Name == ProtoVarintConstants.ValueAttributeName);
 
             if (hasValueAttr)
             {
@@ -677,7 +678,7 @@ public sealed class SerializerGenerator : IIncrementalGenerator
         foreach (var ctor in namedType.Constructors)
         {
             var hasCtor = ctor.GetAttributes().Any(a =>
-                a.AttributeClass?.Name == "ProtoVarintConstructorAttribute");
+                a.AttributeClass?.Name == ProtoVarintConstants.ConstructorAttributeName);
 
             if (hasCtor)
             {

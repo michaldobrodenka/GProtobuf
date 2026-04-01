@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using GProtobuf.Generator.Attributes;
 using GProtobuf.Generator.V2.CodeGeneration.Core;
 using GProtobuf.Generator.V2.Handlers.Core;
 using GProtobuf.Generator.V2.Helpers;
@@ -119,10 +120,25 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
             else
             {
-                // Complex types: protobuf-net uses [tag=0x0A][length][message] for each item
-                _sb.AppendIndentedLine("var tag = reader.ReadVarUInt32();");
-                _sb.AppendIndentedLine("if ((tag & 0x07) != 2) throw new InvalidDataException($\"Expected wire type 2, got {tag & 0x07}\");");
-                GenerateComplexElementRead(elementType, "list.Add");
+                var normalizedElementType = TypeMapping.NormalizeTypeName(elementType);
+                if (_registry.IsProtoVarint(normalizedElementType))
+                {
+                    // ProtoVarint types: serialized as varints (wire type 0)
+                    var varintType = _registry.GetProtoVarintType(normalizedElementType) ?? ProtoVarintType.UInt32;
+                    var valueMember = _registry.GetProtoVarintValueMember(normalizedElementType);
+                    _sb.AppendIndentedLine("var tag = reader.ReadVarUInt32();");
+                    _sb.AppendIndentedLine("if ((tag & 0x07) != 0) throw new InvalidDataException($\"Expected wire type 0 for ProtoVarint, got {tag & 0x07}\");");
+                    var readMethod = PrimitiveTypeCodeGenerator.GetProtoVarintReadMethod(varintType);
+                    var globalTypeName = TypeMapping.GetGlobalGenericTypeName(elementType);
+                    _sb.AppendIndentedLine($"list.Add(new {globalTypeName}(reader.{readMethod}()));");
+                }
+                else
+                {
+                    // Complex types: protobuf-net uses [tag=0x0A][length][message] for each item
+                    _sb.AppendIndentedLine("var tag = reader.ReadVarUInt32();");
+                    _sb.AppendIndentedLine("if ((tag & 0x07) != 2) throw new InvalidDataException($\"Expected wire type 2, got {tag & 0x07}\");");
+                    GenerateComplexElementRead(elementType, "list.Add");
+                }
             }
 
             _sb.EndBlock();
@@ -298,15 +314,27 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 }
                 else
                 {
-                    var className = TypeNameHelper.GetClassName(elementType);
-                    var spanReadersClass = NamespaceHelper.GetSpanReadersClass(elementType, _registry);
-                    _sb.AppendIndentedLine($"var itemLen_{varName} = (int)reader.ReadVarUInt32();");
-                    _sb.AppendIndentedLine($"var itemReader_{varName} = reader.CreateSubReader(itemLen_{varName});");
-                    // For derived types with ProtoInclude, use full Read method (handles wrapper)
-                    // For non-derived types, use ReadContent method
-                    bool isDerivedType = _registry.IsDerivedType(elementType);
-                    var methodSuffix = isDerivedType ? "" : "Content";
-                    _sb.AppendIndentedLine($"_tempList_{varName}.Add({spanReadersClass}.Read{className}{methodSuffix}(ref itemReader_{varName}));");
+                    var normalizedElemType = TypeMapping.NormalizeTypeName(elementType);
+                    if (_registry.IsProtoVarint(normalizedElemType))
+                    {
+                        // ProtoVarint type - read as simple varint
+                        var elemVarintType = _registry.GetProtoVarintType(normalizedElemType) ?? ProtoVarintType.UInt32;
+                        var readMethod = PrimitiveTypeCodeGenerator.GetProtoVarintReadMethod(elemVarintType);
+                        var globalElementTypeProtoVarint = TypeMapping.GetGlobalGenericTypeName(elementType);
+                        _sb.AppendIndentedLine($"_tempList_{varName}.Add(new {globalElementTypeProtoVarint}(reader.{readMethod}()));");
+                    }
+                    else
+                    {
+                        var className = TypeNameHelper.GetClassName(elementType);
+                        var spanReadersClass = NamespaceHelper.GetSpanReadersClass(elementType, _registry);
+                        _sb.AppendIndentedLine($"var itemLen_{varName} = (int)reader.ReadVarUInt32();");
+                        _sb.AppendIndentedLine($"var itemReader_{varName} = reader.CreateSubReader(itemLen_{varName});");
+                        // For derived types with ProtoInclude, use full Read method (handles wrapper)
+                        // For non-derived types, use ReadContent method
+                        bool isDerivedType = _registry.IsDerivedType(elementType);
+                        var methodSuffix = isDerivedType ? "" : "Content";
+                        _sb.AppendIndentedLine($"_tempList_{varName}.Add({spanReadersClass}.Read{className}{methodSuffix}(ref itemReader_{varName}));");
+                    }
                 }
             }
             else
@@ -327,15 +355,27 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 }
                 else
                 {
-                    var className = TypeNameHelper.GetClassName(elementType);
-                    var spanReadersClass = NamespaceHelper.GetSpanReadersClass(elementType, _registry);
-                    _sb.AppendIndentedLine($"var itemLen_{varName} = (int)reader.ReadVarUInt32();");
-                    _sb.AppendIndentedLine($"var itemReader_{varName} = reader.CreateSubReader(itemLen_{varName});");
-                    // For derived types with ProtoInclude, use full Read method (handles wrapper)
-                    // For non-derived types, use ReadContent method
-                    bool isDerivedType = _registry.IsDerivedType(elementType);
-                    var methodSuffix = isDerivedType ? "" : "Content";
-                    _sb.AppendIndentedLine($"{varName}.Add({spanReadersClass}.Read{className}{methodSuffix}(ref itemReader_{varName}));");
+                    var normalizedElemType = TypeMapping.NormalizeTypeName(elementType);
+                    if (_registry.IsProtoVarint(normalizedElemType))
+                    {
+                        // ProtoVarint type - read as simple varint
+                        var listElemVarintType = _registry.GetProtoVarintType(normalizedElemType) ?? ProtoVarintType.UInt32;
+                        var readMethod = PrimitiveTypeCodeGenerator.GetProtoVarintReadMethod(listElemVarintType);
+                        var globalElementTypeProtoVarint = TypeMapping.GetGlobalGenericTypeName(elementType);
+                        _sb.AppendIndentedLine($"{varName}.Add(new {globalElementTypeProtoVarint}(reader.{readMethod}()));");
+                    }
+                    else
+                    {
+                        var className = TypeNameHelper.GetClassName(elementType);
+                        var spanReadersClass = NamespaceHelper.GetSpanReadersClass(elementType, _registry);
+                        _sb.AppendIndentedLine($"var itemLen_{varName} = (int)reader.ReadVarUInt32();");
+                        _sb.AppendIndentedLine($"var itemReader_{varName} = reader.CreateSubReader(itemLen_{varName});");
+                        // For derived types with ProtoInclude, use full Read method (handles wrapper)
+                        // For non-derived types, use ReadContent method
+                        bool isDerivedType = _registry.IsDerivedType(elementType);
+                        var methodSuffix = isDerivedType ? "" : "Content";
+                        _sb.AppendIndentedLine($"{varName}.Add({spanReadersClass}.Read{className}{methodSuffix}(ref itemReader_{varName}));");
+                    }
                 }
             }
         }
@@ -365,16 +405,28 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
             else
             {
-                // Custom type - read as length-delimited, create sub-reader
-                var className = TypeNameHelper.GetClassName(typeName);
-                var spanReadersClass = NamespaceHelper.GetSpanReadersClass(typeName, _registry);
-                _sb.AppendIndentedLine($"var len_{varName} = (int)reader.ReadVarUInt32();");
-                _sb.AppendIndentedLine($"var subReader_{varName} = reader.CreateSubReader(len_{varName});");
-                // For derived types with ProtoInclude, use full Read method (handles wrapper)
-                // For non-derived types, use ReadContent method
-                bool isDerivedType = _registry.IsDerivedType(typeName);
-                var methodSuffix = isDerivedType ? "" : "Content";
-                _sb.AppendIndentedLine($"{varName} = {spanReadersClass}.Read{className}{methodSuffix}(ref subReader_{varName});");
+                var normalizedType = TypeMapping.NormalizeTypeName(typeName);
+                if (_registry.IsProtoVarint(normalizedType))
+                {
+                    // ProtoVarint type - read as simple varint and construct via constructor
+                    var varintType = _registry.GetProtoVarintType(normalizedType) ?? ProtoVarintType.UInt32;
+                    var readMethod = PrimitiveTypeCodeGenerator.GetProtoVarintReadMethod(varintType);
+                    var globalTypeName = TypeMapping.GetGlobalGenericTypeName(typeName);
+                    _sb.AppendIndentedLine($"{varName} = new {globalTypeName}(reader.{readMethod}());");
+                }
+                else
+                {
+                    // Custom type - read as length-delimited, create sub-reader
+                    var className = TypeNameHelper.GetClassName(typeName);
+                    var spanReadersClass = NamespaceHelper.GetSpanReadersClass(typeName, _registry);
+                    _sb.AppendIndentedLine($"var len_{varName} = (int)reader.ReadVarUInt32();");
+                    _sb.AppendIndentedLine($"var subReader_{varName} = reader.CreateSubReader(len_{varName});");
+                    // For derived types with ProtoInclude, use full Read method (handles wrapper)
+                    // For non-derived types, use ReadContent method
+                    bool isDerivedType = _registry.IsDerivedType(typeName);
+                    var methodSuffix = isDerivedType ? "" : "Content";
+                    _sb.AppendIndentedLine($"{varName} = {spanReadersClass}.Read{className}{methodSuffix}(ref subReader_{varName});");
+                }
             }
         }
 
@@ -409,16 +461,28 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
             else
             {
-                // Complex element - read length-delimited
-                var className = TypeNameHelper.GetClassName(elementType);
-                var spanReadersClass = NamespaceHelper.GetSpanReadersClass(elementType, _registry);
-                _sb.AppendIndentedLine($"var itemLen_{varName} = (int)reader.ReadVarUInt32();");
-                _sb.AppendIndentedLine($"var itemReader_{varName} = reader.CreateSubReader(itemLen_{varName});");
-                // For derived types with ProtoInclude, use full Read method (handles wrapper)
-                // For non-derived types, use ReadContent method
-                bool isDerivedType = _registry.IsDerivedType(elementType);
-                var methodSuffix = isDerivedType ? "" : "Content";
-                _sb.AppendIndentedLine($"{varName}.Add({spanReadersClass}.Read{className}{methodSuffix}(ref itemReader_{varName}));");
+                var normalizedElemType = TypeMapping.NormalizeTypeName(elementType);
+                if (_registry.IsProtoVarint(normalizedElemType))
+                {
+                    // ProtoVarint type - read as simple varint
+                    var nestedListVarintType = _registry.GetProtoVarintType(normalizedElemType) ?? ProtoVarintType.UInt32;
+                    var readMethod = PrimitiveTypeCodeGenerator.GetProtoVarintReadMethod(nestedListVarintType);
+                    var globalElementTypeProtoVarint = TypeMapping.GetGlobalGenericTypeName(elementType);
+                    _sb.AppendIndentedLine($"{varName}.Add(new {globalElementTypeProtoVarint}(reader.{readMethod}()));");
+                }
+                else
+                {
+                    // Complex element - read length-delimited
+                    var className = TypeNameHelper.GetClassName(elementType);
+                    var spanReadersClass = NamespaceHelper.GetSpanReadersClass(elementType, _registry);
+                    _sb.AppendIndentedLine($"var itemLen_{varName} = (int)reader.ReadVarUInt32();");
+                    _sb.AppendIndentedLine($"var itemReader_{varName} = reader.CreateSubReader(itemLen_{varName});");
+                    // For derived types with ProtoInclude, use full Read method (handles wrapper)
+                    // For non-derived types, use ReadContent method
+                    bool isDerivedType = _registry.IsDerivedType(elementType);
+                    var methodSuffix = isDerivedType ? "" : "Content";
+                    _sb.AppendIndentedLine($"{varName}.Add({spanReadersClass}.Read{className}{methodSuffix}(ref itemReader_{varName}));");
+                }
             }
 
             _sb.EndBlock();
@@ -455,16 +519,28 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
             else
             {
-                // Complex element - read length-delimited
-                var className = TypeNameHelper.GetClassName(elementType);
-                var spanReadersClass = NamespaceHelper.GetSpanReadersClass(elementType, _registry);
-                _sb.AppendIndentedLine($"var itemLen_{varName} = (int)reader.ReadVarUInt32();");
-                _sb.AppendIndentedLine($"var itemReader_{varName} = reader.CreateSubReader(itemLen_{varName});");
-                // For derived types with ProtoInclude, use full Read method (handles wrapper)
-                // For non-derived types, use ReadContent method
-                bool isDerivedType = _registry.IsDerivedType(elementType);
-                var methodSuffix = isDerivedType ? "" : "Content";
-                _sb.AppendIndentedLine($"tempList_{varName}.Add({spanReadersClass}.Read{className}{methodSuffix}(ref itemReader_{varName}));");
+                var normalizedElemType = TypeMapping.NormalizeTypeName(elementType);
+                if (_registry.IsProtoVarint(normalizedElemType))
+                {
+                    // ProtoVarint type - read as simple varint
+                    var arrayElemVarintType = _registry.GetProtoVarintType(normalizedElemType) ?? ProtoVarintType.UInt32;
+                    var readMethod = PrimitiveTypeCodeGenerator.GetProtoVarintReadMethod(arrayElemVarintType);
+                    var globalElementTypeProtoVarint = TypeMapping.GetGlobalGenericTypeName(elementType);
+                    _sb.AppendIndentedLine($"tempList_{varName}.Add(new {globalElementTypeProtoVarint}(reader.{readMethod}()));");
+                }
+                else
+                {
+                    // Complex element - read length-delimited
+                    var className = TypeNameHelper.GetClassName(elementType);
+                    var spanReadersClass = NamespaceHelper.GetSpanReadersClass(elementType, _registry);
+                    _sb.AppendIndentedLine($"var itemLen_{varName} = (int)reader.ReadVarUInt32();");
+                    _sb.AppendIndentedLine($"var itemReader_{varName} = reader.CreateSubReader(itemLen_{varName});");
+                    // For derived types with ProtoInclude, use full Read method (handles wrapper)
+                    // For non-derived types, use ReadContent method
+                    bool isDerivedType = _registry.IsDerivedType(elementType);
+                    var methodSuffix = isDerivedType ? "" : "Content";
+                    _sb.AppendIndentedLine($"tempList_{varName}.Add({spanReadersClass}.Read{className}{methodSuffix}(ref itemReader_{varName}));");
+                }
             }
 
             _sb.EndBlock();
@@ -648,21 +724,35 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
             else
             {
-                // Complex types: [tag=0x0A][length][message] for each item
-                // tag 0x0A = field 1, wire type 2 (length-delimited)
-                _sb.AppendIndentedLine($"{writerName}.WriteVarUInt32(0x0A); // field 1, wire type 2");
-                var className = TypeNameHelper.GetClassName(elementType);
-                var sizeCalcClass = NamespaceHelper.GetSizeCalculatorsClass(elementType, _registry);
-                var writerClass = NamespaceHelper.GetWritersClass(elementType, isBufferWriter ? "BufferWriters" : "StreamWriters", _registry);
-                // For derived types with ProtoInclude, use full methods (handles wrapper)
-                // For non-derived types, use Content methods
-                bool isDerivedType = _registry.IsDerivedType(elementType);
-                var methodSuffix = isDerivedType ? "" : "Content";
-                var sizeSuffix = isDerivedType ? "Size" : "ContentSize";
-                _sb.AppendIndentedLine("var sizeCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
-                _sb.AppendIndentedLine($"{sizeCalcClass}.Calculate{className}{sizeSuffix}(ref sizeCalc, {varName});");
-                _sb.AppendIndentedLine($"{writerName}.WriteVarUInt32((uint)sizeCalc.Length);");
-                _sb.AppendIndentedLine($"{writerClass}.Write{className}{methodSuffix}(ref {writerName}, {varName});");
+                var normalizedElemType = TypeMapping.NormalizeTypeName(elementType);
+                if (_registry.IsProtoVarint(normalizedElemType))
+                {
+                    // ProtoVarint types use wire type 0 (varint)
+                    // tag 0x08 = field 1, wire type 0 (varint)
+                    var elemWriteVarintType = _registry.GetProtoVarintType(normalizedElemType) ?? ProtoVarintType.UInt32;
+                    var elemWriteValueMember = _registry.GetProtoVarintValueMember(normalizedElemType);
+                    _sb.AppendIndentedLine($"{writerName}.WriteVarUInt32(0x08); // field 1, wire type 0 (varint for ProtoVarint)");
+                    var writeMethod = PrimitiveTypeCodeGenerator.GetProtoVarintWriteMethod(elemWriteVarintType);
+                    _sb.AppendIndentedLine($"{writerName}.{writeMethod}({varName}.{elemWriteValueMember});");
+                }
+                else
+                {
+                    // Complex types: [tag=0x0A][length][message] for each item
+                    // tag 0x0A = field 1, wire type 2 (length-delimited)
+                    _sb.AppendIndentedLine($"{writerName}.WriteVarUInt32(0x0A); // field 1, wire type 2");
+                    var className = TypeNameHelper.GetClassName(elementType);
+                    var sizeCalcClass = NamespaceHelper.GetSizeCalculatorsClass(elementType, _registry);
+                    var writerClass = NamespaceHelper.GetWritersClass(elementType, isBufferWriter ? "BufferWriters" : "StreamWriters", _registry);
+                    // For derived types with ProtoInclude, use full methods (handles wrapper)
+                    // For non-derived types, use Content methods
+                    bool isDerivedType = _registry.IsDerivedType(elementType);
+                    var methodSuffix = isDerivedType ? "" : "Content";
+                    var sizeSuffix = isDerivedType ? "Size" : "ContentSize";
+                    _sb.AppendIndentedLine("var sizeCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
+                    _sb.AppendIndentedLine($"{sizeCalcClass}.Calculate{className}{sizeSuffix}(ref sizeCalc, {varName});");
+                    _sb.AppendIndentedLine($"{writerName}.WriteVarUInt32((uint)sizeCalc.Length);");
+                    _sb.AppendIndentedLine($"{writerClass}.Write{className}{methodSuffix}(ref {writerName}, {varName});");
+                }
             }
         }
 
@@ -915,17 +1005,29 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
             else
             {
-                // Custom type (class or struct) - no null check, let it fail naturally if null class is passed
-                var className = TypeNameHelper.GetClassName(typeName);
-                var sizeCalcClass = NamespaceHelper.GetSizeCalculatorsClass(typeName, _registry);
-                var safeVarName = varName.Replace(".", "_").Replace("[", "_").Replace("]", "_");
-                // For derived types with ProtoInclude, use full Calculate method (handles wrapper)
-                // For non-derived types, use CalculateContentSize method
-                bool isDerivedType = _registry.IsDerivedType(typeName);
-                var sizeSuffix = isDerivedType ? "Size" : "ContentSize";
-                _sb.AppendIndentedLine($"var _calc_{safeVarName}_{fieldNumber} = new global::GProtobuf.Core.WriteSizeCalculator();");
-                _sb.AppendIndentedLine($"{sizeCalcClass}.Calculate{className}{sizeSuffix}(ref _calc_{safeVarName}_{fieldNumber}, {varName});");
-                _sb.AppendIndentedLine($"var {resultVarName} = {tagSize} + global::GProtobuf.Core.Utils.GetVarintSize((uint)_calc_{safeVarName}_{fieldNumber}.Length) + _calc_{safeVarName}_{fieldNumber}.Length;");
+                var normalizedType = TypeMapping.NormalizeTypeName(typeName);
+                if (_registry.IsProtoVarint(normalizedType))
+                {
+                    // ProtoVarint types are written directly as varints (no length prefix), so just wire type 0
+                    var sizeCalcVarintType = _registry.GetProtoVarintType(normalizedType) ?? ProtoVarintType.UInt32;
+                    var sizeCalcValueMember = _registry.GetProtoVarintValueMember(normalizedType);
+                    var sizeExpr = PrimitiveTypeCodeGenerator.GetProtoVarintSizeExpression(sizeCalcVarintType, $"{varName}.{sizeCalcValueMember}");
+                    _sb.AppendIndentedLine($"var {resultVarName} = {tagSize} + {sizeExpr};");
+                }
+                else
+                {
+                    // Custom type (class or struct) - no null check, let it fail naturally if null class is passed
+                    var className = TypeNameHelper.GetClassName(typeName);
+                    var sizeCalcClass = NamespaceHelper.GetSizeCalculatorsClass(typeName, _registry);
+                    var safeVarName = varName.Replace(".", "_").Replace("[", "_").Replace("]", "_");
+                    // For derived types with ProtoInclude, use full Calculate method (handles wrapper)
+                    // For non-derived types, use CalculateContentSize method
+                    bool isDerivedType = _registry.IsDerivedType(typeName);
+                    var sizeSuffix = isDerivedType ? "Size" : "ContentSize";
+                    _sb.AppendIndentedLine($"var _calc_{safeVarName}_{fieldNumber} = new global::GProtobuf.Core.WriteSizeCalculator();");
+                    _sb.AppendIndentedLine($"{sizeCalcClass}.Calculate{className}{sizeSuffix}(ref _calc_{safeVarName}_{fieldNumber}, {varName});");
+                    _sb.AppendIndentedLine($"var {resultVarName} = {tagSize} + global::GProtobuf.Core.Utils.GetVarintSize((uint)_calc_{safeVarName}_{fieldNumber}.Length) + _calc_{safeVarName}_{fieldNumber}.Length;");
+                }
             }
         }
 
@@ -955,19 +1057,31 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
             else
             {
-                // For complex elements, generate loop with WriteSizeCalculator
-                var className = TypeNameHelper.GetClassName(elementType);
-                var sizeCalcClass = NamespaceHelper.GetSizeCalculatorsClass(elementType, _registry);
-                // For derived types with ProtoInclude, use full Calculate method (handles wrapper)
-                // For non-derived types, use CalculateContentSize method
-                bool isDerivedType = _registry.IsDerivedType(elementType);
-                var sizeSuffix = isDerivedType ? "Size" : "ContentSize";
-                _sb.AppendIndentedLine($"foreach (var _item_{safeVarName}_{fieldNumber} in {varName})");
-                _sb.StartNewBlock();
-                _sb.AppendIndentedLine($"var _itemCalc_{safeVarName}_{fieldNumber} = new global::GProtobuf.Core.WriteSizeCalculator();");
-                _sb.AppendIndentedLine($"{sizeCalcClass}.Calculate{className}{sizeSuffix}(ref _itemCalc_{safeVarName}_{fieldNumber}, _item_{safeVarName}_{fieldNumber});");
-                _sb.AppendIndentedLine($"_listContentSize_{safeVarName}_{fieldNumber} += 1 + global::GProtobuf.Core.Utils.GetVarintSize((uint)_itemCalc_{safeVarName}_{fieldNumber}.Length) + _itemCalc_{safeVarName}_{fieldNumber}.Length;");
-                _sb.EndBlock();
+                var normalizedElemType = TypeMapping.NormalizeTypeName(elementType);
+                if (_registry.IsProtoVarint(normalizedElemType))
+                {
+                    // ProtoVarint elements: [tag=varint][varint value]
+                    var nestedCollVarintType = _registry.GetProtoVarintType(normalizedElemType) ?? ProtoVarintType.UInt32;
+                    var nestedCollValueMember = _registry.GetProtoVarintValueMember(normalizedElemType);
+                    var sizeExpr = PrimitiveTypeCodeGenerator.GetProtoVarintSizeExpression(nestedCollVarintType, $"x.{nestedCollValueMember}");
+                    _sb.AppendIndentedLine($"_listContentSize_{safeVarName}_{fieldNumber} = {varName}.Sum(x => 1 + {sizeExpr});");
+                }
+                else
+                {
+                    // For complex elements, generate loop with WriteSizeCalculator
+                    var className = TypeNameHelper.GetClassName(elementType);
+                    var sizeCalcClass = NamespaceHelper.GetSizeCalculatorsClass(elementType, _registry);
+                    // For derived types with ProtoInclude, use full Calculate method (handles wrapper)
+                    // For non-derived types, use CalculateContentSize method
+                    bool isDerivedType = _registry.IsDerivedType(elementType);
+                    var sizeSuffix = isDerivedType ? "Size" : "ContentSize";
+                    _sb.AppendIndentedLine($"foreach (var _item_{safeVarName}_{fieldNumber} in {varName})");
+                    _sb.StartNewBlock();
+                    _sb.AppendIndentedLine($"var _itemCalc_{safeVarName}_{fieldNumber} = new global::GProtobuf.Core.WriteSizeCalculator();");
+                    _sb.AppendIndentedLine($"{sizeCalcClass}.Calculate{className}{sizeSuffix}(ref _itemCalc_{safeVarName}_{fieldNumber}, _item_{safeVarName}_{fieldNumber});");
+                    _sb.AppendIndentedLine($"_listContentSize_{safeVarName}_{fieldNumber} += 1 + global::GProtobuf.Core.Utils.GetVarintSize((uint)_itemCalc_{safeVarName}_{fieldNumber}.Length) + _itemCalc_{safeVarName}_{fieldNumber}.Length;");
+                    _sb.EndBlock();
+                }
             }
 
             _sb.EndBlock(); // end if (varName != null)
@@ -1003,10 +1117,24 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateTaggedFieldWrite(string typeName, string varName, int fieldNumber, bool isPrimitive, StandaloneTypeInfo? nestedInfo, string writerClassName, string? precalculatedListSizeVar = null)
         {
-            var wireType = GetWireType(typeName);
-            var tag = (fieldNumber << 3) | wireType;
+            // Check for ProtoVarint types first - they use wire type 0 (varint), not 2 (length-delimited)
+            var normalizedType = TypeMapping.NormalizeTypeName(typeName);
+            if (_registry.IsProtoVarint(normalizedType))
+            {
+                // ProtoVarint types use wire type 0 (varint)
+                var taggedVarintType = _registry.GetProtoVarintType(normalizedType) ?? ProtoVarintType.UInt32;
+                var taggedValueMember = _registry.GetProtoVarintValueMember(normalizedType);
+                var tag = (fieldNumber << 3) | 0; // wire type 0 = varint
+                var writeMethod = PrimitiveTypeCodeGenerator.GetProtoVarintWriteMethod(taggedVarintType);
+                _sb.AppendIndentedLine($"writer.WriteVarUInt32({tag}); // field {fieldNumber}, wire type 0 (varint for ProtoVarint)");
+                _sb.AppendIndentedLine($"writer.{writeMethod}({varName}.{taggedValueMember});");
+                return;
+            }
 
-            _sb.AppendIndentedLine($"writer.WriteVarUInt32({tag}); // field {fieldNumber}, wire type {wireType}");
+            var wireType = GetWireType(typeName);
+            var tagNormal = (fieldNumber << 3) | wireType;
+
+            _sb.AppendIndentedLine($"writer.WriteVarUInt32({tagNormal}); // field {fieldNumber}, wire type {wireType}");
 
             if (isPrimitive || IsPrimitiveType(typeName))
             {
@@ -1087,15 +1215,27 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 }
                 else
                 {
-                    var className = TypeNameHelper.GetClassName(elementType);
-                    var sizeCalcClass = NamespaceHelper.GetSizeCalculatorsClass(elementType, _registry);
-                    // For derived types with ProtoInclude, use full Calculate method (handles wrapper)
-                    // For non-derived types, use CalculateContentSize method
-                    bool isDerivedType = _registry.IsDerivedType(elementType);
-                    var sizeSuffix = isDerivedType ? "Size" : "ContentSize";
-                    _sb.AppendIndentedLine($"var itemCalc_{fieldNumber} = new global::GProtobuf.Core.WriteSizeCalculator();");
-                    _sb.AppendIndentedLine($"{sizeCalcClass}.Calculate{className}{sizeSuffix}(ref itemCalc_{fieldNumber}, item_{fieldNumber});");
-                    _sb.AppendIndentedLine($"{listSizeVar} += 1 + global::GProtobuf.Core.Utils.GetVarintSize((uint)itemCalc_{fieldNumber}.Length) + itemCalc_{fieldNumber}.Length;");
+                    var normalizedElemType = TypeMapping.NormalizeTypeName(elementType);
+                    if (_registry.IsProtoVarint(normalizedElemType))
+                    {
+                        // ProtoVarint elements: [tag=varint][varint value]
+                        var listSizeVarintType = _registry.GetProtoVarintType(normalizedElemType) ?? ProtoVarintType.UInt32;
+                        var listSizeValueMember = _registry.GetProtoVarintValueMember(normalizedElemType);
+                        var sizeExpr = PrimitiveTypeCodeGenerator.GetProtoVarintSizeExpression(listSizeVarintType, $"item_{fieldNumber}.{listSizeValueMember}");
+                        _sb.AppendIndentedLine($"{listSizeVar} += 1 + {sizeExpr};");
+                    }
+                    else
+                    {
+                        var className = TypeNameHelper.GetClassName(elementType);
+                        var sizeCalcClass = NamespaceHelper.GetSizeCalculatorsClass(elementType, _registry);
+                        // For derived types with ProtoInclude, use full Calculate method (handles wrapper)
+                        // For non-derived types, use CalculateContentSize method
+                        bool isDerivedType = _registry.IsDerivedType(elementType);
+                        var sizeSuffix = isDerivedType ? "Size" : "ContentSize";
+                        _sb.AppendIndentedLine($"var itemCalc_{fieldNumber} = new global::GProtobuf.Core.WriteSizeCalculator();");
+                        _sb.AppendIndentedLine($"{sizeCalcClass}.Calculate{className}{sizeSuffix}(ref itemCalc_{fieldNumber}, item_{fieldNumber});");
+                        _sb.AppendIndentedLine($"{listSizeVar} += 1 + global::GProtobuf.Core.Utils.GetVarintSize((uint)itemCalc_{fieldNumber}.Length) + itemCalc_{fieldNumber}.Length;");
+                    }
                 }
                 _sb.EndBlock();
             }
@@ -1134,19 +1274,32 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
             else
             {
-                var className = TypeNameHelper.GetClassName(elementType);
-                var sizeCalcClass = NamespaceHelper.GetSizeCalculatorsClass(elementType, _registry);
-                var writerClass = NamespaceHelper.GetWritersClass(elementType, writerClassName, _registry);
-                // For derived types with ProtoInclude, use full methods (handles wrapper)
-                // For non-derived types, use Content methods
-                bool isDerivedType = _registry.IsDerivedType(elementType);
-                var methodSuffix = isDerivedType ? "" : "Content";
-                var sizeSuffix = isDerivedType ? "Size" : "ContentSize";
-                _sb.AppendIndentedLine("writer.WriteVarUInt32(0x0A); // field 1, wire type 2");
-                _sb.AppendIndentedLine($"var itemWriteCalc_{fieldNumber} = new global::GProtobuf.Core.WriteSizeCalculator();");
-                _sb.AppendIndentedLine($"{sizeCalcClass}.Calculate{className}{sizeSuffix}(ref itemWriteCalc_{fieldNumber}, item_{fieldNumber});");
-                _sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)itemWriteCalc_{fieldNumber}.Length);");
-                _sb.AppendIndentedLine($"{writerClass}.Write{className}{methodSuffix}(ref writer, item_{fieldNumber});");
+                var normalizedElemType = TypeMapping.NormalizeTypeName(elementType);
+                if (_registry.IsProtoVarint(normalizedElemType))
+                {
+                    // ProtoVarint elements: [tag=varint][varint value]
+                    var listWriteVarintType = _registry.GetProtoVarintType(normalizedElemType) ?? ProtoVarintType.UInt32;
+                    var listWriteValueMember = _registry.GetProtoVarintValueMember(normalizedElemType);
+                    _sb.AppendIndentedLine("writer.WriteVarUInt32(0x08); // field 1, wire type 0 (varint for ProtoVarint)");
+                    var writeMethod = PrimitiveTypeCodeGenerator.GetProtoVarintWriteMethod(listWriteVarintType);
+                    _sb.AppendIndentedLine($"writer.{writeMethod}(item_{fieldNumber}.{listWriteValueMember});");
+                }
+                else
+                {
+                    var className = TypeNameHelper.GetClassName(elementType);
+                    var sizeCalcClass = NamespaceHelper.GetSizeCalculatorsClass(elementType, _registry);
+                    var writerClass = NamespaceHelper.GetWritersClass(elementType, writerClassName, _registry);
+                    // For derived types with ProtoInclude, use full methods (handles wrapper)
+                    // For non-derived types, use Content methods
+                    bool isDerivedType = _registry.IsDerivedType(elementType);
+                    var methodSuffix = isDerivedType ? "" : "Content";
+                    var sizeSuffix = isDerivedType ? "Size" : "ContentSize";
+                    _sb.AppendIndentedLine("writer.WriteVarUInt32(0x0A); // field 1, wire type 2");
+                    _sb.AppendIndentedLine($"var itemWriteCalc_{fieldNumber} = new global::GProtobuf.Core.WriteSizeCalculator();");
+                    _sb.AppendIndentedLine($"{sizeCalcClass}.Calculate{className}{sizeSuffix}(ref itemWriteCalc_{fieldNumber}, item_{fieldNumber});");
+                    _sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)itemWriteCalc_{fieldNumber}.Length);");
+                    _sb.AppendIndentedLine($"{writerClass}.Write{className}{methodSuffix}(ref writer, item_{fieldNumber});");
+                }
             }
             _sb.EndBlock();
         }

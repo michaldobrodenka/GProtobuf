@@ -77,9 +77,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration.Core
             _options = options ?? GeneratorOptions.Default;
             _virtualTypesNamespace = virtualTypesNamespace ?? "GProtobuf.Generated";
             _primitiveHandler = passRegistryToPrimitiveHandler ? new PrimitiveHandler(registry) : new PrimitiveHandler();
-            _collectionHandler = new CollectionHandler(sb, registry);
             _virtualTupleRegistry = virtualTupleRegistry ?? new VirtualTupleTypeRegistry();
             _virtualMapRegistry = virtualMapRegistry ?? new VirtualMapTypeRegistry(_virtualTupleRegistry, _registry);
+            _collectionHandler = new CollectionHandler(sb, registry);
             _tupleHandler = new TupleHandler(sb, _virtualTupleRegistry, _virtualTypesNamespace);
         }
 

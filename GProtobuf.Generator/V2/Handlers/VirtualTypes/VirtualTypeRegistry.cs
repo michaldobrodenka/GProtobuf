@@ -1,4 +1,5 @@
 using GProtobuf.Generator.Attributes;
+using GProtobuf.Generator.V2.Handlers.Core;
 using GProtobuf.Generator.V2.Helpers;
 using System.Collections.Generic;
 using System.Linq;
@@ -544,7 +545,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
 
             // Check for [ProtoVarint] attribute
             var protoVarintAttr = typeSymbol.GetAttributes().FirstOrDefault(a =>
-                a.AttributeClass?.Name == "ProtoVarintAttribute");
+                a.AttributeClass?.Name == ProtoVarintConstants.AttributeName);
 
             if (protoVarintAttr == null)
                 return null;
@@ -562,7 +563,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
             foreach (var member in typeSymbol.GetMembers())
             {
                 var hasValueAttr = member.GetAttributes().Any(a =>
-                    a.AttributeClass?.Name == "ProtoVarintValueAttribute");
+                    a.AttributeClass?.Name == ProtoVarintConstants.ValueAttributeName);
 
                 if (hasValueAttr)
                 {

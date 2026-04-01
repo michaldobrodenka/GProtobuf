@@ -74,6 +74,30 @@ namespace GProtobuf.Generator.Analysis
             }
         }
 
+        /// <summary>
+        /// Registers a lightweight ProtoVarint type that doesn't have [ProtoContract].
+        /// Only stores the ProtoVarint metadata needed for code generation.
+        /// </summary>
+        public void RegisterProtoVarintType(string fullName, Attributes.ProtoVarintType varintType, string valueMember)
+        {
+            if (_byFullName.ContainsKey(fullName))
+                return; // Already registered (e.g., has [ProtoContract])
+
+            var typeDef = new TypeDefinition(
+                IsStruct: true, // ProtoVarint types are typically readonly structs
+                IsAbstract: false,
+                IsEnum: false,
+                FullName: fullName,
+                ProtoIncludes: null,
+                ProtoMembers: null,
+                HasParameterlessConstructor: false,
+                IsProtoVarint: true,
+                ProtoVarintType: varintType,
+                ProtoVarintValueMember: valueMember);
+
+            _byFullName[fullName] = typeDef;
+        }
+
         public void RegisterEnum(string enumTypeName)
         {
             _enumTypes.Add(enumTypeName);

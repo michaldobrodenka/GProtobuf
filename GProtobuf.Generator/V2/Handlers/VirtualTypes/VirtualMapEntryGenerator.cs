@@ -385,6 +385,13 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                     _sb.AppendIndentedLine($"var {fieldPrefix}Item = {VirtualTypesPrefix}.SpanReaders.Read{className}Content(ref {fieldPrefix}ScopedReader);");
                     _sb.AppendIndentedLine($"{tempListVar}.Add({fieldPrefix}Item);");
                 }
+                else if (elemInfo.IsProtoVarint)
+                {
+                    // ProtoVarint types are read as simple varints and constructed via constructor
+                    var readMethod = PrimitiveTypeCodeGenerator.GetProtoVarintReadMethod(elemInfo.ProtoVarintType);
+                    var globalElementType = TypeMapping.GetGlobalGenericTypeName(elementType);
+                    _sb.AppendIndentedLine($"{tempListVar}.Add(new {globalElementType}(reader.{readMethod}()));");
+                }
                 else if (elemInfo.IsCustomType)
                 {
                     var spanReadersClass = GetSpanReadersClass(elementType);
@@ -806,6 +813,13 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 _sb.AppendIndentedLine($"var {fieldPrefix}Item = {VirtualTypesPrefix}.SpanReaders.Read{className}Content(ref {fieldPrefix}ScopedReader);");
                 _sb.AppendIndentedLine($"{targetVar}.Add({fieldPrefix}Item);");
             }
+            else if (elemInfo.IsProtoVarint)
+            {
+                // ProtoVarint types are read as simple varints and constructed via constructor
+                var readMethod = PrimitiveTypeCodeGenerator.GetProtoVarintReadMethod(elemInfo.ProtoVarintType);
+                var globalElementType = TypeMapping.GetGlobalGenericTypeName(elementType);
+                _sb.AppendIndentedLine($"{targetVar}.Add(new {globalElementType}(reader.{readMethod}()));");
+            }
             else if (elemInfo.IsCustomType)
             {
                 // Collection of custom types - use scoped reader to limit reading to item bounds
@@ -1142,6 +1156,13 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 _sb.AppendIndentedLine($"{readerVar}.PopLimit({fieldPrefix}OldLimit);");
                 _sb.AppendIndentedLine($"{tempListVar}.Add({fieldPrefix}Item);");
             }
+            else if (elemInfo.IsProtoVarint)
+            {
+                // ProtoVarint types are read as simple varints and constructed via constructor
+                var readMethod = PrimitiveTypeCodeGenerator.GetProtoVarintReadMethod(elemInfo.ProtoVarintType);
+                var globalElementType = TypeMapping.GetGlobalGenericTypeName(elementType);
+                _sb.AppendIndentedLine($"{tempListVar}.Add(new {globalElementType}({readerVar}.{readMethod}()));");
+            }
             else if (elemInfo.IsCustomType)
             {
                 var streamReadersClass = GetStreamReadersClass(elementType);
@@ -1240,6 +1261,13 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 _sb.AppendIndentedLine($"var {fieldPrefix}Item = {VirtualTypesPrefix}.StreamReaders.Read{className}Content(ref {readerVar});");
                 _sb.AppendIndentedLine($"{readerVar}.PopLimit({fieldPrefix}OldLimit);");
                 _sb.AppendIndentedLine($"{targetVar}.Add({fieldPrefix}Item);");
+            }
+            else if (elemInfo.IsProtoVarint)
+            {
+                // ProtoVarint types are read as simple varints and constructed via constructor
+                var readMethod = PrimitiveTypeCodeGenerator.GetProtoVarintReadMethod(elemInfo.ProtoVarintType);
+                var globalElementType = TypeMapping.GetGlobalGenericTypeName(elementType);
+                _sb.AppendIndentedLine($"{targetVar}.Add(new {globalElementType}({readerVar}.{readMethod}()));");
             }
             else if (elemInfo.IsCustomType)
             {
@@ -1534,8 +1562,8 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 if (string.IsNullOrEmpty(typeInfo.ProtoVarintValueMember))
                     throw new InvalidOperationException($"ProtoVarint type '{typeName}' has IsProtoVarint=true but ProtoVarintValueMember is not set");
                 var valueMember = typeInfo.ProtoVarintValueMember;
-                var sizeMethod = GetProtoVarintSizeMethod(typeInfo.ProtoVarintType);
-                var castPrefix = GetProtoVarintCastPrefix(typeInfo.ProtoVarintType);
+                var sizeMethod = PrimitiveTypeCodeGenerator.GetProtoVarintWriteMethod(typeInfo.ProtoVarintType);
+                var castPrefix = PrimitiveTypeCodeGenerator.GetProtoVarintCastPrefix(typeInfo.ProtoVarintType);
                 _sb.AppendIndentedLine($"{calcVar}.{sizeMethod}({castPrefix}{sourceVar}.{valueMember});");
                 return;
             }
@@ -1677,6 +1705,19 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 _sb.AppendIndentedLine($"{calcVar}.WriteVarInt32((int)item);");
                 _sb.EndBlock();
             }
+            else if (elemInfo.IsProtoVarint)
+            {
+                // ProtoVarint types - serialized as simple varints (wire type 0)
+                var (_, varintTagBytes) = TypeMapping.PrecomputeTagBytes(fieldId, WireType.VarInt);
+                var valueMember = elemInfo.ProtoVarintValueMember;
+                var sizeMethod = PrimitiveTypeCodeGenerator.GetProtoVarintWriteMethod(elemInfo.ProtoVarintType);
+                var castPrefix = PrimitiveTypeCodeGenerator.GetProtoVarintCastPrefix(elemInfo.ProtoVarintType);
+                _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
+                _sb.StartNewBlock();
+                _sb.AppendIndentedLine($"{calcVar}.AddByteLength({varintTagBytes}); // tag for repeated field {fieldId} (varint for ProtoVarint)");
+                _sb.AppendIndentedLine($"{calcVar}.{sizeMethod}({castPrefix}item.{valueMember});");
+                _sb.EndBlock();
+            }
             else if (elemInfo.IsCustomType)
             {
                 // Custom types - each element is a repeated field with tag
@@ -1811,7 +1852,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                     throw new InvalidOperationException($"ProtoVarint type '{typeName}' has IsProtoVarint=true but ProtoVarintValueMember is not set");
                 var valueMember = typeInfo.ProtoVarintValueMember;
                 var writeMethod = Helpers.PrimitiveTypeCodeGenerator.GetProtoVarintWriteMethod(typeInfo.ProtoVarintType);
-                var castPrefix = GetProtoVarintCastPrefix(typeInfo.ProtoVarintType);
+                var castPrefix = PrimitiveTypeCodeGenerator.GetProtoVarintCastPrefix(typeInfo.ProtoVarintType);
                 _sb.AppendIndentedLine($"writer.{writeMethod}({castPrefix}{sourceVar}.{valueMember});");
                 return;
             }
@@ -1957,6 +1998,18 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 _sb.AppendIndentedLine("writer.WriteVarInt32((int)item);");
                 _sb.EndBlock();
             }
+            else if (elemInfo.IsProtoVarint)
+            {
+                // ProtoVarint types - serialized as simple varints (wire type 0)
+                var (varintBytesString, _) = TypeMapping.PrecomputeTagBytes(fieldId, WireType.VarInt);
+                var valueMember = elemInfo.ProtoVarintValueMember;
+                var writeMethod = PrimitiveTypeCodeGenerator.GetProtoVarintWriteMethod(elemInfo.ProtoVarintType);
+                _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
+                _sb.StartNewBlock();
+                _sb.AppendIndentedLine($"writer.WriteSingleByte({varintBytesString}); // tag for repeated field {fieldId} (varint for ProtoVarint)");
+                _sb.AppendIndentedLine($"writer.{writeMethod}(item.{valueMember});");
+                _sb.EndBlock();
+            }
             else if (elemInfo.IsCustomType)
             {
                 // Custom types - each element is a repeated field with tag
@@ -2038,38 +2091,6 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
         private static string GetNullableValueAccess(string sourceVar, string typeName)
         {
             return typeName.EndsWith("?") ? $"{sourceVar}.Value" : sourceVar;
-        }
-
-        /// <summary>
-        /// Gets the size calculator method name for a ProtoVarint type.
-        /// </summary>
-        private static string GetProtoVarintSizeMethod(ProtoVarintType type)
-        {
-            return type switch
-            {
-                ProtoVarintType.UInt32 => "WriteVarUInt32",
-                ProtoVarintType.Int32 => "WriteVarInt32",
-                ProtoVarintType.SInt32 => "WriteZigZag32",
-                ProtoVarintType.UInt64 => "WriteVarUInt64",
-                ProtoVarintType.Int64 => "WriteVarInt64",
-                ProtoVarintType.SInt64 => "WriteZigZag64",
-                _ => "WriteVarUInt32"
-            };
-        }
-
-        /// <summary>
-        /// Gets the cast prefix for a ProtoVarint type value.
-        /// </summary>
-        private static string GetProtoVarintCastPrefix(ProtoVarintType type)
-        {
-            return type switch
-            {
-                ProtoVarintType.Int32 => "(int)",
-                ProtoVarintType.SInt32 => "(int)",
-                ProtoVarintType.Int64 => "(long)",
-                ProtoVarintType.SInt64 => "(long)",
-                _ => ""
-            };
         }
 
         /// <summary>

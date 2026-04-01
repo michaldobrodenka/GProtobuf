@@ -647,6 +647,20 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 _sb.AppendIndentedLine($"{targetCollection}.Add((global::{elementType})reader.ReadVarInt32());");
             }
+            else if (elementTypeInfo?.IsProtoVarint == true)
+            {
+                // ProtoVarint type - read as simple varint and construct via constructor
+                var readMethod = Helpers.PrimitiveTypeCodeGenerator.GetProtoVarintReadMethod(elementTypeInfo.ProtoVarintType);
+                var globalTypeName = TypeMapping.GetGlobalGenericTypeName(elementType);
+                _sb.AppendIndentedLine($"{targetCollection}.Add(new {globalTypeName}(reader.{readMethod}()));");
+            }
+            else if (_registry.IsProtoVarint(TypeMapping.NormalizeTypeName(elementType)))
+            {
+                var varintType = _registry.GetProtoVarintType(TypeMapping.NormalizeTypeName(elementType)) ?? Attributes.ProtoVarintType.UInt32;
+                var readMethod = Helpers.PrimitiveTypeCodeGenerator.GetProtoVarintReadMethod(varintType);
+                var globalTypeName = TypeMapping.GetGlobalGenericTypeName(elementType);
+                _sb.AppendIndentedLine($"{targetCollection}.Add(new {globalTypeName}(reader.{readMethod}()));");
+            }
             else
             {
                 // Complex type - read submessage using PushLimit for zero-allocation nested message reading
@@ -1351,6 +1365,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             else if (isEnum)
             {
                 _sb.AppendIndentedLine($"result.Add(({globalElementType})reader.ReadVarInt32());");
+            }
+            else if (_registry.IsProtoVarint(TypeMapping.NormalizeTypeName(elementType)))
+            {
+                var varintType = _registry.GetProtoVarintType(TypeMapping.NormalizeTypeName(elementType)) ?? Attributes.ProtoVarintType.UInt32;
+                var readMethod = PrimitiveTypeCodeGenerator.GetProtoVarintReadMethod(varintType);
+                _sb.AppendIndentedLine($"result.Add(new {globalElementType}(reader.{readMethod}()));");
             }
             else
             {
@@ -2395,6 +2415,16 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 return;
             }
 
+            // Handle ProtoVarint types - read as simple varint
+            if (_registry.IsProtoVarint(TypeMapping.NormalizeTypeName(member.CollectionElementType)))
+            {
+                var varintType = _registry.GetProtoVarintType(TypeMapping.NormalizeTypeName(member.CollectionElementType)) ?? Attributes.ProtoVarintType.UInt32;
+                var readMethod = Helpers.PrimitiveTypeCodeGenerator.GetProtoVarintReadMethod(varintType);
+                var globalTypeName = TypeMapping.GetGlobalGenericTypeName(member.CollectionElementType);
+                _sb.AppendIndentedLine($"{targetCollection}.Add(new {globalTypeName}(reader.{readMethod}()));");
+                return;
+            }
+
             // Read nested message using PushLimit for zero-allocation nested message reading
             _sb.AppendIndentedLine("var itemLength = reader.ReadVarInt32();");
             _sb.AppendIndentedLine("var itemOldLimit = reader.PushLimit(itemLength);");
@@ -2575,6 +2605,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             else if (isEnum)
             {
                 _sb.AppendIndentedLine($"instance.Add(({globalElementType})reader.ReadVarInt32());");
+            }
+            else if (_registry.IsProtoVarint(TypeMapping.NormalizeTypeName(elementType)))
+            {
+                var varintType = _registry.GetProtoVarintType(TypeMapping.NormalizeTypeName(elementType)) ?? Attributes.ProtoVarintType.UInt32;
+                var readMethod = PrimitiveTypeCodeGenerator.GetProtoVarintReadMethod(varintType);
+                _sb.AppendIndentedLine($"instance.Add(new {globalElementType}(reader.{readMethod}()));");
             }
             else
             {
@@ -4099,6 +4135,16 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 case "System.Byte[]":
                     _sb.AppendIndentedLine($"{targetCollection}.Add(global::GProtobuf.Core.StreamReaders.ReadByteArray(ref reader));");
                     return;
+            }
+
+            // Handle ProtoVarint types - read as simple varint
+            if (_registry.IsProtoVarint(TypeMapping.NormalizeTypeName(member.CollectionElementType)))
+            {
+                var varintType = _registry.GetProtoVarintType(TypeMapping.NormalizeTypeName(member.CollectionElementType)) ?? Attributes.ProtoVarintType.UInt32;
+                var readMethod = Helpers.PrimitiveTypeCodeGenerator.GetProtoVarintReadMethod(varintType);
+                var globalTypeName = TypeMapping.GetGlobalGenericTypeName(member.CollectionElementType);
+                _sb.AppendIndentedLine($"{targetCollection}.Add(new {globalTypeName}(reader.{readMethod}()));");
+                return;
             }
 
             // Use PushLimit for zero-allocation nested message reading
