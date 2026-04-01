@@ -1785,14 +1785,12 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 return;
             }
 
-            // Collect fields needing temp lists from both base and derived
-            var allFields = new List<ProtoMemberAttribute>();
-            if (parentType.ProtoMembers != null)
-                allFields.AddRange(parentType.ProtoMembers);
-            if (type.ProtoMembers != null)
-                allFields.AddRange(type.ProtoMembers);
+            // Collect fields needing temp lists from base only (derived fields handled by PopulateOwnFields)
+            var baseFields = parentType.ProtoMembers != null
+                ? new List<ProtoMemberAttribute>(parentType.ProtoMembers)
+                : new List<ProtoMemberAttribute>();
 
-            var fieldsNeedingTempList = allFields
+            var fieldsNeedingTempList = baseFields
                 .Where(m => m.IsCollection && (
                     m.CollectionKind == CollectionKind.Array ||
                     (m.CollectionKind == CollectionKind.InterfaceCollection && m.Type != null &&
@@ -1853,41 +1851,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             _sb.AppendIndentedLine("var protoIncludeLength = reader.ReadVarInt32();");
             _sb.AppendIndentedLine("var protoIncludeReader = new SpanReader(reader.GetSlice(protoIncludeLength));");
-            _sb.AppendNewLine();
-
-            // Read derived fields from nested reader
-            _sb.AppendIndentedLine("while (!protoIncludeReader.IsEnd)");
-            _sb.StartNewBlock();
-            _sb.AppendIndentedLine("protoIncludeReader.ReadWireTypeAndFieldId(out var derivedWireType, out var derivedFieldId);");
-            _sb.AppendNewLine();
-
-            // Use sorted dispatch for optimal branch prediction (PGO heuristic)
-            if (type.ProtoMembers != null && type.ProtoMembers.Count > 0)
-            {
-                _sb.AppendIndentedLine("switch (derivedFieldId)");
-                _sb.StartNewBlock();
-
-                foreach (var member in GeneratorHelpers.GetSortedFieldsForDispatch(type.ProtoMembers))
-                {
-                    GenerateFieldPopulateCaseWithReader(member, "protoIncludeReader", "derivedWireType");
-                }
-
-                // Default - skip unknown fields
-                _sb.AppendIndentedLine("default:");
-                _sb.IncreaseIndent();
-                _sb.AppendIndentedLine("protoIncludeReader.SkipField(derivedWireType);");
-                _sb.AppendIndentedLine("break;");
-                _sb.DecreaseIndent();
-
-                _sb.EndBlock(); // switch
-            }
-            else
-            {
-                _sb.AppendIndentedLine("protoIncludeReader.SkipField(derivedWireType);");
-            }
-
-            _sb.EndBlock(); // while protoIncludeReader
-
+            _sb.AppendIndentedLine($"Populate{className}OwnFields(ref protoIncludeReader, instance);");
             _sb.AppendIndentedLine("break;");
             _sb.DecreaseIndent();
             _sb.AppendIndentedLine("}");

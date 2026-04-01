@@ -1068,6 +1068,33 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine($"var length{nextLevelIndex} = {currentReaderVar}.ReadVarInt32();");
             _sb.AppendIndentedLine($"var oldLimit{nextLevelIndex} = {currentReaderVar}.PushLimit(length{nextLevelIndex});");
 
+            // For the last level, delegate to PopulateOwnFields if available
+            if (nextLevelIndex == chain.Count - 1)
+            {
+                var lastTypeName = chain[nextLevelIndex];
+                var lastType = _registry.GetByFullName(lastTypeName);
+                if (lastType != null && !lastType.IsStruct && !HasFieldsNeedingTempList(lastType))
+                {
+                    var lastClassName = TypeNameHelper.GetClassName(lastTypeName);
+                    var wireTypeVar = $"wireType{nextLevelIndex}";
+                    var fieldIdVar = $"fieldId{nextLevelIndex}";
+                    _sb.AppendIndentedLine($"while (!{currentReaderVar}.IsEnd)");
+                    _sb.StartNewBlock();
+                    _sb.AppendIndentedLine($"{currentReaderVar}.ReadWireTypeAndFieldId(out var {wireTypeVar}, out var {fieldIdVar});");
+                    _sb.AppendIndentedLine($"if (!Populate{lastClassName}OwnFields(ref {currentReaderVar}, result, {wireTypeVar}, {fieldIdVar}))");
+                    _sb.StartNewBlock();
+                    _sb.AppendIndentedLine($"{currentReaderVar}.SkipField({wireTypeVar});");
+                    _sb.EndBlock();
+                    _sb.EndBlock();
+
+                    _sb.AppendIndentedLine($"{currentReaderVar}.PopLimit(oldLimit{nextLevelIndex});");
+                    _sb.AppendIndentedLine("break;");
+                    _sb.DecreaseIndent();
+                    _sb.AppendIndentedLine("}");
+                    return;
+                }
+            }
+
             // Recursively generate reading for next level using same reader
             GenerateNestedReading(chain, nextLevelIndex, currentReaderVar);
 
