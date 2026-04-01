@@ -608,18 +608,30 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// </summary>
         private void GenerateReadMethodForDerived(TypeDefinition type, string className)
         {
+            var chain = _registry.GetInheritanceChain(type.FullName);
+
+            if (chain.Count == 2 && !type.IsStruct)
+            {
+                GenerateObjectCreation(type, "result");
+                _sb.AppendNewLine();
+                _sb.AppendIndentedLine($"Populate{className}(ref reader, result);");
+                _sb.AppendIndentedLine("return result;");
+                return;
+            }
+
             // Create instance of the derived type
             GenerateObjectCreation(type, "result");
             _sb.AppendNewLine();
 
-            // Get inheritance chain: [Root, ..., Parent, This]
-            var chain = _registry.GetInheritanceChain(type.FullName);
-
-            // Collect all fields needing temp lists from the entire inheritance chain
+            var lastType = _registry.GetByFullName(chain[chain.Count - 1]);
+            bool leafDelegated = lastType != null && !lastType.IsStruct;
             var fieldsNeedingTempList = new List<ProtoMemberAttribute>();
-            foreach (var typeName in chain)
+            for (int i = 0; i < chain.Count; i++)
             {
-                var typeInChain = _registry.GetByFullName(typeName);
+                if (leafDelegated && i == chain.Count - 1)
+                    continue;
+
+                var typeInChain = _registry.GetByFullName(chain[i]);
                 if (typeInChain?.ProtoMembers != null)
                 {
                     var tempListFields = typeInChain.ProtoMembers
@@ -748,6 +760,21 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             _sb.AppendIndentedLine($"var length{nextLevelIndex} = {currentReaderVar}.ReadVarInt32();");
             _sb.AppendIndentedLine($"var {nestedReaderVar} = new SpanReader({currentReaderVar}.GetSlice(length{nextLevelIndex}));");
+
+            if (nextLevelIndex == chain.Count - 1)
+            {
+                var lastTypeName = chain[nextLevelIndex];
+                var lastType = _registry.GetByFullName(lastTypeName);
+                if (lastType != null && !lastType.IsStruct)
+                {
+                    var lastClassName = TypeNameHelper.GetClassName(lastTypeName);
+                    _sb.AppendIndentedLine($"Populate{lastClassName}OwnFields(ref {nestedReaderVar}, result);");
+                    _sb.AppendIndentedLine("break;");
+                    _sb.DecreaseIndent();
+                    _sb.AppendIndentedLine("}");
+                    return;
+                }
+            }
 
             // Recursively generate reading for next level
             GenerateNestedReading(chain, nextLevelIndex, nestedReaderVar);
@@ -931,6 +958,14 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         private void GenerateReadContentMethod(TypeDefinition type)
         {
             var className = TypeNameHelper.GetClassName(type.FullName);
+
+            bool hasProtoIncludes = type.ProtoIncludes != null && type.ProtoIncludes.Count > 0;
+            if (hasProtoIncludes && !_registry.IsDerivedType(type.FullName))
+            {
+                _sb.AppendIndentedLine($"public static global::{type.FullName} Read{className}Content(ref SpanReader reader) => Read{className}(ref reader);");
+                _sb.AppendNewLine();
+                return;
+            }
 
             _sb.AppendIndentedLine($"public static global::{type.FullName} Read{className}Content(ref SpanReader reader)");
             _sb.StartNewBlock();
@@ -1264,6 +1299,19 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
         private void GenerateReadContentWithInheritance(TypeDefinition type, string className)
         {
+            bool isLeafDerived = _registry.IsDerivedType(type.FullName)
+                && (type.ProtoIncludes == null || type.ProtoIncludes.Count == 0)
+                && !type.IsAbstract
+                && !type.IsStruct;
+            if (isLeafDerived)
+            {
+                GenerateObjectCreation(type, "result");
+                _sb.AppendNewLine();
+                _sb.AppendIndentedLine($"Populate{className}OwnFields(ref reader, result);");
+                _sb.AppendIndentedLine("return result;");
+                return;
+            }
+
             // Create instance (abstract types get default)
             if (type.IsAbstract)
             {
