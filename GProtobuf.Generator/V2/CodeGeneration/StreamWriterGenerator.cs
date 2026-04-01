@@ -378,6 +378,20 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// </summary>
         private void GenerateWriteBaseFieldsOnlyMethod(TypeDefinition type, string className)
         {
+            bool canDelegate = _registry.IsDerivedType(type.FullName)
+                && (type.CustomBufferMembers == null || type.CustomBufferMembers.Count == 0);
+
+            if (canDelegate)
+            {
+                _sb.AppendIndentedLine("[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
+                _sb.AppendIndentedLine($"public static void Write{className}BaseFieldsOnly(ref {_writerType} writer, global::{type.FullName} instance)");
+                _sb.IncreaseIndent();
+                _sb.AppendIndentedLine($"=> Write{className}OwnFields(ref writer, instance);");
+                _sb.DecreaseIndent();
+                _sb.AppendNewLine();
+                return;
+            }
+
             _sb.AppendIndentedLine($"/// <summary>");
             _sb.AppendIndentedLine($"/// Writes ONLY base {className} fields without runtime type dispatch.");
             _sb.AppendIndentedLine($"/// Used for nested derived type serialization after ProtoInclude wrapper.");
