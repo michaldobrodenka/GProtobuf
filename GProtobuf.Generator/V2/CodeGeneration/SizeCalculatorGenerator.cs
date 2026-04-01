@@ -11,7 +11,7 @@ using GProtobuf.Generator.WireFormat;
 namespace GProtobuf.Generator.V2.CodeGeneration
 {
     /// <summary>
-    /// Generates SizeCalculators class with Calculate{ClassName}Size and Calculate{ClassName}ContentSize methods.
+    /// Generates SizeCalculators class with Calculate{ClassName}ContentSize methods.
     /// Handles size calculation for serialization.
     /// </summary>
     internal class SizeCalculatorGenerator : GeneratorBase
@@ -74,7 +74,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             foreach (var type in typesList)
             {
-                GenerateCalculateSizeMethod(type);
                 GenerateCalculateContentSizeMethod(type);
 
                 // Generate BaseFieldsOnly method for base types with ProtoIncludes
@@ -215,101 +214,6 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 }
             }
         }
-
-        #region CalculateSize Method
-
-        /// <summary>
-        /// Generates Calculate{ClassName}Size method.
-        /// This is the main entry point that handles inheritance wrappers.
-        /// For root types with ProtoIncludes, no Size method is generated - use ContentSize instead.
-        /// </summary>
-        private void GenerateCalculateSizeMethod(TypeDefinition type)
-        {
-            // Skip generating Size method for root types with ProtoIncludes
-            // These types should use ContentSize directly
-            if (type.ProtoIncludes != null && type.ProtoIncludes.Count > 0 && !_registry.IsDerivedType(type.FullName))
-            {
-                return;
-            }
-
-            var className = TypeNameHelper.GetClassName(type.FullName);
-
-            _sb.AppendIndentedLine($"public static void Calculate{className}Size(ref global::GProtobuf.Core.WriteSizeCalculator calculator, global::{type.FullName} obj)");
-            _sb.StartNewBlock();
-
-            // Add null check for reference types
-            if (!type.IsStruct)
-            {
-                _sb.AppendIndentedLine("if (obj == null) return;");
-            }
-
-            bool isDerived = _registry.IsDerivedType(type.FullName);
-
-            if (isDerived)
-            {
-                GenerateCalculateSizeForDerived(type, className);
-            }
-            else
-            {
-                GenerateSimpleCalculateSize(type, className);
-            }
-
-            _sb.EndBlock();
-            _sb.AppendNewLine();
-        }
-
-        private void GenerateSimpleCalculateSize(TypeDefinition type, string className)
-        {
-            ForEachTypeMember(
-                type,
-                "obj",
-                (member, src) => GenerateFieldSize(member, src),
-                (customMember, src) => GenerateCustomBufferFieldSize(customMember, src));
-        }
-
-        private void GenerateCalculateSizeForDerived(TypeDefinition type, string className)
-        {
-            // Wire format: [wrapper tag][length][derived fields INSIDE][base fields AFTER]
-
-            var inheritanceChain = _registry.GetInheritanceChain(type.FullName);
-            if (inheritanceChain.Count < 2)
-            {
-                // No inheritance - shouldn't happen for derived types, but handle gracefully
-                GenerateCalculateContentSizeForDerivedType(type, className);
-                return;
-            }
-
-            // Get root (base) type
-            var rootTypeName = inheritanceChain[0];
-
-            _sb.AppendIndentedLine($"// ProtoInclude wrapper format (Level200 compatibility)");
-            _sb.AppendIndentedLine($"// Wire: [wrapper tag][length][derived fields INSIDE wrapper][base fields AFTER wrapper]");
-            _sb.AppendNewLine();
-
-            // Call WrapperSize for each level in inheritance chain (except root)
-            // Chain is [Root, Level1, Level2, ..., CurrentType]
-            for (int i = 1; i < inheritanceChain.Count; i++)
-            {
-                var levelTypeName = inheritanceChain[i];
-                var levelClassName = TypeNameHelper.GetClassName(levelTypeName);
-                var levelNamespace = _registry.GetNamespaceForType(levelTypeName);
-                var nsPrefix = GeneratorHelpers.GetNamespacePrefix(levelNamespace, _currentNamespace);
-                _sb.AppendIndentedLine($"{nsPrefix}SizeCalculators.Calculate{levelClassName}WrapperSize(ref calculator, obj);");
-            }
-
-            // Calculate and add base fields size AFTER all wrappers
-            var rootClassName = TypeNameHelper.GetClassName(rootTypeName);
-            var rootNamespace = _registry.GetNamespaceForType(rootTypeName);
-            var rootNsPrefix = GeneratorHelpers.GetNamespacePrefix(rootNamespace, _currentNamespace);
-            _sb.AppendNewLine();
-            _sb.AppendIndentedLine($"// Base class fields ({rootClassName}) - AFTER wrapper");
-            _sb.AppendIndentedLine($"{rootNsPrefix}SizeCalculators.Calculate{rootClassName}BaseFieldsOnlySize(ref calculator, obj);");
-        }
-
-        // Old ProtoInclude wrapper size methods removed - will be rewritten in Phase 2
-        // See PROTOINCLUDE_CLEAN_REWRITE_PLAN.md for new implementation
-
-        #endregion
 
         #region CalculateContentSize Method
 

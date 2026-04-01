@@ -810,7 +810,7 @@ namespace GProtobuf.Benchmark.Models.Serialization
             if (instance.Person != null)
             {
                 //var calculator1 = new global::GProtobuf.Core.WriteSizeCalculator();
-                //SizeCalculators2.CalculatePersonModelSize(ref calculator1, instance.Person);
+                //SizeCalculators2.CalculatePersonModelContentSize(ref calculator1, instance.Person);
                 // Tag for field 1, Len
                 writer.WriteSingleByte(0x0A);
                 writer.WriteVarUInt32((uint)114);
@@ -825,7 +825,7 @@ namespace GProtobuf.Benchmark.Models.Serialization
                     if (item != null)
                     {
                         var calculator = new global::GProtobuf.Core.WriteSizeCalculator();
-                        SizeCalculators.CalculatePersonModelSize(ref calculator, item);
+                        SizeCalculators.CalculatePersonModelContentSize(ref calculator, item);
                         // Tag for field 2, Len
                         writer.WriteSingleByte(0x12);
                         writer.WriteVarUInt32((uint)calculator.Length);
@@ -840,7 +840,7 @@ namespace GProtobuf.Benchmark.Models.Serialization
             if (instance.Address != null)
             {
                 var calculator3 = new global::GProtobuf.Core.WriteSizeCalculator();
-                SizeCalculators.CalculateAddressModelSize(ref calculator3, instance.Address);
+                SizeCalculators.CalculateAddressModelContentSize(ref calculator3, instance.Address);
                 // Tag for field 3, Len
                 writer.WriteSingleByte(0x1A);
                 writer.WriteVarUInt32(46);// (uint)calculator3.Length);
@@ -855,7 +855,7 @@ namespace GProtobuf.Benchmark.Models.Serialization
                     if (item != null)
                     {
                         var calculator = new global::GProtobuf.Core.WriteSizeCalculator();
-                        SizeCalculators.CalculateAddressModelSize(ref calculator, item);
+                        SizeCalculators.CalculateAddressModelContentSize(ref calculator, item);
                         // Tag for field 4, Len
                         writer.WriteSingleByte(0x22);
                         writer.WriteVarUInt32((uint)calculator.Length);
@@ -870,7 +870,7 @@ namespace GProtobuf.Benchmark.Models.Serialization
             if (instance.Company != null)
             {
                 var calculator5 = new global::GProtobuf.Core.WriteSizeCalculator();
-                SizeCalculators.CalculateCompanyModelSize(ref calculator5, instance.Company);
+                SizeCalculators.CalculateCompanyModelContentSize(ref calculator5, instance.Company);
                 // Tag for field 5, Len
                 writer.WriteSingleByte(0x2A);
                 writer.WriteVarUInt32((uint)calculator5.Length);
@@ -915,7 +915,7 @@ namespace GProtobuf.Benchmark.Models.Serialization
             if (instance.Address != null)
             {
                 var calculator5 = new global::GProtobuf.Core.WriteSizeCalculator();
-                SizeCalculators.CalculateAddressModelSize(ref calculator5, instance.Address);
+                SizeCalculators.CalculateAddressModelContentSize(ref calculator5, instance.Address);
                 // Tag for field 5, Len
                 writer.WriteSingleByte(0x2A);
                 writer.WriteVarUInt32((uint)calculator5.Length);
@@ -999,7 +999,7 @@ namespace GProtobuf.Benchmark.Models.Serialization
             if (instance.HeadquartersAddress != null)
             {
                 var calculator2 = new global::GProtobuf.Core.WriteSizeCalculator();
-                SizeCalculators.CalculateAddressModelSize(ref calculator2, instance.HeadquartersAddress);
+                SizeCalculators.CalculateAddressModelContentSize(ref calculator2, instance.HeadquartersAddress);
                 // Tag for field 2, Len
                 writer.WriteSingleByte(0x12);
                 writer.WriteVarUInt32((uint)calculator2.Length);
@@ -1014,7 +1014,7 @@ namespace GProtobuf.Benchmark.Models.Serialization
                     if (item != null)
                     {
                         var calculator = new global::GProtobuf.Core.WriteSizeCalculator();
-                        SizeCalculators.CalculatePersonModelSize(ref calculator, item);
+                        SizeCalculators.CalculatePersonModelContentSize(ref calculator, item);
                         // Tag for field 3, Len
                         writer.WriteSingleByte(0x1A);
                         writer.WriteVarUInt32((uint)calculator.Length);
@@ -1034,7 +1034,7 @@ namespace GProtobuf.Benchmark.Models.Serialization
                     if (item != null)
                     {
                         var calculator = new global::GProtobuf.Core.WriteSizeCalculator();
-                        SizeCalculators.CalculateAddressModelSize(ref calculator, item);
+                        SizeCalculators.CalculateAddressModelContentSize(ref calculator, item);
                         // Tag for field 4, Len
                         writer.WriteSingleByte(0x22);
                         writer.WriteVarUInt32((uint)calculator.Length);
@@ -1379,7 +1379,7 @@ namespace GProtobuf.Benchmark.Models.Serialization
                 // Tag for field 1, Len
                 calculator.AddByteLength(1); // Precomputed tag bytes: 0x0A
                 var lengthBefore1 = calculator.Length;
-                SizeCalculators.CalculatePersonModelSize(ref calculator, obj.Person);
+                SizeCalculators.CalculatePersonModelContentSize(ref calculator, obj.Person);
                 var contentLength1 = calculator.Length - lengthBefore1;
                 calculator.WriteVarUInt32((uint)contentLength1);
             }
@@ -1394,7 +1394,7 @@ namespace GProtobuf.Benchmark.Models.Serialization
                         // Tag for field 2, Len
                         calculator.AddByteLength(1); // Precomputed tag bytes: 0x12
                         var itemCalculator = new global::GProtobuf.Core.WriteSizeCalculator();
-                        SizeCalculators.CalculatePersonModelSize(ref itemCalculator, item);
+                        SizeCalculators.CalculatePersonModelContentSize(ref itemCalculator, item);
                         calculator.WriteVarUInt32((uint)itemCalculator.Length);
                         calculator.AddByteLength(itemCalculator.Length);
                     }
@@ -1409,7 +1409,7 @@ namespace GProtobuf.Benchmark.Models.Serialization
                 // Tag for field 3, Len
                 calculator.AddByteLength(1); // Precomputed tag bytes: 0x1A
                 var lengthBefore3 = calculator.Length;
-                SizeCalculators.CalculateAddressModelSize(ref calculator, obj.Address);
+                SizeCalculators.CalculateAddressModelContentSize(ref calculator, obj.Address);
                 var contentLength3 = calculator.Length - lengthBefore3;
                 calculator.WriteVarUInt32((uint)contentLength3);
             }
@@ -1424,7 +1424,7 @@ namespace GProtobuf.Benchmark.Models.Serialization
                         // Tag for field 4, Len
                         calculator.AddByteLength(1); // Precomputed tag bytes: 0x22
                         var itemCalculator = new global::GProtobuf.Core.WriteSizeCalculator();
-                        SizeCalculators.CalculateAddressModelSize(ref itemCalculator, item);
+                        SizeCalculators.CalculateAddressModelContentSize(ref itemCalculator, item);
                         calculator.WriteVarUInt32((uint)itemCalculator.Length);
                         calculator.AddByteLength(itemCalculator.Length);
                     }
@@ -1439,14 +1439,14 @@ namespace GProtobuf.Benchmark.Models.Serialization
                 // Tag for field 5, Len
                 calculator.AddByteLength(1); // Precomputed tag bytes: 0x2A
                 var lengthBefore5 = calculator.Length;
-                SizeCalculators.CalculateCompanyModelSize(ref calculator, obj.Company);
+                SizeCalculators.CalculateCompanyModelContentSize(ref calculator, obj.Company);
                 var contentLength5 = calculator.Length - lengthBefore5;
                 calculator.WriteVarUInt32((uint)contentLength5);
             }
 
         }
 
-        public static void CalculatePersonModelSize(ref global::GProtobuf.Core.WriteSizeCalculator calculator, global::GProtobuf.Benchmark.Models.PersonModel obj)
+        public static void CalculatePersonModelContentSize(ref global::GProtobuf.Core.WriteSizeCalculator calculator, global::GProtobuf.Benchmark.Models.PersonModel obj)
         {
             if (obj.FirstName != null)
             {
@@ -1481,7 +1481,7 @@ namespace GProtobuf.Benchmark.Models.Serialization
                 // Tag for field 5, Len
                 calculator.AddByteLength(1); // Precomputed tag bytes: 0x2A
                 var lengthBefore5 = calculator.Length;
-                SizeCalculators.CalculateAddressModelSize(ref calculator, obj.Address);
+                SizeCalculators.CalculateAddressModelContentSize(ref calculator, obj.Address);
                 var contentLength5 = calculator.Length - lengthBefore5;
                 calculator.WriteVarUInt32((uint)contentLength5);
             }
@@ -1505,7 +1505,7 @@ namespace GProtobuf.Benchmark.Models.Serialization
             }
         }
 
-        public static void CalculateAddressModelSize(ref global::GProtobuf.Core.WriteSizeCalculator calculator, global::GProtobuf.Benchmark.Models.AddressModel obj)
+        public static void CalculateAddressModelContentSize(ref global::GProtobuf.Core.WriteSizeCalculator calculator, global::GProtobuf.Benchmark.Models.AddressModel obj)
         {
             if (obj.Street != null)
             {
@@ -1544,7 +1544,7 @@ namespace GProtobuf.Benchmark.Models.Serialization
 
         }
 
-        public static void CalculateCompanyModelSize(ref global::GProtobuf.Core.WriteSizeCalculator calculator, global::GProtobuf.Benchmark.Models.CompanyModel obj)
+        public static void CalculateCompanyModelContentSize(ref global::GProtobuf.Core.WriteSizeCalculator calculator, global::GProtobuf.Benchmark.Models.CompanyModel obj)
         {
             if (obj.Name != null)
             {
@@ -1558,7 +1558,7 @@ namespace GProtobuf.Benchmark.Models.Serialization
                 // Tag for field 2, Len
                 calculator.AddByteLength(1); // Precomputed tag bytes: 0x12
                 var lengthBefore2 = calculator.Length;
-                SizeCalculators.CalculateAddressModelSize(ref calculator, obj.HeadquartersAddress);
+                SizeCalculators.CalculateAddressModelContentSize(ref calculator, obj.HeadquartersAddress);
                 var contentLength2 = calculator.Length - lengthBefore2;
                 calculator.WriteVarUInt32((uint)contentLength2);
             }
@@ -1573,7 +1573,7 @@ namespace GProtobuf.Benchmark.Models.Serialization
                         // Tag for field 3, Len
                         calculator.AddByteLength(1); // Precomputed tag bytes: 0x1A
                         var itemCalculator = new global::GProtobuf.Core.WriteSizeCalculator();
-                        SizeCalculators.CalculatePersonModelSize(ref itemCalculator, item);
+                        SizeCalculators.CalculatePersonModelContentSize(ref itemCalculator, item);
                         calculator.WriteVarUInt32((uint)itemCalculator.Length);
                         calculator.AddByteLength(itemCalculator.Length);
                     }
@@ -1593,7 +1593,7 @@ namespace GProtobuf.Benchmark.Models.Serialization
                         // Tag for field 4, Len
                         calculator.AddByteLength(1); // Precomputed tag bytes: 0x22
                         var itemCalculator = new global::GProtobuf.Core.WriteSizeCalculator();
-                        SizeCalculators.CalculateAddressModelSize(ref itemCalculator, item);
+                        SizeCalculators.CalculateAddressModelContentSize(ref itemCalculator, item);
                         calculator.WriteVarUInt32((uint)itemCalculator.Length);
                         calculator.AddByteLength(itemCalculator.Length);
                     }
@@ -1854,7 +1854,7 @@ namespace GProtobuf.Benchmark.Models.Serialization
                 // Tag for field 1, Len
                 calculator.AddByteLength(1); // Precomputed tag bytes: 0x0A
                 var lengthBefore1 = calculator.Length;
-                SizeCalculators.CalculatePersonModelSize(ref calculator, obj.Person);
+                SizeCalculators.CalculatePersonModelContentSize(ref calculator, obj.Person);
                 var contentLength1 = calculator.Length - lengthBefore1;
                 calculator.WriteVarUInt32((uint)contentLength1);
             }
@@ -1869,7 +1869,7 @@ namespace GProtobuf.Benchmark.Models.Serialization
                         // Tag for field 2, Len
                         calculator.AddByteLength(1); // Precomputed tag bytes: 0x12
                         var itemCalculator = new global::GProtobuf.Core.WriteSizeCalculator();
-                        SizeCalculators.CalculatePersonModelSize(ref itemCalculator, item);
+                        SizeCalculators.CalculatePersonModelContentSize(ref itemCalculator, item);
                         calculator.WriteVarUInt32((uint)itemCalculator.Length);
                         calculator.AddByteLength(itemCalculator.Length);
                     }
@@ -1884,7 +1884,7 @@ namespace GProtobuf.Benchmark.Models.Serialization
                 // Tag for field 3, Len
                 calculator.AddByteLength(1); // Precomputed tag bytes: 0x1A
                 var lengthBefore3 = calculator.Length;
-                SizeCalculators.CalculateAddressModelSize(ref calculator, obj.Address);
+                SizeCalculators.CalculateAddressModelContentSize(ref calculator, obj.Address);
                 var contentLength3 = calculator.Length - lengthBefore3;
                 calculator.WriteVarUInt32((uint)contentLength3);
             }
@@ -1899,7 +1899,7 @@ namespace GProtobuf.Benchmark.Models.Serialization
                         // Tag for field 4, Len
                         calculator.AddByteLength(1); // Precomputed tag bytes: 0x22
                         var itemCalculator = new global::GProtobuf.Core.WriteSizeCalculator();
-                        SizeCalculators.CalculateAddressModelSize(ref itemCalculator, item);
+                        SizeCalculators.CalculateAddressModelContentSize(ref itemCalculator, item);
                         calculator.WriteVarUInt32((uint)itemCalculator.Length);
                         calculator.AddByteLength(itemCalculator.Length);
                     }
@@ -1914,175 +1914,9 @@ namespace GProtobuf.Benchmark.Models.Serialization
                 // Tag for field 5, Len
                 calculator.AddByteLength(1); // Precomputed tag bytes: 0x2A
                 var lengthBefore5 = calculator.Length;
-                SizeCalculators.CalculateCompanyModelSize(ref calculator, obj.Company);
+                SizeCalculators.CalculateCompanyModelContentSize(ref calculator, obj.Company);
                 var contentLength5 = calculator.Length - lengthBefore5;
                 calculator.WriteVarUInt32((uint)contentLength5);
-            }
-
-        }
-
-        public static void CalculatePersonModelContentSize(ref global::GProtobuf.Core.WriteSizeCalculator calculator, global::GProtobuf.Benchmark.Models.PersonModel obj)
-        {
-            if (obj.FirstName != null)
-            {
-                // Tag for field 1, Len
-                calculator.AddByteLength(1); // Precomputed tag bytes: 0x0A
-                calculator.WriteString(obj.FirstName);
-            }
-
-            if (obj.LastName != null)
-            {
-                // Tag for field 2, Len
-                calculator.AddByteLength(1); // Precomputed tag bytes: 0x12
-                calculator.WriteString(obj.LastName);
-            }
-
-            if (obj.Age != 0)
-            {
-                // Tag for field 3, VarInt
-                calculator.AddByteLength(1); // Precomputed tag bytes: 0x18
-                calculator.WriteVarInt32(obj.Age);
-            }
-
-            if (obj.Email != null)
-            {
-                // Tag for field 4, Len
-                calculator.AddByteLength(1); // Precomputed tag bytes: 0x22
-                calculator.WriteString(obj.Email);
-            }
-
-            if (obj.Address != null)
-            {
-                // Tag for field 5, Len
-                calculator.AddByteLength(1); // Precomputed tag bytes: 0x2A
-                var lengthBefore5 = calculator.Length;
-                SizeCalculators.CalculateAddressModelSize(ref calculator, obj.Address);
-                var contentLength5 = calculator.Length - lengthBefore5;
-                calculator.WriteVarUInt32((uint)contentLength5);
-            }
-
-            if (obj.PhoneNumbers != null)
-            {
-                for (int i = 0; i < obj.PhoneNumbers.Count; i++)
-                {
-                    var item = obj.PhoneNumbers[i];
-                    if (item != null)
-                    {
-                        // Tag for field 6, Len
-                        calculator.AddByteLength(1); // Precomputed tag bytes: 0x32
-                        calculator.WriteString(item);
-                    }
-                    else
-                    {
-                        throw new System.InvalidOperationException("An element of type string was null; this might be as contents in a list/array");
-                    }
-                }
-            }
-        }
-
-        public static void CalculateAddressModelContentSize(ref global::GProtobuf.Core.WriteSizeCalculator calculator, global::GProtobuf.Benchmark.Models.AddressModel obj)
-        {
-            if (obj.Street != null)
-            {
-                // Tag for field 1, Len
-                calculator.AddByteLength(1); // Precomputed tag bytes: 0x0A
-                calculator.WriteString(obj.Street);
-            }
-
-            if (obj.City != null)
-            {
-                // Tag for field 2, Len
-                calculator.AddByteLength(1); // Precomputed tag bytes: 0x12
-                calculator.WriteString(obj.City);
-            }
-
-            if (obj.State != null)
-            {
-                // Tag for field 3, Len
-                calculator.AddByteLength(1); // Precomputed tag bytes: 0x1A
-                calculator.WriteString(obj.State);
-            }
-
-            if (obj.ZipCode != null)
-            {
-                // Tag for field 4, Len
-                calculator.AddByteLength(1); // Precomputed tag bytes: 0x22
-                calculator.WriteString(obj.ZipCode);
-            }
-
-            if (obj.Country != null)
-            {
-                // Tag for field 5, Len
-                calculator.AddByteLength(1); // Precomputed tag bytes: 0x2A
-                calculator.WriteString(obj.Country);
-            }
-
-        }
-
-        public static void CalculateCompanyModelContentSize(ref global::GProtobuf.Core.WriteSizeCalculator calculator, global::GProtobuf.Benchmark.Models.CompanyModel obj)
-        {
-            if (obj.Name != null)
-            {
-                // Tag for field 1, Len
-                calculator.AddByteLength(1); // Precomputed tag bytes: 0x0A
-                calculator.WriteString(obj.Name);
-            }
-
-            if (obj.HeadquartersAddress != null)
-            {
-                // Tag for field 2, Len
-                calculator.AddByteLength(1); // Precomputed tag bytes: 0x12
-                var lengthBefore2 = calculator.Length;
-                SizeCalculators.CalculateAddressModelSize(ref calculator, obj.HeadquartersAddress);
-                var contentLength2 = calculator.Length - lengthBefore2;
-                calculator.WriteVarUInt32((uint)contentLength2);
-            }
-
-            if (obj.Employees != null)
-            {
-                for (int i = 0; i < obj.Employees.Count; i++)
-                {
-                    var item = obj.Employees[i];
-                    if (item != null)
-                    {
-                        // Tag for field 3, Len
-                        calculator.AddByteLength(1); // Precomputed tag bytes: 0x1A
-                        var itemCalculator = new global::GProtobuf.Core.WriteSizeCalculator();
-                        SizeCalculators.CalculatePersonModelSize(ref itemCalculator, item);
-                        calculator.WriteVarUInt32((uint)itemCalculator.Length);
-                        calculator.AddByteLength(itemCalculator.Length);
-                    }
-                    else
-                    {
-                        throw new System.InvalidOperationException("An element of type PersonModel was null; this might be as contents in a list/array");
-                    }
-                }
-            }
-            if (obj.Offices != null)
-            {
-                for (int i = 0; i < obj.Offices.Count; i++)
-                {
-                    var item = obj.Offices[i];
-                    if (item != null)
-                    {
-                        // Tag for field 4, Len
-                        calculator.AddByteLength(1); // Precomputed tag bytes: 0x22
-                        var itemCalculator = new global::GProtobuf.Core.WriteSizeCalculator();
-                        SizeCalculators.CalculateAddressModelSize(ref itemCalculator, item);
-                        calculator.WriteVarUInt32((uint)itemCalculator.Length);
-                        calculator.AddByteLength(itemCalculator.Length);
-                    }
-                    else
-                    {
-                        throw new System.InvalidOperationException("An element of type AddressModel was null; this might be as contents in a list/array");
-                    }
-                }
-            }
-            if (obj.FoundedYear != 0)
-            {
-                // Tag for field 5, VarInt
-                calculator.AddByteLength(1); // Precomputed tag bytes: 0x28
-                calculator.WriteVarInt32(obj.FoundedYear);
             }
 
         }

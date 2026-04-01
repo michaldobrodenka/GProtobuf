@@ -1579,7 +1579,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
 
                 // Check if type is a derived type with ProtoInclude - needs full serialization with wrapper
                 bool isDerivedType = _typeRegistry?.IsDerivedType(typeName) ?? false;
-                var sizeMethodSuffix = isDerivedType ? "Size" : "ContentSize";
+                var sizeMethodSuffix = "ContentSize";
                 _sb.AppendIndentedLine($"{sizeCalcClass}.Calculate{sanitizedName}{sizeMethodSuffix}(ref tempCalc{fieldId}, {valueAccess});");
 
                 // Cache the length if a cache variable is provided
@@ -1726,7 +1726,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
 
                 // Check if element type is a derived type with ProtoInclude - needs full serialization with wrapper
                 bool isDerivedType = _typeRegistry?.IsDerivedType(typeInfo.CollectionElementType) ?? false;
-                var sizeMethodSuffix = isDerivedType ? "Size" : "ContentSize";
+                var sizeMethodSuffix = "ContentSize";
 
                 _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
                 _sb.StartNewBlock();
@@ -1869,7 +1869,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 // Check if type is a derived type with ProtoInclude - needs full serialization with wrapper
                 bool isDerivedType = _typeRegistry?.IsDerivedType(typeName) ?? false;
                 var methodSuffix = isDerivedType ? "" : "Content";
-                var sizeMethodSuffix = isDerivedType ? "Size" : "ContentSize";
+                var sizeMethodSuffix = "ContentSize";
 
                 // Use cached length if available, otherwise recalculate
                 if (cachedLengthVar != null)
@@ -2020,7 +2020,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 // Check if element type is a derived type with ProtoInclude - needs full serialization with wrapper
                 bool isDerivedType = _typeRegistry?.IsDerivedType(typeInfo.CollectionElementType) ?? false;
                 var methodSuffix = isDerivedType ? "" : "Content";
-                var sizeMethodSuffix = isDerivedType ? "Size" : "ContentSize";
+                var sizeMethodSuffix = "ContentSize";
 
                 _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
                 _sb.StartNewBlock();
