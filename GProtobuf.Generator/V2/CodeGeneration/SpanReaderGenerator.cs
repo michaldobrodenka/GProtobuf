@@ -182,7 +182,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     throw new System.Exception($"Error in GenerateReadContentMethod for type '{type.FullName}'", ex);
                 }
 
-                if (!_registry.IsReadonlyStruct(type.FullName))
+                if (!_registry.IsReadonlyStruct(type.FullName) && !type.IsAbstract)
                 {
                     try
                     {
@@ -229,7 +229,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                         throw new System.Exception($"Error in GenerateReadContentMethod for ProtoInclude type '{protoIncludeTypeName}'", ex);
                     }
 
-                    if (!_registry.IsReadonlyStruct(protoIncludeTypeName))
+                    if (!_registry.IsReadonlyStruct(protoIncludeTypeName) && !protoIncludeType.IsAbstract)
                     {
                         try
                         {
