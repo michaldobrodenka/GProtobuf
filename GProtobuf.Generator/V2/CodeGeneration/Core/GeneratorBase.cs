@@ -388,6 +388,69 @@ namespace GProtobuf.Generator.V2.CodeGeneration.Core
         }
 
         /// <summary>
+        /// Generates code to invoke [ProtoBeforeDeserialization] callback methods.
+        /// Called before deserialization to allow pre-processing (e.g., resetting state).
+        /// </summary>
+        protected void GenerateBeforeDeserializationCallbacks(TypeDefinition type, string instanceVar = "instance")
+        {
+            if (type.BeforeDeserializationCallbacks == null || type.BeforeDeserializationCallbacks.Count == 0)
+                return;
+
+            _sb.AppendIndentedLine("// [ProtoBeforeDeserialization] callbacks");
+            foreach (var callback in type.BeforeDeserializationCallbacks)
+            {
+                if (callback.IsStatic || callback.HasParameters)
+                {
+                    _sb.AppendIndentedLine($"// WARNING: Skipping invalid callback '{callback.MethodName}' (static={callback.IsStatic}, hasParams={callback.HasParameters})");
+                    continue;
+                }
+
+                _sb.AppendIndentedLine($"{instanceVar}.{callback.MethodName}();");
+            }
+            _sb.AppendNewLine();
+        }
+
+        /// <summary>
+        /// Generates code to invoke [ProtoAfterDeserialization] callback methods.
+        /// Called after deserialization completes (typically in finally block for exception safety).
+        /// </summary>
+        protected void GenerateAfterDeserializationCallbacks(TypeDefinition type, string instanceVar = "instance")
+        {
+            if (type.AfterDeserializationCallbacks == null || type.AfterDeserializationCallbacks.Count == 0)
+                return;
+
+            _sb.AppendIndentedLine("// [ProtoAfterDeserialization] callbacks");
+            foreach (var callback in type.AfterDeserializationCallbacks)
+            {
+                if (callback.IsStatic || callback.HasParameters)
+                {
+                    _sb.AppendIndentedLine($"// WARNING: Skipping invalid callback '{callback.MethodName}' (static={callback.IsStatic}, hasParams={callback.HasParameters})");
+                    continue;
+                }
+
+                _sb.AppendIndentedLine($"{instanceVar}.{callback.MethodName}();");
+            }
+        }
+
+        /// <summary>
+        /// Checks if a type has any after-deserialization callbacks.
+        /// Used to determine if try-finally block is needed.
+        /// </summary>
+        protected bool HasAfterDeserializationCallbacks(TypeDefinition type)
+        {
+            return type.AfterDeserializationCallbacks != null && type.AfterDeserializationCallbacks.Count > 0;
+        }
+
+        /// <summary>
+        /// Checks if a type has any deserialization callbacks (before or after).
+        /// </summary>
+        protected bool HasDeserializationCallbacks(TypeDefinition type)
+        {
+            return (type.BeforeDeserializationCallbacks != null && type.BeforeDeserializationCallbacks.Count > 0)
+                || (type.AfterDeserializationCallbacks != null && type.AfterDeserializationCallbacks.Count > 0);
+        }
+
+        /// <summary>
         /// Returns true if WriteXContent can be skipped for this type.
         /// Simple types (no inheritance, no callbacks) can have their WriteXContent body inlined into WriteX,
         /// and callers can use WriteX instead of WriteXContent.

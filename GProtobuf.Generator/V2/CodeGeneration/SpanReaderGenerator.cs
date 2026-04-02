@@ -1221,6 +1221,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             }
 
             _sb.AppendNewLine();
+            GenerateAfterDeserializationCallbacks(type, "result");
             _sb.AppendIndentedLine("return result;");
         }
 
@@ -1823,6 +1824,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             if (fieldsNeedingTempList.Count > 0)
                 _sb.AppendNewLine();
 
+            // Call base class deserialization callbacks first, then derived
+            if (parentType != null)
+                GenerateBeforeDeserializationCallbacks(parentType);
+            GenerateBeforeDeserializationCallbacks(type);
+
             // Wrap in try/finally for exception safety (ObjectArrayBuilder must be disposed)
             if (fieldsUsingObjectBuilder.Count > 0)
             {
@@ -1885,6 +1891,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 ObjectArrayBuilderHelper.GenerateDispose(_sb, fieldsUsingObjectBuilder);
                 _sb.EndBlock();
             }
+
+            // Call derived class deserialization callbacks first, then base
+            GenerateAfterDeserializationCallbacks(type);
+            if (parentType != null)
+                GenerateAfterDeserializationCallbacks(parentType);
         }
 
         /// <summary>
@@ -2170,6 +2181,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             if ((fieldsNeedingTempList?.Count ?? 0) > 0)
                 _sb.AppendNewLine();
 
+            GenerateBeforeDeserializationCallbacks(type);
+
             // Wrap in try/finally for exception safety (ObjectArrayBuilder must be disposed)
             if (fieldsUsingObjectBuilder.Count > 0)
             {
@@ -2241,6 +2254,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 ObjectArrayBuilderHelper.GenerateDispose(_sb, fieldsUsingObjectBuilder);
                 _sb.EndBlock();
             }
+
+            GenerateAfterDeserializationCallbacks(type);
         }
 
         /// <summary>

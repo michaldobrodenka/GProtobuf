@@ -607,4 +607,126 @@ namespace GProtobuf.Tests.TestModel
     }
 
     #endregion
+
+    #region Deserialization Callbacks
+
+    /// <summary>
+    /// Test model for [ProtoBeforeDeserialization] and [ProtoAfterDeserialization] callbacks.
+    /// </summary>
+    [ProtoContract]
+    public class DeserializationCallbackModel
+    {
+        [ProtoMember(1)]
+        public string Name { get; set; }
+
+        [ProtoMember(2)]
+        public int Value { get; set; }
+
+        public List<string> CallbackLog { get; set; } = new List<string>();
+
+        public int BeforeDeserializationCount { get; set; }
+        public int AfterDeserializationCount { get; set; }
+
+        [ProtoBeforeDeserialization]
+        internal void OnBeforeDeserialization()
+        {
+            BeforeDeserializationCount++;
+            CallbackLog.Add("BeforeDeserialization");
+        }
+
+        [ProtoAfterDeserialization]
+        internal void OnAfterDeserialization()
+        {
+            AfterDeserializationCount++;
+            CallbackLog.Add("AfterDeserialization");
+        }
+    }
+
+    /// <summary>
+    /// Test model with all four callback types.
+    /// </summary>
+    [ProtoContract]
+    public class FullCallbackModel
+    {
+        [ProtoMember(1)]
+        public string Name { get; set; }
+
+        [ProtoMember(2)]
+        public int Value { get; set; }
+
+        public List<string> CallbackLog { get; set; } = new List<string>();
+
+        [ProtoBeforeSerialization]
+        internal void OnBeforeSerialization()
+        {
+            CallbackLog.Add("BeforeSerialization");
+        }
+
+        [ProtoAfterSerialization]
+        internal void OnAfterSerialization()
+        {
+            CallbackLog.Add("AfterSerialization");
+        }
+
+        [ProtoBeforeDeserialization]
+        internal void OnBeforeDeserialization()
+        {
+            CallbackLog.Add("BeforeDeserialization");
+        }
+
+        [ProtoAfterDeserialization]
+        internal void OnAfterDeserialization()
+        {
+            CallbackLog.Add("AfterDeserialization");
+        }
+    }
+
+    /// <summary>
+    /// Base class with deserialization callbacks for inheritance testing.
+    /// </summary>
+    [ProtoContract]
+    [ProtoInclude(100, typeof(DerivedWithDeserializationCallback))]
+    public class BaseWithDeserializationCallback
+    {
+        [ProtoMember(1)]
+        public string BaseName { get; set; }
+
+        public List<string> CallbackLog { get; set; } = new List<string>();
+
+        [ProtoBeforeDeserialization]
+        internal void BaseOnBeforeDeserialization()
+        {
+            CallbackLog.Add("Base.BeforeDeserialization");
+        }
+
+        [ProtoAfterDeserialization]
+        internal void BaseOnAfterDeserialization()
+        {
+            CallbackLog.Add("Base.AfterDeserialization");
+        }
+    }
+
+    /// <summary>
+    /// Derived class with its own deserialization callbacks.
+    /// </summary>
+    [ProtoContract]
+    public class DerivedWithDeserializationCallback : BaseWithDeserializationCallback
+    {
+        [ProtoMember(1)]
+        public int DerivedValue { get; set; }
+
+        [ProtoBeforeDeserialization]
+        internal void DerivedOnBeforeDeserialization()
+        {
+            CallbackLog.Add("Derived.BeforeDeserialization");
+        }
+
+        [ProtoAfterDeserialization]
+        internal void DerivedOnAfterDeserialization()
+        {
+            CallbackLog.Add("Derived.AfterDeserialization");
+        }
+    }
+
+    #endregion
 }

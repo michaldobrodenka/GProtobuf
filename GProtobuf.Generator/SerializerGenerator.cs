@@ -99,7 +99,7 @@ namespace ProtoBuf
                     }
                 }
 
-                var (beforeCallbacks, afterCallbacks) = GetSerializationCallbacks(typeWithAttribute);
+                var (beforeCallbacks, afterCallbacks, beforeDeserCallbacks, afterDeserCallbacks) = GetSerializationCallbacks(typeWithAttribute);
 
                 // Check if this type itself is a ProtoVarint type
                 var typeProtoVarintInfo = GetProtoVarintInfo(typeWithAttribute);
@@ -120,6 +120,8 @@ namespace ProtoBuf
                     CustomCollectionElementType: customCollectionElementType,
                     BeforeSerializationCallbacks: beforeCallbacks,
                     AfterSerializationCallbacks: afterCallbacks,
+                    BeforeDeserializationCallbacks: beforeDeserCallbacks,
+                    AfterDeserializationCallbacks: afterDeserCallbacks,
                     IsProtoVarint: typeProtoVarintInfo?.IsValid ?? false,
                     ProtoVarintType: typeProtoVarintInfo?.VarintType ?? ProtoVarintType.UInt32,
                     ProtoVarintValueMember: typeProtoVarintInfo?.ValueMemberName,
@@ -164,7 +166,7 @@ namespace ProtoBuf
                     }
                 }
 
-                var (beforeCallbacks, afterCallbacks) = GetSerializationCallbacks(typeWithAttribute);
+                var (beforeCallbacks, afterCallbacks, beforeDeserCallbacks, afterDeserCallbacks) = GetSerializationCallbacks(typeWithAttribute);
 
                 // Check if this type itself is a ProtoVarint type
                 var typeProtoVarintInfo = GetProtoVarintInfo(typeWithAttribute);
@@ -185,6 +187,8 @@ namespace ProtoBuf
                     CustomCollectionElementType: customCollectionElementType,
                     BeforeSerializationCallbacks: beforeCallbacks,
                     AfterSerializationCallbacks: afterCallbacks,
+                    BeforeDeserializationCallbacks: beforeDeserCallbacks,
+                    AfterDeserializationCallbacks: afterDeserCallbacks,
                     IsProtoVarint: typeProtoVarintInfo?.IsValid ?? false,
                     ProtoVarintType: typeProtoVarintInfo?.VarintType ?? ProtoVarintType.UInt32,
                     ProtoVarintValueMember: typeProtoVarintInfo?.ValueMemberName);
@@ -1272,10 +1276,12 @@ namespace ProtoBuf
     /// - Non-static (need instance context)
     /// - Parameterless (we don't support StreamingContext parameter)
     /// </summary>
-    private static (List<SerializationCallback> before, List<SerializationCallback> after) GetSerializationCallbacks(INamedTypeSymbol typeSymbol)
+    private static (List<SerializationCallback> beforeSer, List<SerializationCallback> afterSer, List<SerializationCallback> beforeDeser, List<SerializationCallback> afterDeser) GetSerializationCallbacks(INamedTypeSymbol typeSymbol)
     {
-        List<SerializationCallback> beforeCallbacks = null;
-        List<SerializationCallback> afterCallbacks = null;
+        List<SerializationCallback> beforeSerCallbacks = null;
+        List<SerializationCallback> afterSerCallbacks = null;
+        List<SerializationCallback> beforeDeserCallbacks = null;
+        List<SerializationCallback> afterDeserCallbacks = null;
 
         foreach (var method in typeSymbol.GetMembers().OfType<IMethodSymbol>())
         {
@@ -1301,8 +1307,8 @@ namespace ProtoBuf
 
                 if (attrName == "ProtoBeforeSerializationAttribute")
                 {
-                    beforeCallbacks ??= new List<SerializationCallback>();
-                    beforeCallbacks.Add(new SerializationCallback
+                    beforeSerCallbacks ??= new List<SerializationCallback>();
+                    beforeSerCallbacks.Add(new SerializationCallback
                     {
                         MethodName = method.Name,
                         IsStatic = false,
@@ -1311,8 +1317,28 @@ namespace ProtoBuf
                 }
                 else if (attrName == "ProtoAfterSerializationAttribute")
                 {
-                    afterCallbacks ??= new List<SerializationCallback>();
-                    afterCallbacks.Add(new SerializationCallback
+                    afterSerCallbacks ??= new List<SerializationCallback>();
+                    afterSerCallbacks.Add(new SerializationCallback
+                    {
+                        MethodName = method.Name,
+                        IsStatic = false,
+                        HasParameters = false
+                    });
+                }
+                else if (attrName == "ProtoBeforeDeserializationAttribute")
+                {
+                    beforeDeserCallbacks ??= new List<SerializationCallback>();
+                    beforeDeserCallbacks.Add(new SerializationCallback
+                    {
+                        MethodName = method.Name,
+                        IsStatic = false,
+                        HasParameters = false
+                    });
+                }
+                else if (attrName == "ProtoAfterDeserializationAttribute")
+                {
+                    afterDeserCallbacks ??= new List<SerializationCallback>();
+                    afterDeserCallbacks.Add(new SerializationCallback
                     {
                         MethodName = method.Name,
                         IsStatic = false,
@@ -1322,6 +1348,6 @@ namespace ProtoBuf
             }
         }
 
-        return (beforeCallbacks, afterCallbacks);
+        return (beforeSerCallbacks, afterSerCallbacks, beforeDeserCallbacks, afterDeserCallbacks);
     }
 }

@@ -1103,5 +1103,149 @@ namespace GProtobuf.CrossTests
         }
 
         #endregion
+
+        #region Deserialization Callback Tests
+
+        [Fact]
+        public void GG_BeforeDeserializationCallback_IsInvoked()
+        {
+            var model = new DeserializationCallbackModel
+            {
+                Name = "Test",
+                Value = 42
+            };
+
+            // Serialize with GProtobuf
+            using var ms = new MemoryStream();
+            global::GProtobuf.Tests.TestModel.Serialization.Serializers.SerializeDeserializationCallbackModel(ms, model);
+            var bytes = ms.ToArray();
+
+            // Deserialize - callbacks should be invoked
+            var deserialized = global::GProtobuf.Tests.TestModel.Serialization.Deserializers.DeserializeDeserializationCallbackModel(bytes);
+
+            Assert.Equal("Test", deserialized.Name);
+            Assert.Equal(42, deserialized.Value);
+            Assert.Equal(1, deserialized.BeforeDeserializationCount);
+            Assert.Contains("BeforeDeserialization", deserialized.CallbackLog);
+        }
+
+        [Fact]
+        public void GG_AfterDeserializationCallback_IsInvoked()
+        {
+            var model = new DeserializationCallbackModel
+            {
+                Name = "Test",
+                Value = 42
+            };
+
+            using var ms = new MemoryStream();
+            global::GProtobuf.Tests.TestModel.Serialization.Serializers.SerializeDeserializationCallbackModel(ms, model);
+            var bytes = ms.ToArray();
+
+            var deserialized = global::GProtobuf.Tests.TestModel.Serialization.Deserializers.DeserializeDeserializationCallbackModel(bytes);
+
+            Assert.Equal(1, deserialized.BeforeDeserializationCount);
+            Assert.Equal(1, deserialized.AfterDeserializationCount);
+            Assert.Contains("BeforeDeserialization", deserialized.CallbackLog);
+            Assert.Contains("AfterDeserialization", deserialized.CallbackLog);
+        }
+
+        [Fact]
+        public void GG_DeserializationCallbacks_InvokedInCorrectOrder()
+        {
+            var model = new DeserializationCallbackModel
+            {
+                Name = "OrderTest",
+                Value = 99
+            };
+
+            using var ms = new MemoryStream();
+            global::GProtobuf.Tests.TestModel.Serialization.Serializers.SerializeDeserializationCallbackModel(ms, model);
+            var bytes = ms.ToArray();
+
+            var deserialized = global::GProtobuf.Tests.TestModel.Serialization.Deserializers.DeserializeDeserializationCallbackModel(bytes);
+
+            // Before should come before After
+            Assert.Equal(2, deserialized.CallbackLog.Count);
+            Assert.Equal("BeforeDeserialization", deserialized.CallbackLog[0]);
+            Assert.Equal("AfterDeserialization", deserialized.CallbackLog[1]);
+        }
+
+        [Fact]
+        public void GG_FullCallbackModel_AllFourCallbacksInvoked()
+        {
+            var model = new FullCallbackModel
+            {
+                Name = "FullTest",
+                Value = 123
+            };
+
+            // Serialize - before/after serialization callbacks invoked
+            using var ms = new MemoryStream();
+            global::GProtobuf.Tests.TestModel.Serialization.Serializers.SerializeFullCallbackModel(ms, model);
+
+            Assert.Contains("BeforeSerialization", model.CallbackLog);
+            Assert.Contains("AfterSerialization", model.CallbackLog);
+
+            // Deserialize - before/after deserialization callbacks invoked
+            var bytes = ms.ToArray();
+            var deserialized = global::GProtobuf.Tests.TestModel.Serialization.Deserializers.DeserializeFullCallbackModel(bytes);
+
+            Assert.Equal("FullTest", deserialized.Name);
+            Assert.Equal(123, deserialized.Value);
+            Assert.Contains("BeforeDeserialization", deserialized.CallbackLog);
+            Assert.Contains("AfterDeserialization", deserialized.CallbackLog);
+        }
+
+        [Fact]
+        public void GG_DeserializationCallbacks_StreamReader()
+        {
+            var model = new DeserializationCallbackModel
+            {
+                Name = "StreamTest",
+                Value = 55
+            };
+
+            using var ms = new MemoryStream();
+            global::GProtobuf.Tests.TestModel.Serialization.Serializers.SerializeDeserializationCallbackModel(ms, model);
+
+            ms.Position = 0;
+            var deserialized = global::GProtobuf.Tests.TestModel.Serialization.Deserializers.DeserializeDeserializationCallbackModel(ms);
+
+            Assert.Equal("StreamTest", deserialized.Name);
+            Assert.Equal(55, deserialized.Value);
+            Assert.Equal(1, deserialized.BeforeDeserializationCount);
+            Assert.Equal(1, deserialized.AfterDeserializationCount);
+        }
+
+        [Fact]
+        public void GG_InheritanceDeserializationCallbacks_Populate_BaseAndDerived()
+        {
+            var model = new DerivedWithDeserializationCallback
+            {
+                BaseName = "BaseTest",
+                DerivedValue = 42
+            };
+
+            // Serialize
+            using var ms = new MemoryStream();
+            global::GProtobuf.Tests.TestModel.Serialization.Serializers.SerializeBaseWithDeserializationCallback(ms, model);
+            var bytes = ms.ToArray();
+
+            // Populate on existing instance — Populate method has full callback support
+            var target = new DerivedWithDeserializationCallback();
+            global::GProtobuf.Tests.TestModel.Serialization.Deserializers.PopulateDerivedWithDeserializationCallback(bytes, target);
+
+            Assert.Equal("BaseTest", target.BaseName);
+            Assert.Equal(42, target.DerivedValue);
+
+            // Both base and derived callbacks should be invoked
+            Assert.Contains("Base.BeforeDeserialization", target.CallbackLog);
+            Assert.Contains("Base.AfterDeserialization", target.CallbackLog);
+            Assert.Contains("Derived.BeforeDeserialization", target.CallbackLog);
+            Assert.Contains("Derived.AfterDeserialization", target.CallbackLog);
+        }
+
+        #endregion
     }
 }
