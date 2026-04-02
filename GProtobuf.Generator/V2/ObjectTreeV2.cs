@@ -613,6 +613,9 @@ namespace GProtobuf.Generator.V2
 
             foreach (var type in types)
             {
+                // Skip entry-point methods for types with SkipEntryPoints = true
+                if (type.SkipEntryPoints) continue;
+
                 var className = TypeNameHelper.GetClassName(type.FullName);
                 // Reference types can have optional null parameter; value types (structs, enums) cannot
                 bool isReferenceType = !type.IsStruct && !type.IsEnum;
@@ -786,6 +789,9 @@ namespace GProtobuf.Generator.V2
 
             foreach (var type in types)
             {
+                // Skip entry-point methods for types with SkipEntryPoints = true
+                if (type.SkipEntryPoints) continue;
+
                 var className = TypeNameHelper.GetClassName(type.FullName);
 
                 if (_options.GenerateStreamWriter)

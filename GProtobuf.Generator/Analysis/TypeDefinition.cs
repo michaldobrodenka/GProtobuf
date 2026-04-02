@@ -81,5 +81,6 @@ namespace GProtobuf.Generator.Analysis
         List<SerializationCallback>? AfterSerializationCallbacks = null,
         bool IsProtoVarint = false,
         ProtoVarintType ProtoVarintType = ProtoVarintType.UInt32,
-        string? ProtoVarintValueMember = null);
+        string? ProtoVarintValueMember = null,
+        bool SkipEntryPoints = false);
 }

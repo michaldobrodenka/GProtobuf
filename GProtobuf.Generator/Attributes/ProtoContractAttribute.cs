@@ -36,5 +36,15 @@ namespace GProtobuf.Generator.Attributes
         /// Default is false (no guard generated).
         /// </summary>
         public bool EnableRecursionGuard { get; set; }
+
+        /// <summary>
+        /// When true, suppresses generation of public entry-point methods
+        /// (Deserialize, Serialize, Populate, Read, Write) for this type.
+        /// Internal helper methods (OwnFields, Content, AsParent) are still generated
+        /// for use by the parent type's polymorphic dispatch.
+        /// Use on derived types that are only accessed via base-type polymorphic dispatch.
+        /// Default is false (all methods generated).
+        /// </summary>
+        public bool SkipEntryPoints { get; set; }
     }
 }

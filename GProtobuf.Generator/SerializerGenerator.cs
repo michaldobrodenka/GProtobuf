@@ -21,6 +21,23 @@ public sealed class SerializerGenerator : IIncrementalGenerator
 //        }
 //#endif
 
+        // Inject [SkipSerializationEntryPoints] attribute into the compilation
+        context.RegisterPostInitializationOutput(static ctx =>
+        {
+            ctx.AddSource("SkipSerializationEntryPointsAttribute.g.cs", @"
+namespace ProtoBuf
+{
+    /// <summary>
+    /// When applied to a type, suppresses generation of public entry-point methods
+    /// (Deserialize, Serialize, Populate, Read, Write, Calculate) for this type.
+    /// Internal helper methods (OwnFields, Content, AsParent, WrapperSize) are still generated.
+    /// Use on derived types that are only accessed via base-type polymorphic dispatch.
+    /// </summary>
+    [global::System.AttributeUsage(global::System.AttributeTargets.Class | global::System.AttributeTargets.Struct, AllowMultiple = false, Inherited = false)]
+    internal sealed class SkipSerializationEntryPointsAttribute : global::System.Attribute { }
+}
+");
+        });
 
         // Collect all enums from compilation
         var enumTypesProvider = context.CompilationProvider
@@ -64,6 +81,7 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                 var hasParameterlessConstructor = HasParameterlessConstructor(typeWithAttribute);
                 var baseClass = GetBaseClass(typeWithAttribute);
                 var enableRecursionGuard = GetEnableRecursionGuard(typeWithAttribute);
+                var skipEntryPoints = GetSkipEntryPoints(typeWithAttribute);
 
                 // Check if this is a custom collection type (implements IEnumerable<T> + Add(T))
                 // Only treat as custom collection if there are no ProtoMember fields
@@ -104,7 +122,8 @@ public sealed class SerializerGenerator : IIncrementalGenerator
                     AfterSerializationCallbacks: afterCallbacks,
                     IsProtoVarint: typeProtoVarintInfo?.IsValid ?? false,
                     ProtoVarintType: typeProtoVarintInfo?.VarintType ?? ProtoVarintType.UInt32,
-                    ProtoVarintValueMember: typeProtoVarintInfo?.ValueMemberName);
+                    ProtoVarintValueMember: typeProtoVarintInfo?.ValueMemberName,
+                    SkipEntryPoints: skipEntryPoints);
 
                 return (namespaceName, typeDefinition);
             });
@@ -1217,6 +1236,30 @@ public sealed class SerializerGenerator : IIncrementalGenerator
         {
             if (arg.Key == "EnableRecursionGuard" && arg.Value.Value is bool value)
                 return value;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Checks if the type has [SkipSerializationEntryPoints] attribute or [ProtoContract(SkipEntryPoints = true)].
+    /// </summary>
+    private static bool GetSkipEntryPoints(INamedTypeSymbol typeSymbol)
+    {
+        // Check for standalone [SkipSerializationEntryPoints] attribute
+        if (typeSymbol.GetAttributes().Any(a => a.AttributeClass?.ToDisplayString() == "ProtoBuf.SkipSerializationEntryPointsAttribute"))
+            return true;
+
+        // Also check for [ProtoContract(SkipEntryPoints = true)] (for projects using our own attribute)
+        var attr = typeSymbol.GetAttributes()
+            .FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == "ProtoBuf.ProtoContractAttribute");
+
+        if (attr != null)
+        {
+            foreach (var arg in attr.NamedArguments)
+            {
+                if (arg.Key == "SkipEntryPoints" && arg.Value.Value is bool value)
+                    return value;
+            }
         }
         return false;
     }

@@ -223,6 +223,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// </summary>
         private void GenerateCalculateContentSizeMethod(TypeDefinition type)
         {
+            // Skip entry-point CalculateContentSize method for types with SkipEntryPoints = true
+            if (type.SkipEntryPoints) return;
+
             var className = TypeNameHelper.GetClassName(type.FullName);
 
             _sb.AppendIndentedLine($"public static void Calculate{className}ContentSize(ref global::GProtobuf.Core.WriteSizeCalculator calculator, global::{type.FullName} obj)");

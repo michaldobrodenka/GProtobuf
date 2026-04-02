@@ -234,52 +234,56 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         {
             var className = TypeNameHelper.GetClassName(type.FullName);
 
-            // Generate main Write method (entry point)
-            _sb.AppendIndentedLine($"public static void Write{className}(ref {_writerType} writer, global::{type.FullName} instance)");
-            _sb.StartNewBlock();
-
-            // Add null check for reference types (structs can't be null)
-            if (!type.IsStruct)
+            // Skip entry-point Write method for types with SkipEntryPoints = true
+            if (!type.SkipEntryPoints)
             {
-                _sb.AppendIndentedLine("if (instance == null) return;");
-            }
-
-            GenerateBeforeSerializationCallbacks(type);
-
-            bool hasAfterCallbacks = HasAfterSerializationCallbacks(type);
-
-            if (hasAfterCallbacks)
-            {
-                _sb.AppendIndentedLine("try");
+                // Generate main Write method (entry point)
+                _sb.AppendIndentedLine($"public static void Write{className}(ref {_writerType} writer, global::{type.FullName} instance)");
                 _sb.StartNewBlock();
-            }
 
-            bool isDerived = _registry.IsDerivedType(type.FullName);
+                // Add null check for reference types (structs can't be null)
+                if (!type.IsStruct)
+                {
+                    _sb.AppendIndentedLine("if (instance == null) return;");
+                }
 
-            if (isDerived)
-            {
-                GenerateWriteMethodForDerived(type, className);
-            }
-            else if (type.ProtoIncludes != null && type.ProtoIncludes.Count > 0)
-            {
-                GenerateWriteMethodWithInheritance(type, className);
-            }
-            else
-            {
-                GenerateSimpleWriteMethod(type, className);
-            }
+                GenerateBeforeSerializationCallbacks(type);
 
-            if (hasAfterCallbacks)
-            {
-                _sb.EndBlock(); // try
-                _sb.AppendIndentedLine("finally");
-                _sb.StartNewBlock();
-                GenerateAfterSerializationCallbacks(type);
-                _sb.EndBlock(); // finally
-            }
+                bool hasAfterCallbacks = HasAfterSerializationCallbacks(type);
 
-            _sb.EndBlock();
-            _sb.AppendNewLine();
+                if (hasAfterCallbacks)
+                {
+                    _sb.AppendIndentedLine("try");
+                    _sb.StartNewBlock();
+                }
+
+                bool isDerived = _registry.IsDerivedType(type.FullName);
+
+                if (isDerived)
+                {
+                    GenerateWriteMethodForDerived(type, className);
+                }
+                else if (type.ProtoIncludes != null && type.ProtoIncludes.Count > 0)
+                {
+                    GenerateWriteMethodWithInheritance(type, className);
+                }
+                else
+                {
+                    GenerateSimpleWriteMethod(type, className);
+                }
+
+                if (hasAfterCallbacks)
+                {
+                    _sb.EndBlock(); // try
+                    _sb.AppendIndentedLine("finally");
+                    _sb.StartNewBlock();
+                    GenerateAfterSerializationCallbacks(type);
+                    _sb.EndBlock(); // finally
+                }
+
+                _sb.EndBlock();
+                _sb.AppendNewLine();
+            }
 
             // Generate WriteContent method (for nested serialization without tag)
             GenerateWriteContentMethod(type, className);

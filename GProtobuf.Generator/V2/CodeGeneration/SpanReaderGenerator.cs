@@ -371,6 +371,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// </summary>
         private void GenerateReadMethod(TypeDefinition type)
         {
+            // Skip entry-point Read method for types with SkipEntryPoints = true
+            if (type.SkipEntryPoints) return;
+
             var className = TypeNameHelper.GetClassName(type.FullName);
             bool hasInheritance = GeneratorHelpers.HasInheritance(type, _registry);
 
@@ -1578,6 +1581,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// </summary>
         private void GeneratePopulateMethod(TypeDefinition type)
         {
+            // Skip entry-point Populate method for types with SkipEntryPoints = true
+            if (type.SkipEntryPoints) return;
 
             var className = TypeNameHelper.GetClassName(type.FullName);
 

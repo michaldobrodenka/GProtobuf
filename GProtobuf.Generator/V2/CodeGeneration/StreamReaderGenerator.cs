@@ -860,6 +860,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// </summary>
         private void GenerateReadMethod(TypeDefinition type)
         {
+            // Skip entry-point Read method for types with SkipEntryPoints = true
+            if (type.SkipEntryPoints) return;
+
             var className = TypeNameHelper.GetClassName(type.FullName);
             var nsPrefix = GeneratorHelpers.GetNamespacePrefix(_registry.GetNamespaceForType(type.FullName), _currentNamespace);
 
@@ -2542,6 +2545,9 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         /// </summary>
         private void GeneratePopulateMethod(TypeDefinition type)
         {
+            // Skip entry-point Populate method for types with SkipEntryPoints = true
+            if (type.SkipEntryPoints) return;
+
             // Skip abstract types - can't populate them directly
             if (type.IsAbstract)
                 return;

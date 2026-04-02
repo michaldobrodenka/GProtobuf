@@ -711,47 +711,51 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         {
             var className = TypeNameHelper.GetClassName(type.FullName);
 
-            // Generate main Write method (entry point)
-            _sb.AppendIndentedLine($"public static void Write{className}(ref {WriterType} writer, global::{type.FullName} instance)");
-            _sb.StartNewBlock();
-
-            // Add null check for reference types
-            if (!type.IsStruct)
+            // Skip entry-point Write method for types with SkipEntryPoints = true
+            if (!type.SkipEntryPoints)
             {
-                _sb.AppendIndentedLine("if (instance == null) return;");
-            }
-
-            GenerateBeforeSerializationCallbacks(type);
-
-            bool hasAfterCallbacks = HasAfterSerializationCallbacks(type);
-
-            if (hasAfterCallbacks)
-            {
-                _sb.AppendIndentedLine("try");
+                // Generate main Write method (entry point)
+                _sb.AppendIndentedLine($"public static void Write{className}(ref {WriterType} writer, global::{type.FullName} instance)");
                 _sb.StartNewBlock();
-            }
 
-            // For simple types without callbacks, inline the body directly into WriteX
-            if (CanSkipWriteContentMethod(type))
-            {
-                GenerateWriteContentBodyOnePass(type, className);
-            }
-            else
-            {
-                _sb.AppendIndentedLine($"Write{className}Content(ref writer, instance);");
-            }
+                // Add null check for reference types
+                if (!type.IsStruct)
+                {
+                    _sb.AppendIndentedLine("if (instance == null) return;");
+                }
 
-            if (hasAfterCallbacks)
-            {
-                _sb.EndBlock(); // try
-                _sb.AppendIndentedLine("finally");
-                _sb.StartNewBlock();
-                GenerateAfterSerializationCallbacks(type);
-                _sb.EndBlock(); // finally
-            }
+                GenerateBeforeSerializationCallbacks(type);
 
-            _sb.EndBlock();
-            _sb.AppendNewLine();
+                bool hasAfterCallbacks = HasAfterSerializationCallbacks(type);
+
+                if (hasAfterCallbacks)
+                {
+                    _sb.AppendIndentedLine("try");
+                    _sb.StartNewBlock();
+                }
+
+                // For simple types without callbacks, inline the body directly into WriteX
+                if (CanSkipWriteContentMethod(type))
+                {
+                    GenerateWriteContentBodyOnePass(type, className);
+                }
+                else
+                {
+                    _sb.AppendIndentedLine($"Write{className}Content(ref writer, instance);");
+                }
+
+                if (hasAfterCallbacks)
+                {
+                    _sb.EndBlock(); // try
+                    _sb.AppendIndentedLine("finally");
+                    _sb.StartNewBlock();
+                    GenerateAfterSerializationCallbacks(type);
+                    _sb.EndBlock(); // finally
+                }
+
+                _sb.EndBlock();
+                _sb.AppendNewLine();
+            }
 
             // Generate WriteContent method (skipped for simple types without callbacks)
             GenerateWriteContentMethod(type, className);
