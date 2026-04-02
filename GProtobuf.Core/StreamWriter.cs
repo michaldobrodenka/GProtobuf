@@ -572,6 +572,23 @@ namespace GProtobuf.Core
             bufferPosition++;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteTwoBytes(byte b0, byte b1)
+        {
+            if (buffer.Length - bufferPosition >= 2)
+            {
+                ref byte p = ref RefAt(bufferPosition);
+                Unsafe.WriteUnaligned(ref p, b0);
+                Unsafe.WriteUnaligned(ref Unsafe.Add(ref p, 1), b1);
+                bufferPosition += 2;
+            }
+            else
+            {
+                WriteSingleByte(b0);
+                WriteSingleByte(b1);
+            }
+        }
+
         public void Flush()
         {
             if (bufferPosition > 0)

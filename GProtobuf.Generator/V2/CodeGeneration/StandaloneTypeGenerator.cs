@@ -3,6 +3,7 @@ using GProtobuf.Generator.Attributes;
 using GProtobuf.Generator.V2.CodeGeneration.Core;
 using GProtobuf.Generator.V2.Handlers.Core;
 using GProtobuf.Generator.V2.Helpers;
+using GProtobuf.Generator.WireFormat;
 
 // Use existing type mapping and helper classes for primitive type handling
 using static GProtobuf.Generator.WireFormat.TypeMapping;
@@ -716,7 +717,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 {
                     // Enums: [tag (wire type 0)][varint value]
                     var tag = (1 << 3) | 0; // field 1 + wire type 0 (varint)
-                    _sb.AppendIndentedLine($"{writerName}.WriteVarUInt32(0x{tag:X2}); // field 1, wire type 0 (varint for enum)");
+                    _sb.AppendIndentedLine($"{writerName}.WriteSingleByte(0x{tag:X2}); // field 1, wire type 0 (varint for enum)");
                     _sb.AppendIndentedLine($"{writerName}.WriteVarInt32((int){varName});");
                 }
                 else
@@ -724,7 +725,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     // Primitive types: [tag][value] for each element (unpacked format)
                     var wireType = GetWireType(elementType);
                     var tag = (1 << 3) | wireType; // field 1 + wire type
-                    _sb.AppendIndentedLine($"{writerName}.WriteVarUInt32(0x{tag:X2}); // field 1, wire type {wireType}");
+                    _sb.AppendIndentedLine($"{writerName}.WriteSingleByte(0x{tag:X2}); // field 1, wire type {wireType}");
 
                     // For string, use WriteString which handles length prefix
                     if (elementType == "string" || elementType == "System.String")
@@ -747,7 +748,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     // tag 0x08 = field 1, wire type 0 (varint)
                     var elemWriteVarintType = _registry.GetProtoVarintType(normalizedElemType) ?? ProtoVarintType.UInt32;
                     var elemWriteValueMember = _registry.GetProtoVarintValueMember(normalizedElemType);
-                    _sb.AppendIndentedLine($"{writerName}.WriteVarUInt32(0x08); // field 1, wire type 0 (varint for ProtoVarint)");
+                    _sb.AppendIndentedLine($"{writerName}.WriteSingleByte(0x08); // field 1, wire type 0 (varint for ProtoVarint)");
                     var writeMethod = PrimitiveTypeCodeGenerator.GetProtoVarintWriteMethod(elemWriteVarintType);
                     _sb.AppendIndentedLine($"{writerName}.{writeMethod}({varName}.{elemWriteValueMember});");
                 }
@@ -755,7 +756,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 {
                     // Complex types: [tag=0x0A][length][message] for each item
                     // tag 0x0A = field 1, wire type 2 (length-delimited)
-                    _sb.AppendIndentedLine($"{writerName}.WriteVarUInt32(0x0A); // field 1, wire type 2");
+                    _sb.AppendIndentedLine($"{writerName}.WriteSingleByte(0x0A); // field 1, wire type 2");
                     var className = TypeNameHelper.GetClassName(elementType);
                     var sizeCalcClass = NamespaceHelper.GetSizeCalculatorsClass(elementType, _registry);
                     var writerClass = NamespaceHelper.GetWritersClass(elementType, isBufferWriter ? "BufferWriters" : "StreamWriters", _registry);
@@ -829,7 +830,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             // protobuf-net format: [tag=0x0A][length][entry] for each map entry
             // Write outer tag first
-            _sb.AppendIndentedLine("writer.WriteVarUInt32(0x0A); // field 1, wire type 2 (map entry)");
+            _sb.AppendIndentedLine("writer.WriteSingleByte(0x0A); // field 1, wire type 2 (map entry)");
 
             // Calculate entry size
             _sb.AppendIndentedLine("// Calculate entry size");
@@ -953,7 +954,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 {
                     // Enum: field_tag (wire type 0) + varint value
                     var tag = (fieldNumber << 3) | 0;
-                    _sb.AppendIndentedLine($"writer.WriteVarUInt32({tag}); // field {fieldNumber}, wire type 0 (varint for enum)");
+                    TagCodeHelper.WriteTagValue(_sb, tag);
                     _sb.AppendIndentedLine($"writer.WriteVarInt32((int)_elem_{safeVarName}_{fieldNumber});");
                 }
                 else
@@ -961,7 +962,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     // Primitive: field_tag + value
                     wireType = GetWireType(elementType);
                     var tag = (fieldNumber << 3) | wireType;
-                    _sb.AppendIndentedLine($"writer.WriteVarUInt32({tag}); // field {fieldNumber}, wire type {wireType}");
+                    TagCodeHelper.WriteTagValue(_sb, tag);
 
                     if (elementType == "string" || elementType == "System.String")
                     {
@@ -978,7 +979,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 // Complex type: field_tag (wire type 2) + length + content
                 var tag = (fieldNumber << 3) | 2;
-                _sb.AppendIndentedLine($"writer.WriteVarUInt32({tag}); // field {fieldNumber}, wire type 2");
+                TagCodeHelper.WriteTagValue(_sb, tag);
 
                 var className = TypeNameHelper.GetClassName(elementType);
                 var sizeCalcClass = NamespaceHelper.GetSizeCalculatorsClass(elementType, _registry);
@@ -1138,7 +1139,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 var taggedValueMember = _registry.GetProtoVarintValueMember(normalizedType);
                 var tag = (fieldNumber << 3) | 0; // wire type 0 = varint
                 var writeMethod = PrimitiveTypeCodeGenerator.GetProtoVarintWriteMethod(taggedVarintType);
-                _sb.AppendIndentedLine($"writer.WriteVarUInt32({tag}); // field {fieldNumber}, wire type 0 (varint for ProtoVarint)");
+                TagCodeHelper.WriteTagValue(_sb, tag);
                 _sb.AppendIndentedLine($"writer.{writeMethod}({varName}.{taggedValueMember});");
                 return;
             }
@@ -1146,7 +1147,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var wireType = GetWireType(typeName);
             var tagNormal = (fieldNumber << 3) | wireType;
 
-            _sb.AppendIndentedLine($"writer.WriteVarUInt32({tagNormal}); // field {fieldNumber}, wire type {wireType}");
+            TagCodeHelper.WriteTagValue(_sb, tagNormal);
 
             if (isPrimitive || IsPrimitiveType(typeName))
             {
@@ -1261,14 +1262,14 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 if (nestedInfo.ElementIsEnum)
                 {
                     // Enum element - write as varint
-                    _sb.AppendIndentedLine($"writer.WriteVarUInt32(0x08); // field 1, wire type 0 (varint for enum)");
+                    _sb.AppendIndentedLine($"writer.WriteSingleByte(0x08); // field 1, wire type 0 (varint for enum)");
                     _sb.AppendIndentedLine($"writer.WriteVarInt32((int)item_{fieldNumber});");
                 }
                 else
                 {
                     var wireType = GetWireType(elementType);
                     var itemTag = (1 << 3) | wireType;
-                    _sb.AppendIndentedLine($"writer.WriteVarUInt32(0x{itemTag:X2}); // field 1, wire type {wireType}");
+                    _sb.AppendIndentedLine($"writer.WriteSingleByte(0x{itemTag:X2}); // field 1, wire type {wireType}");
 
                     if (elementType == "string" || elementType == "System.String")
                     {
@@ -1289,7 +1290,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     // ProtoVarint elements: [tag=varint][varint value]
                     var listWriteVarintType = _registry.GetProtoVarintType(normalizedElemType) ?? ProtoVarintType.UInt32;
                     var listWriteValueMember = _registry.GetProtoVarintValueMember(normalizedElemType);
-                    _sb.AppendIndentedLine("writer.WriteVarUInt32(0x08); // field 1, wire type 0 (varint for ProtoVarint)");
+                    _sb.AppendIndentedLine("writer.WriteSingleByte(0x08); // field 1, wire type 0 (varint for ProtoVarint)");
                     var writeMethod = PrimitiveTypeCodeGenerator.GetProtoVarintWriteMethod(listWriteVarintType);
                     _sb.AppendIndentedLine($"writer.{writeMethod}(item_{fieldNumber}.{listWriteValueMember});");
                 }
@@ -1300,7 +1301,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     var writerClass = NamespaceHelper.GetWritersClass(elementType, writerClassName, _registry);
                     var methodSuffix = GetWriteMethodSuffix(elementType);
                     var sizeSuffix = "ContentSize";
-                    _sb.AppendIndentedLine("writer.WriteVarUInt32(0x0A); // field 1, wire type 2");
+                    _sb.AppendIndentedLine("writer.WriteSingleByte(0x0A); // field 1, wire type 2");
                     _sb.AppendIndentedLine($"var itemWriteCalc_{fieldNumber} = new global::GProtobuf.Core.WriteSizeCalculator();");
                     _sb.AppendIndentedLine($"{sizeCalcClass}.Calculate{className}{sizeSuffix}(ref itemWriteCalc_{fieldNumber}, item_{fieldNumber});");
                     _sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)itemWriteCalc_{fieldNumber}.Length);");
@@ -1339,7 +1340,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             // Write each entry
             _sb.AppendIndentedLine($"foreach (var innerKvp_{fieldNumber} in {varName})");
             _sb.StartNewBlock();
-            _sb.AppendIndentedLine("writer.WriteVarUInt32(0x0A); // entry tag");
+            _sb.AppendIndentedLine("writer.WriteSingleByte(0x0A); // entry tag");
 
             // Calculate and write entry size
             GenerateSizeCalculation(keyType, $"innerKvp_{fieldNumber}.Key", 1, nestedInfo.KeyIsPrimitive, null, $"innerKeySize2_{fieldNumber}");

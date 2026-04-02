@@ -166,6 +166,14 @@ namespace GProtobuf.Core
             currentSpan[currentPosition++] = value;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteTwoBytes(byte b0, byte b1)
+        {
+            EnsureSpace(2);
+            currentSpan[currentPosition++] = b0;
+            currentSpan[currentPosition++] = b1;
+        }
+
         /// <summary>
         /// Writes an unsigned 32-bit integer using varint encoding (WireType.VarInt).
         /// Encoding: 7 bits per byte with continuation bit, little-endian.

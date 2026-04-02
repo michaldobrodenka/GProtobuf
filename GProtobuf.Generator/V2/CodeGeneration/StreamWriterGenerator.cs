@@ -1325,7 +1325,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             // Calculate wrapper tag size
             _sb.AppendIndentedLine($"// ProtoInclude wrapper (field {protoInclude.FieldId} in {parentTypeName})");
-            _sb.AppendIndentedLine($"{calcVar}.WriteVarUInt32({wrapperTag}u);");
+            TagCodeHelper.WriteTagValue(_sb, wrapperTag, calcVar);
 
             // Calculate wrapper content size (derived fields ONLY, not base)
             var wrapperContentCalcVar = isNonNullableStruct ? $"wrapperContent_{member.FieldId}" : "wrapperContentCalc";
@@ -1350,7 +1350,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendNewLine();
 
             // Step 3: Write ProtoInclude wrapper tag and length
-            _sb.AppendIndentedLine($"writer.WriteVarUInt32({wrapperTag}u);");
+            TagCodeHelper.WriteTagValue(_sb, wrapperTag);
             _sb.AppendIndentedLine($"writer.WriteVarUInt32((uint){wrapperContentCalcVar}.Length);");
             _sb.AppendNewLine();
 
@@ -1444,7 +1444,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
                 // Wrapper tag size
                 _sb.AppendIndentedLine($"// ProtoInclude wrapper (field {protoInclude.FieldId} in {parentTypeName})");
-                _sb.AppendIndentedLine($"totalCalc{derivedClassName}.WriteVarUInt32({wrapperTag}u);");
+                TagCodeHelper.WriteTagValue(_sb, wrapperTag, $"totalCalc{derivedClassName}");
 
                 // Wrapper content size (derived fields ONLY, not base)
                 _sb.AppendIndentedLine($"var wrapperCalc{derivedClassName} = new global::GProtobuf.Core.WriteSizeCalculator();");
@@ -1468,7 +1468,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 _sb.AppendNewLine();
 
                 // Step 3: Write ProtoInclude wrapper tag and length
-                _sb.AppendIndentedLine($"writer.WriteVarUInt32({wrapperTag}u);");
+                TagCodeHelper.WriteTagValue(_sb, wrapperTag);
                 _sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)wrapperCalc{derivedClassName}.Length);");
                 _sb.AppendNewLine();
 

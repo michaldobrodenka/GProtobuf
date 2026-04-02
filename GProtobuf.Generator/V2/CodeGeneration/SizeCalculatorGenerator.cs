@@ -352,14 +352,14 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             if (isSimpleType)
             {
                 // Tag (1 byte) + value
-                _sb.AppendIndentedLine("calculator.AddByteLength(1);"); // Tag
+                _sb.AppendIndentedLine("calculator.AddByte();"); // Tag
                 var sizeExpr = TypeMapping.GetSizeExpression(elementType, "item", DataFormat.Default, "calculator");
                 _sb.AppendIndentedLine($"{sizeExpr};");
             }
             else if (isEnum)
             {
                 // Tag (1 byte) + VarInt
-                _sb.AppendIndentedLine("calculator.AddByteLength(1);"); // Tag
+                _sb.AppendIndentedLine("calculator.AddByte();"); // Tag
                 _sb.AppendIndentedLine("calculator.WriteVarInt32((int)item);");
             }
             else if (_registry.IsProtoVarint(TypeMapping.NormalizeTypeName(elementType)))
@@ -367,7 +367,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 var varintType = _registry.GetProtoVarintType(TypeMapping.NormalizeTypeName(elementType)) ?? ProtoVarintType.UInt32;
                 var valueMember = _registry.GetProtoVarintValueMember(TypeMapping.NormalizeTypeName(elementType));
                 // ProtoVarint type - tag (1 byte) + VarInt
-                _sb.AppendIndentedLine("calculator.AddByteLength(1);"); // Tag
+                _sb.AppendIndentedLine("calculator.AddByte();"); // Tag
                 var sizeExpr = PrimitiveTypeCodeGenerator.GetProtoVarintSizeExpression(varintType, $"item.{valueMember}");
                 _sb.AppendIndentedLine($"calculator.AddByteLength({sizeExpr});");
             }
@@ -380,7 +380,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     ? $"Calculate{elementClassName}ContentSize"
                     : $"global::{elementNs}.Serialization.SizeCalculators.Calculate{elementClassName}ContentSize";
 
-                _sb.AppendIndentedLine("calculator.AddByteLength(1);"); // Tag
+                _sb.AppendIndentedLine("calculator.AddByte();"); // Tag
                 _sb.AppendIndentedLine("var nestedCalc = new global::GProtobuf.Core.WriteSizeCalculator();");
                 _sb.AppendIndentedLine($"{sizeCalcCall}(ref nestedCalc, item);");
                 _sb.AppendIndentedLine("calculator.WriteVarInt32(nestedCalc.Length);"); // Length prefix
@@ -953,7 +953,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             // Add wrapper tag size
             _sb.AppendIndentedLine($"// ProtoInclude wrapper (field {protoInclude.FieldId} in {parentTypeName})");
-            _sb.AppendIndentedLine($"{nestedCalcVar}.WriteVarUInt32({wrapperTag}u);");
+            TagCodeHelper.WriteTagValue(_sb, wrapperTag, nestedCalcVar);
 
             // Calculate wrapper content size (derived-specific fields)
             var wrapperContentCalcVar = isNonNullableStruct ? $"wrapperContent_{member.FieldId}" : "wrapperContentCalc";
@@ -1053,7 +1053,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
                 // Wrapper tag size
                 _sb.AppendIndentedLine($"// ProtoInclude wrapper (field {protoInclude.FieldId} in {parentTypeName})");
-                _sb.AppendIndentedLine($"{totalCalcVar}.WriteVarUInt32({wrapperTag}u);");
+                TagCodeHelper.WriteTagValue(_sb, wrapperTag, totalCalcVar);
 
                 // Wrapper content size (derived fields only)
                 var wrapperCalcVar = $"wrapperCalc{derivedClassName}";
@@ -1122,8 +1122,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 var wrapperTag = (protoInclude.FieldId << 3) | (int)WireType.Len;
                 _sb.AppendIndentedLine($"// ProtoInclude wrapper for {TypeNameHelper.GetClassName(derivedTypeName)}");
-                _sb.AppendIndentedLine($"calculator.WriteVarUInt32({wrapperTag}u);");
-                _sb.AppendIndentedLine("calculator.WriteVarUInt32(0); // Empty wrapper marker");
+                TagCodeHelper.WriteTagValue(_sb, wrapperTag, "calculator");
+                _sb.AppendIndentedLine("calculator.WriteSingleByte(0); // Empty wrapper marker");
             }
         }
 

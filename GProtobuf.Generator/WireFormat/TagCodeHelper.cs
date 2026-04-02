@@ -20,13 +20,13 @@ namespace GProtobuf.Generator.WireFormat
             {
                 sb.AppendIndentedLine($"{writerVar}.WriteSingleByte({bytesString});");
             }
+            else if (byteCount == 2)
+            {
+                sb.AppendIndentedLine($"{writerVar}.WriteTwoBytes({bytesString});");
+            }
             else
             {
-                // Generate inline WriteVarUInt32 for multi-byte tags
-                // This avoids dependency on Tags constants which may not be generated for all fields
-                // Tag encoding formula: (fieldId << 3) | wireType
-                // This matches WireFormatHelpers.EncodeTag implementation
-                const int WireTypeBitWidth = 3; // Same as ProtobufConstants.WireTypeBitWidth
+                const int WireTypeBitWidth = 3;
                 var tagValue = (fieldId << WireTypeBitWidth) | (int)wireType;
                 sb.AppendIndentedLine($"{writerVar}.WriteVarUInt32({tagValue}u);");
             }
@@ -48,7 +48,7 @@ namespace GProtobuf.Generator.WireFormat
         public static void AddTagSize(StringBuilderWithIndent sb, int fieldId, WireType wireType, string calculatorVar = "calculator")
         {
             var (_, byteCount) = TypeMapping.PrecomputeTagBytes(fieldId, wireType);
-            sb.AppendIndentedLine($"{calculatorVar}.AddByteLength({byteCount});");
+            EmitAddByteLength(sb, byteCount, calculatorVar);
         }
 
         /// <summary>
@@ -83,8 +83,58 @@ namespace GProtobuf.Generator.WireFormat
             // Both tag and value are fixed size - combine them
             var (_, tagByteCount) = TypeMapping.PrecomputeTagBytes(fieldId, wireType);
             var totalSize = tagByteCount + fixedValueSize;
-            sb.AppendIndentedLine($"{calculatorVar}.AddByteLength({totalSize});");
+            EmitAddByteLength(sb, totalSize, calculatorVar);
             return true;
+        }
+
+        /// <summary>
+        /// Emits the optimal write call for a pre-computed tag value (known at generator time).
+        /// Uses WriteSingleByte for tags &lt;= 127, WriteTwoBytes for 2-byte tags, WriteVarUInt32 for larger.
+        /// </summary>
+        public static void WriteTagValue(StringBuilderWithIndent sb, int tagValue, string writerVar = "writer")
+        {
+            if (tagValue < 0x80)
+            {
+                sb.AppendIndentedLine($"{writerVar}.WriteSingleByte(0x{tagValue:X2});");
+            }
+            else if (tagValue < 0x4000)
+            {
+                byte b0 = (byte)((tagValue & 0x7F) | 0x80);
+                byte b1 = (byte)(tagValue >> 7);
+                sb.AppendIndentedLine($"{writerVar}.WriteTwoBytes(0x{b0:X2}, 0x{b1:X2});");
+            }
+            else
+            {
+                sb.AppendIndentedLine($"{writerVar}.WriteVarUInt32({tagValue}u);");
+            }
+        }
+
+        /// <summary>
+        /// Emits the optimal AddByteLength call based on the constant value.
+        /// </summary>
+        public static void EmitAddByteLength(StringBuilderWithIndent sb, int byteCount, string calculatorVar = "calculator")
+        {
+            switch (byteCount)
+            {
+                case 1:
+                    sb.AppendIndentedLine($"{calculatorVar}.AddByte();");
+                    break;
+                case 2:
+                    sb.AppendIndentedLine($"{calculatorVar}.AddBytes2();");
+                    break;
+                case 3:
+                    sb.AppendIndentedLine($"{calculatorVar}.AddBytes3();");
+                    break;
+                case 9:
+                    sb.AppendIndentedLine($"{calculatorVar}.AddBytes9();");
+                    break;
+                case 10:
+                    sb.AppendIndentedLine($"{calculatorVar}.AddBytes10();");
+                    break;
+                default:
+                    sb.AppendIndentedLine($"{calculatorVar}.AddByteLength({byteCount});");
+                    break;
+            }
         }
     }
 }

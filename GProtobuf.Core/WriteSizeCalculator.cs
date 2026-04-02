@@ -148,6 +148,48 @@ namespace GProtobuf.Core
             Length += byteLength;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void AddByte()
+        {
+            Length++;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void AddBytes2()
+        {
+            Length += 2;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void AddBytes3()
+        {
+            Length += 3;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void AddBytes9()
+        {
+            Length += 9;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void AddBytes10()
+        {
+            Length += 10;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteSingleByte(byte value)
+        {
+            Length++;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteTwoBytes(byte b0, byte b1)
+        {
+            Length += 2;
+        }
+
         public void WriteRawBytes(byte[] bytes)
         {
             if (bytes != null)

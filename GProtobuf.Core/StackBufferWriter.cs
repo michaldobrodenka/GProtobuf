@@ -80,6 +80,13 @@ namespace GProtobuf.Core
             _buffer[_position++] = value;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteTwoBytes(byte b0, byte b1)
+        {
+            _buffer[_position++] = b0;
+            _buffer[_position++] = b1;
+        }
+
         /// <summary>
         /// Writes a single byte (alias for WriteSingleByte).
         /// </summary>
