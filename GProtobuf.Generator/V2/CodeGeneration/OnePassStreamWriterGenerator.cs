@@ -76,6 +76,22 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 GenerateWriteMethod(type);
             }
 
+            // Generate WriteContent methods for ProtoInclude derived types
+            // that are not in the main types list (types without [ProtoContract])
+            var processedTypes = new HashSet<string>(typesList.Select(t => t.FullName));
+            var protoIncludeTypes = CollectUnprocessedProtoIncludeTypes(processedTypes);
+
+            foreach (var protoIncludeTypeName in protoIncludeTypes)
+            {
+                var protoIncludeType = _registry.GetByFullName(protoIncludeTypeName);
+                if (protoIncludeType != null)
+                {
+                    var className = TypeNameHelper.GetClassName(protoIncludeTypeName);
+                    GenerateWriteContentMethod(protoIncludeType, className);
+                    processedTypes.Add(protoIncludeTypeName);
+                }
+            }
+
             // Virtual map entry and tuple writers are NOT generated here - they are centralized
             // in GProtobuf.Generated.Serialization.cs via GenerateVirtualTypesOnly().
             // Types are registered during field processing above, then generated once in the shared file.
@@ -182,7 +198,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 var keyClassName = TypeNameHelper.GetClassName(virtualType.KeyType);
                 var writersClass = GetWritersClass(virtualType.KeyType);
                 var keyTypeDef = _registry.GetByFullName(TypeMapping.NormalizeTypeName(virtualType.KeyType));
-                var keyWriteMethod = (keyTypeDef != null && CanSkipWriteContentMethod(keyTypeDef))
+                var keyWriteMethod = (keyTypeDef == null || CanSkipWriteContentMethod(keyTypeDef))
                     ? $"Write{keyClassName}"
                     : $"Write{keyClassName}Content";
                 TagCodeHelper.WriteTag(_sb, 1, WireType.Len);
@@ -344,7 +360,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var valueClassName = TypeNameHelper.GetClassName(underlyingType);
             var writersClass = GetWritersClass(underlyingType);
             var valTypeDef = _registry.GetByFullName(TypeMapping.NormalizeTypeName(underlyingType));
-            var valWriteMethod = (valTypeDef != null && CanSkipWriteContentMethod(valTypeDef))
+            var valWriteMethod = (valTypeDef == null || CanSkipWriteContentMethod(valTypeDef))
                 ? $"Write{valueClassName}"
                 : $"Write{valueClassName}Content";
 
@@ -435,7 +451,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var valueClassName = TypeNameHelper.GetClassName(virtualType.ValueType);
             var writersClass = GetWritersClass(virtualType.ValueType);
             var valTypeDef = _registry.GetByFullName(TypeMapping.NormalizeTypeName(virtualType.ValueType));
-            var valWriteMethod = (valTypeDef != null && CanSkipWriteContentMethod(valTypeDef))
+            var valWriteMethod = (valTypeDef == null || CanSkipWriteContentMethod(valTypeDef))
                 ? $"Write{valueClassName}"
                 : $"Write{valueClassName}Content";
             bool needsNullCheck = valueTypeInfo != null && !valueTypeInfo.IsPrimitive && !valueTypeInfo.IsStruct;
@@ -475,6 +491,18 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             {
                 TagCodeHelper.WriteTag(_sb, fieldId, WireType.VarInt);
                 _sb.AppendIndentedLine($"writer.WriteVarInt32((int){itemVar});");
+                return;
+            }
+
+            // ProtoVarint elements
+            if (_registry != null && _registry.IsProtoVarint(TypeMapping.NormalizeTypeName(elementType)))
+            {
+                var normalizedElemType = TypeMapping.NormalizeTypeName(elementType);
+                var varintType = _registry.GetProtoVarintType(normalizedElemType) ?? Attributes.ProtoVarintType.UInt32;
+                var valueMember = _registry.GetProtoVarintValueMember(normalizedElemType);
+                var writeMethod = PrimitiveTypeCodeGenerator.GetProtoVarintWriteMethod(varintType);
+                TagCodeHelper.WriteTag(_sb, fieldId, WireType.VarInt);
+                _sb.AppendIndentedLine($"writer.{writeMethod}({itemVar}.{valueMember});");
                 return;
             }
 
@@ -523,7 +551,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             var elementClassName = TypeNameHelper.GetClassName(elementType);
             var writersClass = GetWritersClass(elementType);
             var elementTypeDef = _registry.GetByFullName(TypeMapping.NormalizeTypeName(elementType));
-            var elementWriteMethod = (elementTypeDef != null && CanSkipWriteContentMethod(elementTypeDef))
+            var elementWriteMethod = (elementTypeDef == null || CanSkipWriteContentMethod(elementTypeDef))
                 ? $"Write{elementClassName}"
                 : $"Write{elementClassName}Content";
             _sb.AppendIndentedLine($"if ({itemVar} != null)");
@@ -616,7 +644,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     var elementClassName = TypeNameHelper.GetClassName(elementType);
                     var writersClass = GetWritersClass(elementType);
                     var elemTypeDef = _registry.GetByFullName(TypeMapping.NormalizeTypeName(elementType));
-                    var elemWriteMethod = (elemTypeDef != null && CanSkipWriteContentMethod(elemTypeDef))
+                    var elemWriteMethod = (elemTypeDef == null || CanSkipWriteContentMethod(elemTypeDef))
                         ? $"Write{elementClassName}"
                         : $"Write{elementClassName}Content";
                     _sb.AppendIndentedLine($"if ({itemAccess} != null)");
@@ -1127,6 +1155,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 // BCL types like DateTime, Guid, TimeSpan that are "simple" but not primitive arrays
                 GenerateBclTypeCollectionWrite(member, sourceVar, normalizedType);
             }
+            else if (_registry != null && _registry.IsProtoVarint(normalizedType))
+            {
+                // ProtoVarint type collection - write as VarInt values
+                GenerateProtoVarintCollectionWrite(member, sourceVar, normalizedType);
+            }
             else
             {
                 // Complex type collection - use BeginSubMessage/EndSubMessage
@@ -1160,6 +1193,28 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 // Fallback to generic handling
                 _sb.AppendIndentedLine($"// Warning: Unsupported BCL type {normalizedType}");
             }
+
+            _sb.EndBlock();
+            _sb.EndBlock();
+        }
+
+        /// <summary>
+        /// Generates write code for collections of ProtoVarint types (structs with [ProtoVarint] attribute).
+        /// These are written as simple VarInt values, not as sub-messages.
+        /// </summary>
+        private void GenerateProtoVarintCollectionWrite(ProtoMemberAttribute member, string sourceVar, string normalizedType)
+        {
+            var varintType = _registry.GetProtoVarintType(normalizedType) ?? Attributes.ProtoVarintType.UInt32;
+            var valueMember = _registry.GetProtoVarintValueMember(normalizedType);
+            var writeMethod = PrimitiveTypeCodeGenerator.GetProtoVarintWriteMethod(varintType);
+
+            _sb.AppendIndentedLine($"if ({sourceVar} != null)");
+            _sb.StartNewBlock();
+            _sb.AppendIndentedLine($"foreach (var item in {sourceVar})");
+            _sb.StartNewBlock();
+
+            TagCodeHelper.WriteTag(_sb, member.FieldId, WireType.VarInt);
+            _sb.AppendIndentedLine($"writer.{writeMethod}(item.{valueMember});");
 
             _sb.EndBlock();
             _sb.EndBlock();
@@ -1220,7 +1275,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             TagCodeHelper.WriteTag(_sb, member.FieldId, WireType.Len);
             _sb.AppendIndentedLine("writer.BeginSubMessage();");
-            var collWriteMethod = (elementTypeDef != null && CanSkipWriteContentMethod(elementTypeDef))
+            var collWriteMethod = (elementTypeDef == null || CanSkipWriteContentMethod(elementTypeDef))
                 ? $"Write{elementClassName}"
                 : $"Write{elementClassName}Content";
             _sb.AppendIndentedLine($"{writersClass}.{collWriteMethod}(ref writer, item);");
@@ -1281,7 +1336,7 @@ namespace GProtobuf.Generator.V2.CodeGeneration
 
             var typeNamespace = _registry.GetNamespaceForType(actualType);
             var nsPrefix = GeneratorHelpers.GetNamespacePrefix(typeNamespace, _currentNamespace);
-            var complexWriteMethod = (typeDef != null && CanSkipWriteContentMethod(typeDef))
+            var complexWriteMethod = (typeDef == null || CanSkipWriteContentMethod(typeDef))
                 ? $"Write{typeName}"
                 : $"Write{typeName}Content";
             _sb.AppendIndentedLine($"{nsPrefix}{ClassName}.{complexWriteMethod}(ref writer, {valueArg});");
