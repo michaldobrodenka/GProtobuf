@@ -662,6 +662,122 @@ namespace GProtobuf.Core
             currentPosition += tagBytes.Length;
         }
 
+        #region Field Writing Helpers (tag + default check + write combined)
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteStringField(byte tag, string value)
+        { if (value != null) { WriteSingleByte(tag); WriteString(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteStringField(byte tag1, byte tag2, string value)
+        { if (value != null) { WriteTwoBytes(tag1, tag2); WriteString(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteBytesField(byte tag, byte[] value)
+        { if (value != null) { WriteSingleByte(tag); WriteVarUInt32((uint)value.Length); WriteBytes(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteBytesField(byte tag1, byte tag2, byte[] value)
+        { if (value != null) { WriteTwoBytes(tag1, tag2); WriteVarUInt32((uint)value.Length); WriteBytes(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteVarInt32Field(byte tag, int value)
+        { if (value != 0) { WriteSingleByte(tag); WriteVarInt32(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteVarInt32Field(byte tag1, byte tag2, int value)
+        { if (value != 0) { WriteTwoBytes(tag1, tag2); WriteVarInt32(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteVarUInt32Field(byte tag, uint value)
+        { if (value != 0) { WriteSingleByte(tag); WriteVarUInt32(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteVarUInt32Field(byte tag1, byte tag2, uint value)
+        { if (value != 0) { WriteTwoBytes(tag1, tag2); WriteVarUInt32(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteVarInt64Field(byte tag, long value)
+        { if (value != 0) { WriteSingleByte(tag); WriteVarInt64(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteVarInt64Field(byte tag1, byte tag2, long value)
+        { if (value != 0) { WriteTwoBytes(tag1, tag2); WriteVarInt64(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteVarUInt64Field(byte tag, ulong value)
+        { if (value != 0) { WriteSingleByte(tag); WriteVarUInt64(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteVarUInt64Field(byte tag1, byte tag2, ulong value)
+        { if (value != 0) { WriteTwoBytes(tag1, tag2); WriteVarUInt64(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteBoolField(byte tag, bool value)
+        { if (value) { WriteSingleByte(tag); WriteBool(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteBoolField(byte tag1, byte tag2, bool value)
+        { if (value) { WriteTwoBytes(tag1, tag2); WriteBool(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteDoubleField(byte tag, double value)
+        { if (value != 0) { WriteSingleByte(tag); WriteDouble(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteDoubleField(byte tag1, byte tag2, double value)
+        { if (value != 0) { WriteTwoBytes(tag1, tag2); WriteDouble(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteFloatField(byte tag, float value)
+        { if (value != 0) { WriteSingleByte(tag); WriteFloat(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteFloatField(byte tag1, byte tag2, float value)
+        { if (value != 0) { WriteTwoBytes(tag1, tag2); WriteFloat(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteZigZag32Field(byte tag, int value)
+        { if (value != 0) { WriteSingleByte(tag); WriteZigZag32(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteZigZag32Field(byte tag1, byte tag2, int value)
+        { if (value != 0) { WriteTwoBytes(tag1, tag2); WriteZigZag32(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteZigZag64Field(byte tag, long value)
+        { if (value != 0) { WriteSingleByte(tag); WriteZigZagVarInt64(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteZigZag64Field(byte tag1, byte tag2, long value)
+        { if (value != 0) { WriteTwoBytes(tag1, tag2); WriteZigZagVarInt64(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteFixedInt32Field(byte tag, int value)
+        { if (value != 0) { WriteSingleByte(tag); WriteFixedSizeInt32(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteFixedInt32Field(byte tag1, byte tag2, int value)
+        { if (value != 0) { WriteTwoBytes(tag1, tag2); WriteFixedSizeInt32(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteFixedInt64Field(byte tag, long value)
+        { if (value != 0) { WriteSingleByte(tag); WriteFixed64(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteFixedInt64Field(byte tag1, byte tag2, long value)
+        { if (value != 0) { WriteTwoBytes(tag1, tag2); WriteFixed64(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteFixedUInt64Field(byte tag, ulong value)
+        { if (value != 0) { WriteSingleByte(tag); WriteFixed64(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteFixedUInt64Field(byte tag1, byte tag2, ulong value)
+        { if (value != 0) { WriteTwoBytes(tag1, tag2); WriteFixed64(value); } }
+
+        #endregion
+
         #region Custom Buffer Support
 
         private byte[] _largeBuffer;

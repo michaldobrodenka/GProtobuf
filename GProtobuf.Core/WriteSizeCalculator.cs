@@ -644,5 +644,121 @@ namespace GProtobuf.Core
         }
 
         #endregion
+
+        #region Field Size Calculation Helpers (tag + default check + size combined)
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void CalculateStringField(string value)
+        { if (value != null) { AddByte(); WriteString(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void CalculateStringField2(string value)
+        { if (value != null) { AddBytes2(); WriteString(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void CalculateBytesField(byte[] value)
+        { if (value != null) { AddByte(); WriteBytes(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void CalculateBytesField2(byte[] value)
+        { if (value != null) { AddBytes2(); WriteBytes(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void CalculateVarInt32Field(int value)
+        { if (value != 0) { AddByte(); WriteVarInt32(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void CalculateVarInt32Field2(int value)
+        { if (value != 0) { AddBytes2(); WriteVarInt32(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void CalculateVarUInt32Field(uint value)
+        { if (value != 0) { AddByte(); WriteVarUInt32(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void CalculateVarUInt32Field2(uint value)
+        { if (value != 0) { AddBytes2(); WriteVarUInt32(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void CalculateVarInt64Field(long value)
+        { if (value != 0) { AddByte(); WriteVarInt64(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void CalculateVarInt64Field2(long value)
+        { if (value != 0) { AddBytes2(); WriteVarInt64(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void CalculateVarUInt64Field(ulong value)
+        { if (value != 0) { AddByte(); WriteVarUInt64(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void CalculateVarUInt64Field2(ulong value)
+        { if (value != 0) { AddBytes2(); WriteVarUInt64(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void CalculateBoolField(bool value)
+        { if (value) { AddByte(); WriteBool(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void CalculateBoolField2(bool value)
+        { if (value) { AddBytes2(); WriteBool(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void CalculateDoubleField(double value)
+        { if (value != 0) { AddByte(); WriteDouble(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void CalculateDoubleField2(double value)
+        { if (value != 0) { AddBytes2(); WriteDouble(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void CalculateFloatField(float value)
+        { if (value != 0) { AddByte(); WriteFloat(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void CalculateFloatField2(float value)
+        { if (value != 0) { AddBytes2(); WriteFloat(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void CalculateZigZag32Field(int value)
+        { if (value != 0) { AddByte(); WriteZigZag32(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void CalculateZigZag32Field2(int value)
+        { if (value != 0) { AddBytes2(); WriteZigZag32(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void CalculateZigZag64Field(long value)
+        { if (value != 0) { AddByte(); WriteZigZagVarInt64(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void CalculateZigZag64Field2(long value)
+        { if (value != 0) { AddBytes2(); WriteZigZagVarInt64(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void CalculateFixedInt32Field(int value)
+        { if (value != 0) { AddByte(); WriteFixedSizeInt32(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void CalculateFixedInt32Field2(int value)
+        { if (value != 0) { AddBytes2(); WriteFixedSizeInt32(value); } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void CalculateFixedInt64Field(long value)
+        { if (value != 0) { AddByte(); Length += 8; } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void CalculateFixedInt64Field2(long value)
+        { if (value != 0) { AddBytes2(); Length += 8; } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void CalculateFixedUInt64Field(ulong value)
+        { if (value != 0) { AddByte(); Length += 8; } }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void CalculateFixedUInt64Field2(ulong value)
+        { if (value != 0) { AddBytes2(); Length += 8; } }
+
+        #endregion
     }
 }

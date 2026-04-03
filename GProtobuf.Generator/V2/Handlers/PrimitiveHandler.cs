@@ -619,6 +619,73 @@ namespace GProtobuf.Generator.V2.Handlers
         /// Generates write code for a single primitive value with tag.
         /// Includes default value check for non-nullable types.
         /// </summary>
+        /// <summary>
+        /// Gets the field helper method name for a primitive type and format, or null if no helper exists.
+        /// Helpers combine: default/null check + tag write + value write into a single call.
+        /// </summary>
+        private static string GetFieldHelperName(string normalizedType, DataFormat format)
+        {
+            return normalizedType switch
+            {
+                "System.Int32" => format switch
+                {
+                    DataFormat.FixedSize => "WriteFixedInt32Field",
+                    DataFormat.ZigZag => "WriteZigZag32Field",
+                    _ => "WriteVarInt32Field"
+                },
+                "System.Int64" => format switch
+                {
+                    DataFormat.FixedSize => "WriteFixedInt64Field",
+                    DataFormat.ZigZag => "WriteZigZag64Field",
+                    _ => "WriteVarInt64Field"
+                },
+                "System.UInt32" => format switch
+                {
+                    DataFormat.FixedSize => null, // WriteFixedUInt32 not available as field helper
+                    _ => "WriteVarUInt32Field"
+                },
+                "System.UInt64" => format switch
+                {
+                    DataFormat.FixedSize => "WriteFixedUInt64Field",
+                    _ => "WriteVarUInt64Field"
+                },
+                "System.Int16" => format switch
+                {
+                    DataFormat.ZigZag => "WriteZigZag32Field",
+                    _ => "WriteVarInt32Field"
+                },
+                "System.UInt16" => "WriteVarUInt32Field",
+                "System.SByte" => format switch
+                {
+                    DataFormat.ZigZag => "WriteZigZag32Field",
+                    _ => "WriteVarInt32Field"
+                },
+                "System.Byte" => "WriteVarUInt32Field",
+                "System.Char" => null, // Needs cast: (uint)value
+                "System.Boolean" => "WriteBoolField",
+                "System.Single" => "WriteFloatField",
+                "System.Double" => "WriteDoubleField",
+                "System.String" => "WriteStringField",
+                "System.Byte[]" => "WriteBytesField",
+                _ => null
+            };
+        }
+
+        /// <summary>
+        /// Gets the cast expression needed for types that don't match the helper parameter type directly.
+        /// </summary>
+        private static string GetFieldHelperCast(string normalizedType, DataFormat format)
+        {
+            return normalizedType switch
+            {
+                "System.Int16" => "(int)",
+                "System.UInt16" => "(uint)",
+                "System.SByte" => format == DataFormat.ZigZag ? "(int)" : "(int)",
+                "System.Byte" => "(uint)",
+                _ => null
+            };
+        }
+
         public void GenerateWrite(
             StringBuilderWithIndent sb,
             string sourceVar,
@@ -636,6 +703,27 @@ namespace GProtobuf.Generator.V2.Handlers
 
             var normalizedType = TypeMapping.NormalizeTypeName(typeName);
             bool isReferenceType = normalizedType == "System.String" || normalizedType == "System.Byte[]";
+
+            // Fast path: use field helper for non-nullable, non-required fields with 1-2 byte tags
+            if (!isNullable && !isRequired)
+            {
+                var helperName = GetFieldHelperName(normalizedType, format);
+                if (helperName != null)
+                {
+                    var (bytesString, byteCount) = TypeMapping.PrecomputeTagBytes(fieldId, wireType);
+                    if (byteCount <= 2)
+                    {
+                        var cast = GetFieldHelperCast(normalizedType, format);
+                        var valueArg = cast != null ? $"{cast}{sourceVar}" : sourceVar;
+
+                        if (byteCount == 1)
+                            sb.AppendIndentedLine($"{writerVar}.{helperName}({bytesString}, {valueArg});");
+                        else
+                            sb.AppendIndentedLine($"{writerVar}.{helperName}({bytesString}, {valueArg});");
+                        return;
+                    }
+                }
+            }
 
             string valueExpr;
 
@@ -818,6 +906,57 @@ namespace GProtobuf.Generator.V2.Handlers
         /// <summary>
         /// Generates size calculation for a single primitive value.
         /// </summary>
+        /// <summary>
+        /// Gets the size calculator field helper method name, or null if no helper exists.
+        /// </summary>
+        private static string GetSizeFieldHelperName(string normalizedType, DataFormat format)
+        {
+            return normalizedType switch
+            {
+                "System.Int32" => format switch
+                {
+                    DataFormat.FixedSize => "CalculateFixedInt32Field",
+                    DataFormat.ZigZag => "CalculateZigZag32Field",
+                    _ => "CalculateVarInt32Field"
+                },
+                "System.Int64" => format switch
+                {
+                    DataFormat.FixedSize => "CalculateFixedInt64Field",
+                    DataFormat.ZigZag => "CalculateZigZag64Field",
+                    _ => "CalculateVarInt64Field"
+                },
+                "System.UInt32" => format switch
+                {
+                    DataFormat.FixedSize => null,
+                    _ => "CalculateVarUInt32Field"
+                },
+                "System.UInt64" => format switch
+                {
+                    DataFormat.FixedSize => "CalculateFixedUInt64Field",
+                    _ => "CalculateVarUInt64Field"
+                },
+                "System.Int16" => format switch
+                {
+                    DataFormat.ZigZag => "CalculateZigZag32Field",
+                    _ => "CalculateVarInt32Field"
+                },
+                "System.UInt16" => "CalculateVarUInt32Field",
+                "System.SByte" => format switch
+                {
+                    DataFormat.ZigZag => "CalculateZigZag32Field",
+                    _ => "CalculateVarInt32Field"
+                },
+                "System.Byte" => "CalculateVarUInt32Field",
+                "System.Char" => null,
+                "System.Boolean" => "CalculateBoolField",
+                "System.Single" => "CalculateFloatField",
+                "System.Double" => "CalculateDoubleField",
+                "System.String" => "CalculateStringField",
+                "System.Byte[]" => "CalculateBytesField",
+                _ => null
+            };
+        }
+
         public void GenerateSize(
             StringBuilderWithIndent sb,
             string sourceVar,
@@ -832,6 +971,24 @@ namespace GProtobuf.Generator.V2.Handlers
 
             var normalizedType = TypeMapping.NormalizeTypeName(typeName);
             bool isReferenceType = normalizedType == "System.String" || normalizedType == "System.Byte[]";
+
+            // Fast path: use field helper for non-nullable, non-required fields with 1-2 byte tags
+            if (!isNullable && !isRequired)
+            {
+                var helperName = GetSizeFieldHelperName(normalizedType, format);
+                if (helperName != null)
+                {
+                    var (_, byteCount) = TypeMapping.PrecomputeTagBytes(fieldId, wireType);
+                    if (byteCount <= 2)
+                    {
+                        var cast = GetFieldHelperCast(normalizedType, format);
+                        var valueArg = cast != null ? $"{cast}{sourceVar}" : sourceVar;
+                        var suffix = byteCount == 2 ? "2" : "";
+                        sb.AppendIndentedLine($"{calculatorVar}.{helperName}{suffix}({valueArg});");
+                        return;
+                    }
+                }
+            }
 
             string valueExpr;
 
