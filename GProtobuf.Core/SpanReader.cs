@@ -753,6 +753,22 @@ namespace GProtobuf.Core
         }
 
         /// <summary>
+        /// Peeks at the next field key. If it matches the expected field and wire type,
+        /// advances past the key and returns true. Otherwise, rewinds and returns false.
+        /// Returns false immediately if at end of buffer.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool TryPeekSameField(int expectedFieldId, WireType expectedWireType)
+        {
+            if (IsEnd) return false;
+            var savedPosition = position;
+            var (wt, fid) = ReadKey();
+            if (fid == expectedFieldId && wt == expectedWireType) return true;
+            position = savedPosition;
+            return false;
+        }
+
+        /// <summary>
         /// Peeks at the next tag without advancing the position.
         /// Returns 0 if at end of buffer.
         /// Used for ProtoInclude wrapper detection in nested fields.

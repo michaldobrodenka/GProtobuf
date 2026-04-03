@@ -175,29 +175,15 @@ namespace GProtobuf.Generator.V2.Handlers
 
             var expectedWireType = isEnum ? "WireType.VarInt" : TypeMapping.GetWireTypeString(elementTypeName, format);
 
-            // Generate unique loop variable names to avoid conflicts with outer scope
-            var wireTypeLoopVar = wireTypeVar + "_loop";
-            var fieldIdLoopVar = fieldIdVar + "_loop";
-
             // For managed types (string, Guid, TimeSpan), use List<T>
             if (normalized == "System.String" || normalized == "System.Guid" || normalized == "System.TimeSpan")
             {
                 sb.AppendIndentedLine($"var tempList = new global::System.Collections.Generic.List<{shortType}>();");
-                sb.AppendIndentedLine($"var {wireTypeLoopVar} = {wireTypeVar};");
-                sb.AppendIndentedLine($"var {fieldIdLoopVar} = {fieldIdVar};");
-                sb.AppendIndentedLine($"while ({fieldIdLoopVar} == {fieldId} && {wireTypeLoopVar} == {expectedWireType})");
+                sb.AppendIndentedLine($"do");
                 sb.StartNewBlock();
                 sb.AppendIndentedLine($"tempList.Add({elementReadExpr});");
-                sb.AppendIndentedLine($"// Level200: Check EndOfData BEFORE peek to avoid reading past buffer");
-                sb.AppendIndentedLine($"if ({readerVar}.IsEnd) break;");
-                sb.AppendIndentedLine($"var p = {readerVar}.Position;");
-                sb.AppendIndentedLine($"({wireTypeLoopVar}, {fieldIdLoopVar}) = {readerVar}.ReadKey();");
-                sb.AppendIndentedLine($"if ({fieldIdLoopVar} != {fieldId})");
-                sb.StartNewBlock();
-                sb.AppendIndentedLine($"{readerVar}.Position = p; // rewind");
-                sb.AppendIndentedLine($"break;");
                 sb.EndBlock();
-                sb.EndBlock();
+                sb.AppendIndentedLine($"while ({readerVar}.TryPeekSameField({fieldId}, {expectedWireType}));");
 
                 // Generate assignment based on collection kind
                 // For custom collections, generate separate loop (no constructor with array parameter)
@@ -241,21 +227,11 @@ namespace GProtobuf.Generator.V2.Handlers
             {
                 // For unmanaged types, use UnmanagedArrayBuilder (unified byte[] pool)
                 sb.AppendIndentedLine($"using var resultCollector = new global::GProtobuf.Core.UnmanagedArrayBuilder<{shortType}>(stackalloc {shortType}[256 / sizeof({shortType})], 1024);");
-                sb.AppendIndentedLine($"var {wireTypeLoopVar} = {wireTypeVar};");
-                sb.AppendIndentedLine($"var {fieldIdLoopVar} = {fieldIdVar};");
-                sb.AppendIndentedLine($"while ({fieldIdLoopVar} == {fieldId} && {wireTypeLoopVar} == {expectedWireType})");
+                sb.AppendIndentedLine($"do");
                 sb.StartNewBlock();
                 sb.AppendIndentedLine($"resultCollector.Add({elementReadExpr});");
-                sb.AppendIndentedLine($"// Level200: Check IsEnd BEFORE peek to avoid reading past buffer");
-                sb.AppendIndentedLine($"if ({readerVar}.IsEnd) break;");
-                sb.AppendIndentedLine($"var p = {readerVar}.Position;");
-                sb.AppendIndentedLine($"({wireTypeLoopVar}, {fieldIdLoopVar}) = {readerVar}.ReadKey();");
-                sb.AppendIndentedLine($"if ({fieldIdLoopVar} != {fieldId})");
-                sb.StartNewBlock();
-                sb.AppendIndentedLine($"{readerVar}.Position = p; // rewind");
-                sb.AppendIndentedLine($"break;");
                 sb.EndBlock();
-                sb.EndBlock();
+                sb.AppendIndentedLine($"while ({readerVar}.TryPeekSameField({fieldId}, {expectedWireType}));");
 
                 // Generate assignment based on collection kind
                 // For custom collections, generate separate loop (no constructor with array parameter)

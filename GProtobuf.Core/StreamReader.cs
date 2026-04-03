@@ -1002,6 +1002,22 @@ namespace GProtobuf.Core
         }
 
         /// <summary>
+        /// Peeks at the next field key. If it matches the expected field and wire type,
+        /// advances past the key and returns true. Otherwise, rewinds and returns false.
+        /// Returns false immediately if at end of buffer.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool TryPeekSameField(int expectedFieldId, WireType expectedWireType)
+        {
+            if (IsEnd) return false;
+            var savedPosition = Position;
+            var (wt, fid) = ReadKey();
+            if (fid == expectedFieldId && wt == expectedWireType) return true;
+            Position = savedPosition;
+            return false;
+        }
+
+        /// <summary>
         /// Skips an unknown field based on wire type.
         /// For large Len fields, reads and discards in chunks.
         /// </summary>
