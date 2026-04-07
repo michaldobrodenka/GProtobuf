@@ -20,6 +20,7 @@ namespace GProtobuf.Generator.Analysis
             "byte", "System.Byte",
             "sbyte", "System.SByte",
             "bool", "System.Boolean",
+            "char", "System.Char",
             "float", "System.Single",
             "double", "System.Double",
             "string", "System.String",
@@ -406,6 +407,8 @@ namespace GProtobuf.Generator.Analysis
                 case "System.SByte": return "SByte";
                 case "bool":
                 case "System.Boolean": return "Boolean";
+                case "char":
+                case "System.Char": return "Char";
                 case "float":
                 case "System.Single": return "Single";
                 case "double":

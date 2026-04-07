@@ -177,7 +177,7 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                 _tupleRegistry.RegisterNestedTuples(info.ValueType);
             }
 
-            // If value is a dictionary, register it as both a map entry and a collection type
+            // If value is a dictionary, register it as a map entry
             if (info.ValueTypeInfo.IsDictionary)
             {
                 // Analyze nested key/value types to detect enums
@@ -189,15 +189,16 @@ namespace GProtobuf.Generator.V2.Handlers.VirtualTypes
                     info.ValueTypeInfo.DictionaryValueType,
                     nestedKeyTypeInfo?.IsEnum ?? false,
                     nestedValueTypeInfo?.IsEnum ?? false);
-                // Also register as a collection type for virtual reader generation
-                RegisterCollectionType(info.ValueType, info.ValueTypeInfo);
             }
 
-            // If value is a collection (List, HashSet), register it as a collection type
+            if (info.KeyTypeInfo != null &&
+                (info.KeyTypeInfo.IsCollection || info.KeyTypeInfo.IsList || info.KeyTypeInfo.IsHashSet || info.KeyTypeInfo.IsArray))
+            {
+                RegisterCollectionType(info.KeyType, info.KeyTypeInfo);
+            }
+
             if (info.ValueTypeInfo.IsCollection || info.ValueTypeInfo.IsList || info.ValueTypeInfo.IsHashSet)
             {
-                RegisterCollectionType(info.ValueType, info.ValueTypeInfo);
-
                 // If collection element is a dictionary, register it
                 if (info.ValueTypeInfo.CollectionElementTypeInfo?.IsDictionary == true)
                 {
