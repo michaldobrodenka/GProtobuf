@@ -1118,11 +1118,15 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         {
             _sb.AppendIndentedLine($"// Custom buffer field {member.FieldId}");
 
-            // Write tag (field ID + WireType.Len)
-            TagCodeHelper.WriteTag(_sb, member.FieldId, WireType.Len);
-
             // Call user's size method to get the size
             _sb.AppendIndentedLine($"var customSize_{member.FieldId} = {objectName}.{member.SizeMethodName}();");
+
+            // Skip serialization if size is 0
+            _sb.AppendIndentedLine($"if (customSize_{member.FieldId} > 0)");
+            _sb.StartNewBlock();
+
+            // Write tag (field ID + WireType.Len)
+            TagCodeHelper.WriteTag(_sb, member.FieldId, WireType.Len);
 
             // Write length prefix
             _sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)customSize_{member.FieldId});");
@@ -1131,6 +1135,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine($"var customBuffer_{member.FieldId} = writer.GetSpan(customSize_{member.FieldId});");
             _sb.AppendIndentedLine($"{objectName}.{member.FillMethodName}(customBuffer_{member.FieldId});");
             _sb.AppendIndentedLine($"writer.Advance(customSize_{member.FieldId});");
+
+            _sb.EndBlock();
         }
 
         #endregion

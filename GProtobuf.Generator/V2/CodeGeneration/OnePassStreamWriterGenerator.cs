@@ -1011,11 +1011,15 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         private void GenerateCustomBufferFieldWrite(CustomBufferMember member, string objectName)
         {
             _sb.AppendIndentedLine($"// Custom buffer field {member.FieldId}");
+
+            _sb.AppendIndentedLine($"var customSize_{member.FieldId} = {objectName}.{member.SizeMethodName}();");
+
+            // Skip serialization if size is 0
+            _sb.AppendIndentedLine($"if (customSize_{member.FieldId} > 0)");
+            _sb.StartNewBlock();
+
             TagCodeHelper.WriteTag(_sb, member.FieldId, WireType.Len);
 
-            // For OnePass, we use BeginSubMessage/EndSubMessage pattern
-            // But custom buffer is written as raw bytes, so we need to handle it differently
-            _sb.AppendIndentedLine($"var customSize_{member.FieldId} = {objectName}.{member.SizeMethodName}();");
             _sb.AppendIndentedLine($"writer.WriteVarUInt32((uint)customSize_{member.FieldId});");
 
             // Write raw bytes - need to allocate buffer
@@ -1029,6 +1033,8 @@ namespace GProtobuf.Generator.V2.CodeGeneration
             _sb.AppendIndentedLine("finally");
             _sb.StartNewBlock();
             _sb.AppendIndentedLine($"System.Buffers.ArrayPool<byte>.Shared.Return(customBuffer_{member.FieldId});");
+            _sb.EndBlock();
+
             _sb.EndBlock();
         }
 

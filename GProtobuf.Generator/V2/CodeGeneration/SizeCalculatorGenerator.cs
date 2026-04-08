@@ -749,17 +749,23 @@ namespace GProtobuf.Generator.V2.CodeGeneration
         {
             _sb.AppendIndentedLine($"// Custom buffer field {member.FieldId}");
 
-            // Add tag size (field ID + WireType.Len)
-            TagCodeHelper.AddTagSize(_sb, member.FieldId, WireType.Len);
-
             // Call user's size method
             _sb.AppendIndentedLine($"var customSize_{member.FieldId} = {objectName}.{member.SizeMethodName}();");
+
+            // Skip size calculation if size is 0
+            _sb.AppendIndentedLine($"if (customSize_{member.FieldId} > 0)");
+            _sb.StartNewBlock();
+
+            // Add tag size (field ID + WireType.Len)
+            TagCodeHelper.AddTagSize(_sb, member.FieldId, WireType.Len);
 
             // Add length prefix size (VarInt encoding of the size)
             _sb.AppendIndentedLine($"calculator.WriteVarUInt32((uint)customSize_{member.FieldId});");
 
             // Add the actual content size
             _sb.AppendIndentedLine($"calculator.AddByteLength(customSize_{member.FieldId});");
+
+            _sb.EndBlock();
         }
 
         #endregion
