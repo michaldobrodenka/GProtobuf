@@ -8,6 +8,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text;
 using Xunit.Abstractions;
 
@@ -976,6 +977,380 @@ public sealed class GProtobufToGProtobufTests : BaseSerializationTest
         deserialized.EmptyByteArray.Should().BeEmpty();
         deserialized.LargeByteArray.Should().Equal(model.LargeByteArray);
         deserialized.AllPossibleBytes.Should().Equal(0, 127, 128, 255);
+    }
+
+    #endregion
+
+    #region ByteWrapperTypes Tests (GProtobuf to GProtobuf)
+
+    [Fact]
+    public void ByteWrapperTypes_ArraySegment_RoundTrip_GG()
+    {
+        var model = new ByteWrapperTypesModel
+        {
+            SegmentField = new ArraySegment<byte>(new byte[] { 1, 2, 3, 4, 5 })
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeByteWrapperTypesModel);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializeByteWrapperTypesModel(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.SegmentField.ToArray().Should().Equal(1, 2, 3, 4, 5);
+    }
+
+    [Fact]
+    public void ByteWrapperTypes_Memory_RoundTrip_GG()
+    {
+        var model = new ByteWrapperTypesModel
+        {
+            MemoryField = new Memory<byte>(new byte[] { 10, 20, 30 })
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeByteWrapperTypesModel);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializeByteWrapperTypesModel(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.MemoryField.ToArray().Should().Equal(10, 20, 30);
+    }
+
+    [Fact]
+    public void ByteWrapperTypes_ReadOnlyMemory_RoundTrip_GG()
+    {
+        var model = new ByteWrapperTypesModel
+        {
+            ReadOnlyMemoryField = new ReadOnlyMemory<byte>(new byte[] { 100, 200, 255 })
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeByteWrapperTypesModel);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializeByteWrapperTypesModel(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.ReadOnlyMemoryField.ToArray().Should().Equal(100, 200, 255);
+    }
+
+    [Fact]
+    public void ByteWrapperTypes_AllFieldsTogether_GG()
+    {
+        var model = new ByteWrapperTypesModel
+        {
+            SegmentField = new ArraySegment<byte>(new byte[] { 1, 2 }),
+            MemoryField = new Memory<byte>(new byte[] { 3, 4 }),
+            ReadOnlyMemoryField = new ReadOnlyMemory<byte>(new byte[] { 5, 6 }),
+            ByteArrayField = new byte[] { 7, 8 }
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeByteWrapperTypesModel);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializeByteWrapperTypesModel(data);
+
+        deserialized.SegmentField.ToArray().Should().Equal(1, 2);
+        deserialized.MemoryField.ToArray().Should().Equal(3, 4);
+        deserialized.ReadOnlyMemoryField.ToArray().Should().Equal(5, 6);
+        deserialized.ByteArrayField.Should().Equal(7, 8);
+    }
+
+    [Fact]
+    public void ByteWrapperTypes_DefaultValues_GG()
+    {
+        var model = new ByteWrapperTypesModel();
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeByteWrapperTypesModel);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializeByteWrapperTypesModel(data);
+
+        deserialized.Should().NotBeNull();
+        deserialized.SegmentField.Array.Should().BeNull();
+        deserialized.MemoryField.IsEmpty.Should().BeTrue();
+        deserialized.ReadOnlyMemoryField.IsEmpty.Should().BeTrue();
+        deserialized.ByteArrayField.Should().BeNull();
+    }
+
+    [Fact]
+    public void ByteWrapperTypes_ArraySegmentWithOffset_GG()
+    {
+        // ArraySegment with offset != 0 — should only serialize the slice
+        var bigArray = new byte[] { 0, 0, 10, 20, 30, 0, 0 };
+        var model = new ByteWrapperTypesModel
+        {
+            SegmentField = new ArraySegment<byte>(bigArray, 2, 3)
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeByteWrapperTypesModel);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializeByteWrapperTypesModel(data);
+
+        deserialized.SegmentField.ToArray().Should().Equal(10, 20, 30);
+    }
+
+    [Fact]
+    public void ByteWrapperTypes_LargePayload_GG()
+    {
+        var largeData = new byte[5000];
+        for (int i = 0; i < largeData.Length; i++)
+            largeData[i] = (byte)(i % 256);
+
+        var model = new ByteWrapperTypesModel
+        {
+            SegmentField = new ArraySegment<byte>(largeData),
+            MemoryField = new Memory<byte>((byte[])largeData.Clone()),
+            ReadOnlyMemoryField = new ReadOnlyMemory<byte>((byte[])largeData.Clone())
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeByteWrapperTypesModel);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializeByteWrapperTypesModel(data);
+
+        deserialized.SegmentField.ToArray().Should().Equal(largeData);
+        deserialized.MemoryField.ToArray().Should().Equal(largeData);
+        deserialized.ReadOnlyMemoryField.ToArray().Should().Equal(largeData);
+    }
+
+    [Fact]
+    public void ByteWrapperTypes_StreamReader_RoundTrip_GG()
+    {
+        var model = new ByteWrapperTypesModel
+        {
+            SegmentField = new ArraySegment<byte>(new byte[] { 1, 2, 3 }),
+            MemoryField = new Memory<byte>(new byte[] { 4, 5, 6 }),
+            ReadOnlyMemoryField = new ReadOnlyMemory<byte>(new byte[] { 7, 8, 9 })
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeByteWrapperTypesModel);
+        var deserialized = DeserializeWithGProtobufStreamFromBytes(data, s => TestModel.Serialization.Deserializers.DeserializeByteWrapperTypesModel(s));
+
+        deserialized.SegmentField.ToArray().Should().Equal(1, 2, 3);
+        deserialized.MemoryField.ToArray().Should().Equal(4, 5, 6);
+        deserialized.ReadOnlyMemoryField.ToArray().Should().Equal(7, 8, 9);
+    }
+
+    [Fact]
+    public void ByteWrapperTypes_WireCompatibleWithByteArray_GG()
+    {
+        // Serialize a byte[] field, deserialize into ArraySegment/Memory/ReadOnlyMemory — should be wire-compatible
+        var byteArrayModel = new ByteArrayTestModel
+        {
+            BasicByteArray = new byte[] { 42, 43, 44 }
+        };
+
+        var data = SerializeWithGProtobuf(byteArrayModel, TestModel.Serialization.Serializers.SerializeByteArrayTestModel);
+
+        // Deserialize the same wire data into ByteWrapperTypesModel — field 1 maps to SegmentField
+        var deserialized = TestModel.Serialization.Deserializers.DeserializeByteWrapperTypesModel(data);
+
+        deserialized.SegmentField.ToArray().Should().Equal(42, 43, 44);
+    }
+
+    [Fact]
+    public void ByteWrapperTypes_SingleByte_GG()
+    {
+        var model = new ByteWrapperTypesModel
+        {
+            SegmentField = new ArraySegment<byte>(new byte[] { 0xFF }),
+            MemoryField = new Memory<byte>(new byte[] { 0x00 }),
+            ReadOnlyMemoryField = new ReadOnlyMemory<byte>(new byte[] { 0x80 })
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeByteWrapperTypesModel);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializeByteWrapperTypesModel(data);
+
+        deserialized.SegmentField.ToArray().Should().Equal(0xFF);
+        deserialized.MemoryField.ToArray().Should().Equal(0x00);
+        deserialized.ReadOnlyMemoryField.ToArray().Should().Equal(0x80);
+    }
+
+    [Fact]
+    public void ByteWrapperTypes_MemorySlice_GG()
+    {
+        // Memory<byte> created from a slice of a bigger array
+        var bigArray = new byte[] { 0, 0, 42, 43, 44, 0, 0 };
+        var model = new ByteWrapperTypesModel
+        {
+            MemoryField = new Memory<byte>(bigArray, 2, 3),
+            ReadOnlyMemoryField = new ReadOnlyMemory<byte>(bigArray, 2, 3)
+        };
+
+        var data = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeByteWrapperTypesModel);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializeByteWrapperTypesModel(data);
+
+        deserialized.MemoryField.ToArray().Should().Equal(42, 43, 44);
+        deserialized.ReadOnlyMemoryField.ToArray().Should().Equal(42, 43, 44);
+    }
+
+    [Fact]
+    public void ByteWrapperTypes_SizeCalculation_MatchesActualWrite_GG()
+    {
+        // Verify size calculator and writer agree (prevents buffer overrun in SerializeToArray path)
+        var model = new ByteWrapperTypesModel
+        {
+            SegmentField = new ArraySegment<byte>(new byte[] { 1, 2, 3 }),
+            MemoryField = new Memory<byte>(new byte[] { 4, 5, 6, 7 }),
+            ReadOnlyMemoryField = new ReadOnlyMemory<byte>(new byte[] { 8 }),
+            ByteArrayField = new byte[] { 9, 10 }
+        };
+
+        // SerializeToArray uses SizeCalculator then StackBufferWriter — if sizes mismatch, it will throw
+        var arrayData = TestModel.Serialization.Serializers.SerializeToArrayByteWrapperTypesModel(model);
+        var streamData = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeByteWrapperTypesModel);
+
+        arrayData.Should().Equal(streamData);
+    }
+
+    [Fact]
+    public void ByteWrapperTypes_ArraySegmentWithOffset_SizeCalculation_GG()
+    {
+        // ArraySegment with offset — size calc must use Count, not Array.Length
+        var bigArray = new byte[100];
+        for (int i = 0; i < 100; i++) bigArray[i] = (byte)i;
+
+        var model = new ByteWrapperTypesModel
+        {
+            SegmentField = new ArraySegment<byte>(bigArray, 50, 3) // only 3 bytes
+        };
+
+        var arrayData = TestModel.Serialization.Serializers.SerializeToArrayByteWrapperTypesModel(model);
+        var deserialized = TestModel.Serialization.Deserializers.DeserializeByteWrapperTypesModel(arrayData);
+
+        deserialized.SegmentField.ToArray().Should().Equal(50, 51, 52);
+        deserialized.SegmentField.Count.Should().Be(3);
+    }
+
+    [Fact]
+    public void ByteWrapperTypes_MultipleRoundTrips_GG()
+    {
+        // Serialize → deserialize → serialize → deserialize — data must survive
+        var model = new ByteWrapperTypesModel
+        {
+            SegmentField = new ArraySegment<byte>(new byte[] { 1, 2, 3 }),
+            MemoryField = new Memory<byte>(new byte[] { 4, 5 }),
+            ReadOnlyMemoryField = new ReadOnlyMemory<byte>(new byte[] { 6 })
+        };
+
+        var data1 = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeByteWrapperTypesModel);
+        var deserialized1 = TestModel.Serialization.Deserializers.DeserializeByteWrapperTypesModel(data1);
+        var data2 = SerializeWithGProtobuf(deserialized1, TestModel.Serialization.Serializers.SerializeByteWrapperTypesModel);
+        var deserialized2 = TestModel.Serialization.Deserializers.DeserializeByteWrapperTypesModel(data2);
+
+        data2.Should().Equal(data1);
+        deserialized2.SegmentField.ToArray().Should().Equal(1, 2, 3);
+        deserialized2.MemoryField.ToArray().Should().Equal(4, 5);
+        deserialized2.ReadOnlyMemoryField.ToArray().Should().Equal(6);
+    }
+
+    #endregion
+
+    #region ByteWrapperTypes V2 Zero-Copy Tests
+
+    [Fact]
+    public void ByteWrapperTypes_ZeroCopy_ReadOnlyMemory_SharesSourceBuffer()
+    {
+        var model = new ByteWrapperTypesModel
+        {
+            ReadOnlyMemoryField = new ReadOnlyMemory<byte>(new byte[] { 10, 20, 30 })
+        };
+
+        var serialized = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeByteWrapperTypesModel);
+
+        // Deserialize via SpanReader.FromMemory — zero-copy path
+        ReadOnlyMemory<byte> sourceMemory = serialized;
+        var reader = GProtobuf.Core.SpanReader.FromMemory(sourceMemory);
+        var deserialized = TestModel.Serialization.SpanReaders.ReadByteWrapperTypesModel(ref reader);
+
+        // Verify the deserialized ReadOnlyMemory shares the same backing array as source
+        MemoryMarshal.TryGetArray(deserialized.ReadOnlyMemoryField, out var deserializedSegment).Should().BeTrue();
+        MemoryMarshal.TryGetArray(sourceMemory, out var sourceSegment).Should().BeTrue();
+        deserializedSegment.Array.Should().BeSameAs(sourceSegment.Array);
+        deserialized.ReadOnlyMemoryField.ToArray().Should().Equal(10, 20, 30);
+    }
+
+    [Fact]
+    public void ByteWrapperTypes_SpanPath_ReadOnlyMemory_AllocatesNewArray()
+    {
+        var sourceArray = new byte[] { 10, 20, 30 };
+        var model = new ByteWrapperTypesModel
+        {
+            ReadOnlyMemoryField = new ReadOnlyMemory<byte>(sourceArray)
+        };
+
+        var serialized = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeByteWrapperTypesModel);
+
+        // Deserialize via span (non-zero-copy path)
+        var deserialized = TestModel.Serialization.Deserializers.DeserializeByteWrapperTypesModel((ReadOnlySpan<byte>)serialized);
+
+        // Verify the deserialized ReadOnlyMemory does NOT share the serialized array
+        MemoryMarshal.TryGetArray(deserialized.ReadOnlyMemoryField, out var deserializedSegment).Should().BeTrue();
+        deserializedSegment.Array.Should().NotBeSameAs(serialized);
+        deserialized.ReadOnlyMemoryField.ToArray().Should().Equal(10, 20, 30);
+    }
+
+    [Fact]
+    public void ByteWrapperTypes_ZeroCopy_MixedFields_OnlyReadOnlyMemoryIsZeroCopy()
+    {
+        var model = new ByteWrapperTypesModel
+        {
+            SegmentField = new ArraySegment<byte>(new byte[] { 1, 2 }),
+            MemoryField = new Memory<byte>(new byte[] { 3, 4 }),
+            ReadOnlyMemoryField = new ReadOnlyMemory<byte>(new byte[] { 5, 6 }),
+            ByteArrayField = new byte[] { 7, 8 }
+        };
+
+        var serialized = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeByteWrapperTypesModel);
+        ReadOnlyMemory<byte> sourceMemory = serialized;
+        var reader = GProtobuf.Core.SpanReader.FromMemory(sourceMemory);
+        var deserialized = TestModel.Serialization.SpanReaders.ReadByteWrapperTypesModel(ref reader);
+
+        // ReadOnlyMemory shares source
+        MemoryMarshal.TryGetArray(deserialized.ReadOnlyMemoryField, out var romSegment).Should().BeTrue();
+        MemoryMarshal.TryGetArray(sourceMemory, out var srcSegment).Should().BeTrue();
+        romSegment.Array.Should().BeSameAs(srcSegment.Array);
+
+        // byte[], ArraySegment, Memory all allocate separate arrays
+        deserialized.ByteArrayField.Should().NotBeSameAs(serialized);
+
+        // Values are all correct
+        deserialized.SegmentField.ToArray().Should().Equal(1, 2);
+        deserialized.MemoryField.ToArray().Should().Equal(3, 4);
+        deserialized.ReadOnlyMemoryField.ToArray().Should().Equal(5, 6);
+        deserialized.ByteArrayField.Should().Equal(7, 8);
+    }
+
+    [Fact]
+    public void ByteWrapperTypes_ZeroCopy_EmptyField()
+    {
+        var model = new ByteWrapperTypesModel();
+
+        var serialized = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeByteWrapperTypesModel);
+        ReadOnlyMemory<byte> sourceMemory = serialized;
+        var reader = GProtobuf.Core.SpanReader.FromMemory(sourceMemory);
+        var deserialized = TestModel.Serialization.SpanReaders.ReadByteWrapperTypesModel(ref reader);
+
+        deserialized.ReadOnlyMemoryField.IsEmpty.Should().BeTrue();
+    }
+
+    [Fact]
+    public void ByteWrapperTypes_ZeroCopy_LargePayload_CorrectOffsets()
+    {
+        var data1 = new byte[500];
+        var data2 = new byte[500];
+        for (int i = 0; i < 500; i++)
+        {
+            data1[i] = (byte)(i % 256);
+            data2[i] = (byte)((i + 128) % 256);
+        }
+
+        var model = new ByteWrapperTypesModel
+        {
+            ReadOnlyMemoryField = new ReadOnlyMemory<byte>(data1),
+            ByteArrayField = data2 // field 4, sits between in wire order
+        };
+
+        var serialized = SerializeWithGProtobuf(model, TestModel.Serialization.Serializers.SerializeByteWrapperTypesModel);
+        ReadOnlyMemory<byte> sourceMemory = serialized;
+        var reader = GProtobuf.Core.SpanReader.FromMemory(sourceMemory);
+        var deserialized = TestModel.Serialization.SpanReaders.ReadByteWrapperTypesModel(ref reader);
+
+        deserialized.ReadOnlyMemoryField.ToArray().Should().Equal(data1);
+        deserialized.ByteArrayField.Should().Equal(data2);
+
+        // Verify zero-copy
+        MemoryMarshal.TryGetArray(deserialized.ReadOnlyMemoryField, out var romSegment).Should().BeTrue();
+        MemoryMarshal.TryGetArray(sourceMemory, out var srcSegment).Should().BeTrue();
+        romSegment.Array.Should().BeSameAs(srcSegment.Array);
     }
 
     #endregion

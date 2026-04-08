@@ -664,6 +664,14 @@ namespace GProtobuf.Core
         { if (value != null) { AddBytes2(); WriteBytes(value); } }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void CalculateBytesField(ReadOnlySpan<byte> value)
+        { AddByte(); WriteBytes(value); }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void CalculateBytesField2(ReadOnlySpan<byte> value)
+        { AddBytes2(); WriteBytes(value); }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void CalculateVarInt32Field(int value)
         { if (value != 0) { AddByte(); WriteVarInt32(value); } }
 

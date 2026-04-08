@@ -5,6 +5,7 @@ using GProtobuf.Core;
 using GProtobuf.Tests.TestModel;
 using GProtobuf.CrossTests.TestModel;
 using Xunit;
+using System.Drawing;
 
 // Register standalone serializers for List<BasicTypesModel>
 [assembly: GenerateSerializer(typeof(List<BasicTypesModel>))]
@@ -13,10 +14,21 @@ using Xunit;
 [assembly: GenerateSerializer(typeof(List<ModelBase>))]
 
 // Register standalone serializers for primitive collections
+[assembly: GenerateSerializer(typeof(List<bool>))]
+[assembly: GenerateSerializer(typeof(List<char>))]
 [assembly: GenerateSerializer(typeof(List<int>))]
-[assembly: GenerateSerializer(typeof(List<string>))]
-[assembly: GenerateSerializer(typeof(List<long>))]
+[assembly: GenerateSerializer(typeof(List<uint>))]
+[assembly: GenerateSerializer(typeof(List<float>))]
 [assembly: GenerateSerializer(typeof(List<double>))]
+[assembly: GenerateSerializer(typeof(List<sbyte>))]
+[assembly: GenerateSerializer(typeof(List<byte>))]
+[assembly: GenerateSerializer(typeof(List<short>))]
+[assembly: GenerateSerializer(typeof(List<ushort>))]
+[assembly: GenerateSerializer(typeof(List<long>))]
+[assembly: GenerateSerializer(typeof(List<ulong>))]
+[assembly: GenerateSerializer(typeof(List<string>))]
+[assembly: GenerateSerializer(typeof(List<HorizontalAlign>))]
+[assembly: GenerateSerializer(typeof(List<VerticalAlign>))]
 [assembly: GenerateSerializer(typeof(int[]))]
 [assembly: GenerateSerializer(typeof(string[]))]
 
@@ -135,6 +147,32 @@ namespace GProtobuf.CrossTests
             Assert.NotNull(deserialized);
             Assert.Empty(deserialized);
         }
+
+        #region List<char> Tests
+
+        [Fact]
+        public void Test_GG_ListOfChar()
+        {
+            // Arrange: Serialize with GProtobuf
+            var original = new List<char> { 'A', 'B', 'C', 'Z', '\u00E9' };
+
+            using var ms = new MemoryStream();
+            global::GProtobuf.Generated.Serialization.Serializers.SerializeListOfChar(ms, original);
+            var bytes = ms.ToArray();
+
+            // Act: Deserialize with GProtobuf
+            var deserialized = global::GProtobuf.Generated.Serialization.Deserializers.DeserializeListOfChar(bytes);
+
+            // Assert
+            Assert.NotNull(deserialized);
+            Assert.Equal(original.Count, deserialized.Count);
+            for (int i = 0; i < original.Count; i++)
+            {
+                Assert.Equal(original[i], deserialized[i]);
+            }
+        }
+
+        #endregion
 
         #region List<int> Tests
 

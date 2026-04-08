@@ -269,6 +269,8 @@ namespace GProtobuf.Core
     {
         private ReadOnlySpan<byte> buffer;
         private int position;
+        private ReadOnlyMemory<byte> _sourceMemory;
+        private int _sourceOffset;
 
         /// <summary>
         /// Gets or sets the current read position in the buffer.
@@ -299,6 +301,26 @@ namespace GProtobuf.Core
         {
             this.buffer = buffer;
             this.position = 0;
+            this._sourceMemory = default;
+            this._sourceOffset = 0;
+        }
+
+        /// <summary>
+        /// Creates a SpanReader over the specified memory buffer with zero-copy support.
+        /// ReadOnlyMemory&lt;byte&gt; fields will be sliced from the source memory instead of allocating new byte[].
+        /// The source memory must outlive any deserialized ReadOnlyMemory&lt;byte&gt; fields.
+        /// </summary>
+        public static SpanReader FromMemory(ReadOnlyMemory<byte> memory)
+        {
+            return new SpanReader(memory.Span, memory, 0);
+        }
+
+        private SpanReader(ReadOnlySpan<byte> buffer, ReadOnlyMemory<byte> sourceMemory, int sourceOffset)
+        {
+            this.buffer = buffer;
+            this.position = 0;
+            this._sourceMemory = sourceMemory;
+            this._sourceOffset = sourceOffset;
         }
 
         /// <summary>
@@ -373,7 +395,14 @@ namespace GProtobuf.Core
         /// <exception cref="InvalidOperationException">If insufficient bytes remain.</exception>
         public SpanReader CreateSubReader(int length)
         {
-            return new SpanReader(GetSlice(length));
+            CheckLength(length);
+            int startPos = position;
+            var slice = buffer.Slice(position, length);
+            position += length;
+
+            if (_sourceMemory.Length > 0)
+                return new SpanReader(slice, _sourceMemory, _sourceOffset + startPos);
+            return new SpanReader(slice);
         }
 
         /// <summary>

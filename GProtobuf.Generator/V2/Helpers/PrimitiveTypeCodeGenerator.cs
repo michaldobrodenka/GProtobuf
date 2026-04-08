@@ -1,4 +1,5 @@
 using GProtobuf.Generator.Attributes;
+using GProtobuf.Generator.WireFormat;
 
 namespace GProtobuf.Generator.V2.Helpers
 {
@@ -45,6 +46,9 @@ namespace GProtobuf.Generator.V2.Helpers
                     ? $"global::GProtobuf.Core.StreamReaders.ReadTimeSpan(ref {readerVar}, {wireTypeVar})"
                     : $"global::GProtobuf.Core.StreamReaders.ReadTimeSpan(ref {readerVar}, global::GProtobuf.Core.WireType.Len)",
                 "System.Byte[]" => $"global::GProtobuf.Core.StreamReaders.ReadByteArray(ref {readerVar})",
+                TypeMapping.ArraySegmentByteTypeName => $"new global::System.ArraySegment<byte>(global::GProtobuf.Core.StreamReaders.ReadByteArray(ref {readerVar}))",
+                TypeMapping.MemoryByteTypeName => $"new global::System.Memory<byte>(global::GProtobuf.Core.StreamReaders.ReadByteArray(ref {readerVar}))",
+                TypeMapping.ReadOnlyMemoryByteTypeName => $"new global::System.ReadOnlyMemory<byte>(global::GProtobuf.Core.StreamReaders.ReadByteArray(ref {readerVar}))",
                 _ => null
             };
         }
@@ -96,6 +100,7 @@ namespace GProtobuf.Generator.V2.Helpers
                 "System.DateTime" => false,
                 "System.TimeSpan" => false,
                 "System.Byte[]" => false,
+                TypeMapping.ArraySegmentByteTypeName or TypeMapping.MemoryByteTypeName or TypeMapping.ReadOnlyMemoryByteTypeName => false,
                 _ => false
             };
         }

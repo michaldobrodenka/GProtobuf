@@ -28,6 +28,30 @@ namespace GProtobuf.Core
             return slice.ToArray();
         }
 
+        /// <summary>
+        /// Reads a length-delimited byte field as ReadOnlyMemory&lt;byte&gt;.
+        /// When the reader was constructed from ReadOnlyMemory source, returns a zero-copy slice.
+        /// When constructed from ReadOnlySpan, falls back to allocating a new byte[].
+        /// </summary>
+        public ReadOnlyMemory<byte> ReadByteArrayAsMemory()
+        {
+            int length = ReadVarInt32();
+            if (length == 0)
+                return ReadOnlyMemory<byte>.Empty;
+
+            if (position + length > buffer.Length)
+                throw new InvalidOperationException("Buffer overrun");
+
+            ReadOnlyMemory<byte> result;
+            if (_sourceMemory.Length > 0)
+                result = _sourceMemory.Slice(_sourceOffset + position, length);
+            else
+                result = buffer.Slice(position, length).ToArray();
+
+            position += length;
+            return result;
+        }
+
         public List<byte> ReadListByte(int length)
         {
             if (position + length > buffer.Length) throw new InvalidOperationException("Buffer overrun");

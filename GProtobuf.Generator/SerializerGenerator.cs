@@ -973,6 +973,18 @@ namespace ProtoBuf
             var elementType = namedType.TypeArguments[0].ToDisplayString();
             var typeDisplayString = namedType.ToDisplayString();
 
+            // ArraySegment<byte>, Memory<byte>, ReadOnlyMemory<byte> are simple types (serialized as length-delimited bytes), not collections
+            if (namedType.TypeArguments[0].SpecialType == SpecialType.System_Byte)
+            {
+                var origDef = namedType.OriginalDefinition.ToDisplayString();
+                if (origDef == "System.ArraySegment<T>" ||
+                    origDef == "System.Memory<T>" ||
+                    origDef == "System.ReadOnlyMemory<T>")
+                {
+                    return (false, null, CollectionKind.None);
+                }
+            }
+
             // Check for specific collection types
             if (IsInterfaceCollectionType(namedType))
             {

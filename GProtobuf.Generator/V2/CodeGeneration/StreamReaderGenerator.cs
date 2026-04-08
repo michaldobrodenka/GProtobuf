@@ -2029,6 +2029,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                 case "System.Byte[]":
                     _sb.AppendIndentedLine($"result.{member.Name} = global::GProtobuf.Core.StreamReaders.ReadByteArray(ref reader);");
                     break;
+                case TypeMapping.ArraySegmentByteTypeName:
+                case TypeMapping.MemoryByteTypeName:
+                case TypeMapping.ReadOnlyMemoryByteTypeName:
+                    _sb.AppendIndentedLine(PrimitiveTypeCodeGenerator.GetAssignmentStatement(typeName, $"result.{member.Name}", "reader"));
+                    break;
                 case "System.Guid":
                     _sb.AppendIndentedLine($"result.{member.Name} = global::GProtobuf.Core.StreamReaders.ReadGuid(ref reader, wireType);");
                     break;
@@ -2921,6 +2926,11 @@ namespace GProtobuf.Generator.V2.CodeGeneration
                     break;
                 case "System.Byte[]":
                     _sb.AppendIndentedLine($"instance.{member.Name} = global::GProtobuf.Core.StreamReaders.ReadByteArray(ref reader);");
+                    break;
+                case TypeMapping.ArraySegmentByteTypeName:
+                case TypeMapping.MemoryByteTypeName:
+                case TypeMapping.ReadOnlyMemoryByteTypeName:
+                    _sb.AppendIndentedLine(PrimitiveTypeCodeGenerator.GetAssignmentStatement(typeName, $"instance.{member.Name}", "reader"));
                     break;
                 case "System.Guid":
                     _sb.AppendIndentedLine($"instance.{member.Name} = global::GProtobuf.Core.StreamReaders.ReadGuid(ref reader, wireType);");

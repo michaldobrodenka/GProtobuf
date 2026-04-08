@@ -766,18 +766,38 @@ namespace GProtobuf.Generator.V2.Handlers
                 valueExpr = sourceVar;
             }
 
-            // Write tag
-            GenerateWriteTag(sb, fieldId, wireType, writerVar);
-
-            // For nullable bool, we need to write the actual value (could be true or false)
-            if (TypeMapping.IsBooleanType(typeName) && isNullable)
+            // Byte wrapper types: use WriteBytesField helper (tag + varint length + bytes in one inlined call)
+            var spanFieldExpr = TypeMapping.GetByteWrapperSpanExpression(normalizedType, valueExpr);
+            if (spanFieldExpr != null)
             {
-                sb.AppendIndentedLine($"{writerVar}.WriteBool({valueExpr});");
+                var (bytesString, byteCount) = TypeMapping.PrecomputeTagBytes(fieldId, wireType);
+                if (byteCount == 1)
+                    sb.AppendIndentedLine($"{writerVar}.WriteBytesField({bytesString}, {spanFieldExpr});");
+                else if (byteCount == 2)
+                    sb.AppendIndentedLine($"{writerVar}.WriteBytesField({bytesString}, {spanFieldExpr});");
+                else
+                {
+                    // Fallback for 3+ byte tags: manual tag + write
+                    GenerateWriteTag(sb, fieldId, wireType, writerVar);
+                    var actualWriteExpr = TypeMapping.GetWriteExpression(typeName, valueExpr, format, writerVar);
+                    sb.AppendIndentedLine($"{actualWriteExpr};");
+                }
             }
             else
             {
-                var actualWriteExpr = TypeMapping.GetWriteExpression(typeName, valueExpr, format, writerVar);
-                sb.AppendIndentedLine($"{actualWriteExpr};");
+                // Write tag
+                GenerateWriteTag(sb, fieldId, wireType, writerVar);
+
+                // For nullable bool, we need to write the actual value (could be true or false)
+                if (TypeMapping.IsBooleanType(typeName) && isNullable)
+                {
+                    sb.AppendIndentedLine($"{writerVar}.WriteBool({valueExpr});");
+                }
+                else
+                {
+                    var actualWriteExpr = TypeMapping.GetWriteExpression(typeName, valueExpr, format, writerVar);
+                    sb.AppendIndentedLine($"{actualWriteExpr};");
+                }
             }
 
             // Close blocks
@@ -1031,8 +1051,23 @@ namespace GProtobuf.Generator.V2.Handlers
                 valueExpr = sourceVar;
             }
 
+            // Byte wrapper types: use CalculateBytesField helper (tag + varint length + data size in one inlined call)
+            var spanSizeExpr = TypeMapping.GetByteWrapperSpanExpression(normalizedType, valueExpr);
+            if (spanSizeExpr != null)
+            {
+                var (_, byteCount) = TypeMapping.PrecomputeTagBytes(fieldId, wireType);
+                var suffix = byteCount == 2 ? "2" : "";
+                if (byteCount <= 2)
+                    sb.AppendIndentedLine($"{calculatorVar}.CalculateBytesField{suffix}({spanSizeExpr});");
+                else
+                {
+                    // Fallback for 3+ byte tags
+                    var sizeExpr = TypeMapping.GetSizeExpression(typeName, valueExpr, format, calculatorVar);
+                    sb.AppendIndentedLine($"{sizeExpr};");
+                }
+            }
             // For nullable bool, we need to calculate size for the actual value (could be true or false)
-            if (TypeMapping.IsBooleanType(typeName) && isNullable)
+            else if (TypeMapping.IsBooleanType(typeName) && isNullable)
             {
                 GenerateSizeTag(sb, fieldId, wireType, calculatorVar);
                 sb.AppendIndentedLine($"{calculatorVar}.WriteBool({valueExpr});");

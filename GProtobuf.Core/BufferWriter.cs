@@ -681,6 +681,14 @@ namespace GProtobuf.Core
         { if (value != null) { WriteTwoBytes(tag1, tag2); WriteVarUInt32((uint)value.Length); WriteBytes(value); } }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteBytesField(byte tag, scoped ReadOnlySpan<byte> value)
+        { WriteSingleByte(tag); WriteVarUInt32((uint)value.Length); WriteBytes(value); }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteBytesField(byte tag1, byte tag2, scoped ReadOnlySpan<byte> value)
+        { WriteTwoBytes(tag1, tag2); WriteVarUInt32((uint)value.Length); WriteBytes(value); }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void WriteVarInt32Field(byte tag, int value)
         { if (value != 0) { WriteSingleByte(tag); WriteVarInt32(value); } }
 

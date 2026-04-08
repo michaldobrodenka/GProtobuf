@@ -17,6 +17,10 @@ namespace GProtobuf.Generator.WireFormat
         /// </summary>
         public const string BooleanTypeName = "System.Boolean";
 
+        public const string ArraySegmentByteTypeName = "System.ArraySegment<byte>";
+        public const string MemoryByteTypeName = "System.Memory<byte>";
+        public const string ReadOnlyMemoryByteTypeName = "System.ReadOnlyMemory<byte>";
+
         #endregion
 
         #region Type Classification
@@ -42,6 +46,7 @@ namespace GProtobuf.Generator.WireFormat
                 "System.Single" or "System.Double" => true,
                 "System.Boolean" or "System.String" or "System.Char" => true,
                 "System.Byte[]" => true,
+                ArraySegmentByteTypeName or MemoryByteTypeName or ReadOnlyMemoryByteTypeName => true,
                 "System.Guid" or "System.TimeSpan" or "System.DateTime" => true,
                 _ => false
             };
@@ -119,6 +124,9 @@ namespace GProtobuf.Generator.WireFormat
                 "System.Char" => $"{valueExpr} != '\\0'",
                 "System.String" => $"{valueExpr} != null",
                 "System.Byte[]" => $"{valueExpr} != null",
+                ArraySegmentByteTypeName => $"{valueExpr}.Array != null",
+                MemoryByteTypeName => $"!{valueExpr}.IsEmpty",
+                ReadOnlyMemoryByteTypeName => $"!{valueExpr}.IsEmpty",
                 "System.Guid" => $"{valueExpr} != global::System.Guid.Empty",
                 "System.TimeSpan" => $"{valueExpr} != global::System.TimeSpan.Zero",
                 "System.DateTime" => $"{valueExpr} != default(global::System.DateTime)",
@@ -156,7 +164,7 @@ namespace GProtobuf.Generator.WireFormat
                 "System.Boolean" or "System.Char" => WireType.VarInt,
                 "System.Single" => WireType.Fixed32b,
                 "System.Double" => WireType.Fixed64b,
-                "System.String" or "System.Byte[]" or "System.Guid" or "System.DateTime" or "System.TimeSpan" => WireType.Len, // TimeSpan serialized as sub-message (Level200)
+                "System.String" or "System.Byte[]" or ArraySegmentByteTypeName or MemoryByteTypeName or ReadOnlyMemoryByteTypeName or "System.Guid" or "System.DateTime" or "System.TimeSpan" => WireType.Len, // TimeSpan serialized as sub-message (Level200)
                 _ => WireType.Len
             };
         }
@@ -247,6 +255,9 @@ namespace GProtobuf.Generator.WireFormat
                     ? $"{readerVar}.ReadStringPooled()"
                     : $"{readerVar}.ReadString({wireTypeVar})",
                 "System.Byte[]" => $"{readerVar}.ReadByteArray()",
+                ArraySegmentByteTypeName => $"new global::System.ArraySegment<byte>({readerVar}.ReadByteArray())",
+                MemoryByteTypeName => $"new global::System.Memory<byte>({readerVar}.ReadByteArray())",
+                ReadOnlyMemoryByteTypeName => $"{readerVar}.ReadByteArrayAsMemory()",
                 "System.Guid" => $"{readerVar}.ReadGuid({wireTypeVar})",
                 "System.TimeSpan" => $"{readerVar}.ReadTimeSpan({wireTypeVar})",
                 "System.DateTime" => $"{readerVar}.ReadDateTime({wireTypeVar})",
@@ -381,6 +392,30 @@ namespace GProtobuf.Generator.WireFormat
         #region Write Expressions
 
         /// <summary>
+        /// Gets the ReadOnlySpan&lt;byte&gt; expression for byte wrapper types.
+        /// Returns null for non-byte-wrapper types.
+        /// </summary>
+        public static string GetByteWrapperSpanExpression(string normalizedType, string valueExpr)
+        {
+            return normalizedType switch
+            {
+                ArraySegmentByteTypeName => $"new global::System.ReadOnlySpan<byte>({valueExpr}.Array, {valueExpr}.Offset, {valueExpr}.Count)",
+                MemoryByteTypeName => $"{valueExpr}.Span",
+                ReadOnlyMemoryByteTypeName => $"{valueExpr}.Span",
+                _ => null
+            };
+        }
+
+        private static string GetByteWrapperLengthExpression(string normalizedType, string valueExpr)
+        {
+            return normalizedType switch
+            {
+                ArraySegmentByteTypeName => $"{valueExpr}.Count",
+                _ => $"{valueExpr}.Length"
+            };
+        }
+
+        /// <summary>
         /// Gets write expression for a primitive type.
         /// </summary>
         public static string GetWriteExpression(
@@ -438,6 +473,8 @@ namespace GProtobuf.Generator.WireFormat
                 "System.Char" => $"{writerVar}.WriteVarUInt32((uint){valueExpr})",
                 "System.String" => $"{writerVar}.WriteString({valueExpr})",
                 "System.Byte[]" => $"{writerVar}.WriteVarUInt32((uint){valueExpr}.Length); {writerVar}.WriteBytes({valueExpr})",
+                ArraySegmentByteTypeName or MemoryByteTypeName or ReadOnlyMemoryByteTypeName =>
+                    $"{writerVar}.WriteVarUInt32((uint){GetByteWrapperLengthExpression(normalized, valueExpr)}); {writerVar}.WriteBytes({GetByteWrapperSpanExpression(normalized, valueExpr)})",
                 "System.Guid" => $"{writerVar}.WriteGuid({valueExpr})",
                 "System.TimeSpan" => $"{writerVar}.WriteTimeSpan({valueExpr})",
                 "System.DateTime" => $"{writerVar}.WriteDateTime({valueExpr})",
@@ -570,6 +607,8 @@ namespace GProtobuf.Generator.WireFormat
                 "System.Char" => $"{calculatorVar}.WriteVarUInt32((uint){valueExpr})",
                 "System.String" => $"{calculatorVar}.WriteString({valueExpr})",
                 "System.Byte[]" => $"{calculatorVar}.WriteBytes({valueExpr})",
+                ArraySegmentByteTypeName or MemoryByteTypeName or ReadOnlyMemoryByteTypeName =>
+                    $"{calculatorVar}.WriteBytes({GetByteWrapperSpanExpression(normalized, valueExpr)})",
                 "System.Guid" => $"{calculatorVar}.WriteGuid({valueExpr})",
                 "System.TimeSpan" => $"{calculatorVar}.WriteTimeSpan({valueExpr})",
                 "System.DateTime" => $"{calculatorVar}.WriteDateTime({valueExpr})",
